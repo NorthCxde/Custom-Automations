@@ -832,20 +832,52 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.reply({ content: `Allowed roles updated: ${roleList}`, ephemeral: true });
 });
 
+// Boost message types (plain boost + tier 1/2/3 upgrades)
+const BOOST_MESSAGE_TYPES = new Set([8, 9, 10, 11]);
+
+// Primary: detect boost via role change, then find and react to the system message
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+    if (oldMember.premiumSince || !newMember.premiumSince) return;
+
+    const boostChannelId = client.boostChannels.get(newMember.guild.id);
+    if (!boostChannelId) return;
+
+    // Wait for Discord to post the system message
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    try {
+        const channel = newMember.guild.channels.cache.get(boostChannelId)
+            || await newMember.guild.channels.fetch(boostChannelId);
+        if (!channel || !channel.isTextBased()) return;
+
+        const messages = await channel.messages.fetch({ limit: 5 });
+        const cutoff = Date.now() - 20000;
+        const boostMsg = messages.find(m =>
+            BOOST_MESSAGE_TYPES.has(m.type) && m.createdTimestamp > cutoff
+        );
+
+        if (boostMsg && !boostMsg.reactions.cache.has('❤️')) {
+            await boostMsg.react('❤️');
+        }
+    } catch (err) {
+        console.error('Failed to react to boost message:', err);
+    }
+});
+
+// Fallback: also catch boost system messages directly via messageCreate
 client.on('messageCreate', async (message) => {
-    // React with ❤️ to server boost system messages in the configured boost channel
-    if (message.type === MessageType.UserPremiumGuildSubscription && message.guild) {
+    if (BOOST_MESSAGE_TYPES.has(message.type) && message.guild) {
         const boostChannelId = client.boostChannels.get(message.guild.id);
         if (boostChannelId && message.channel.id === boostChannelId) {
             try {
-                await message.react('❤️');
+                if (!message.reactions.cache.has('❤️')) await message.react('❤️');
             } catch (err) {
-                console.error('Failed to react to boost message:', err);
+                console.error('Failed to react to boost message (messageCreate):', err);
             }
         }
     }
 
-    if (message.author.bot) return;
+    if (message.author?.bot) return;
     if (!message.content || !message.content.startsWith(prefix)) return;
     if (!message.guild) return;
     if (!client.prefixCommandsEnabled) return;
