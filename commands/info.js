@@ -1,0 +1,172 @@
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const config = require('../config.json');
+
+function isNumeric(value) {
+    return /^[0-9]+$/.test(value);
+}
+
+async function fetchRobloxUserById(id) {
+    try {
+        const response = await fetch(`https://users.roblox.com/v1/users/${id}`);
+        if (!response.ok) return null;
+        return await response.json();
+    } catch (err) {
+        console.error('Roblox user lookup failed:', err);
+        return null;
+    }
+}
+
+async function fetchRobloxUserByUsername(username) {
+    try {
+        const response = await fetch(`https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(username)}`);
+        if (!response.ok) return null;
+        const body = await response.json();
+        if (!Array.isArray(body.data) || body.data.length === 0) return null;
+        return body.data[0];
+    } catch (err) {
+        console.error('Roblox username lookup failed:', err);
+        return null;
+    }
+}
+
+async function fetchRobloxAvatarUrl(userId) {
+    try {
+        const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=420x420&format=Png&isCircular=false`);
+        if (!response.ok) return null;
+        const body = await response.json();
+        return body.data?.[0]?.imageUrl || null;
+    } catch (err) {
+        console.error('Roblox avatar lookup failed:', err);
+        return null;
+    }
+}
+
+module.exports = {
+    name: 'info',
+    description: 'Retrieve Bloxlink and Discord/Roblox linked information for a user',
+    data: new SlashCommandBuilder()
+        .setName('info')
+        .setDescription('Retrieve Bloxlink and Discord/Roblox linked information for a user')
+        .addUserOption(option =>
+            option.setName('discord_user')
+                .setDescription('Retrieve the Roblox information of this Discord user')
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('roblox_user')
+                .setDescription('Retrieve the Discord IDs linked to this Roblox username or ID')
+                .setRequired(false)),
+    async executeInteraction({ client, interaction }) {
+        if (!interaction.guild) {
+            return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+        }
+
+        const discordUser = interaction.options.getUser('discord_user');
+        const robloxUser = interaction.options.getString('roblox_user')?.trim();
+
+        if (!discordUser && !robloxUser) {
+            return interaction.reply({ content: 'Please provide either a Discord user or a Roblox username/ID.', ephemeral: true });
+        }
+
+        const apiKey = process.env.BLOXLINK_API_KEY || config.bloxlinkApiKey;
+        if (!apiKey) {
+            return interaction.reply({ content: 'Bloxlink API key is not configured. Set BLOXLINK_API_KEY or bloxlinkApiKey in config.json.', ephemeral: true });
+        }
+
+        const embed = new EmbedBuilder()
+            .setTitle('Bloxlink Lookup')
+            .setColor(0x000000)
+            .setFooter({ text: 'Bloxlink data lookup' })
+            .setTimestamp();
+
+        if (discordUser) {
+            embed.setAuthor({
+                name: `${discordUser.tag} on Discord`,
+                iconURL: discordUser.displayAvatarURL({ extension: 'png', size: 128 })
+            });
+
+            const discordInfo = [
+                `Mention: <@${discordUser.id}>`,
+                `ID: ${discordUser.id}`,
+                `Created: ${discordUser.createdAt.toUTCString()}`
+            ].join('\n');
+            embed.addFields({ name: 'Discord Information', value: discordInfo, inline: false });
+
+            let robloxId = null;
+            try {
+                if (client.getLinkedRobloxId) {
+                    robloxId = await client.getLinkedRobloxId(interaction.guild.id, discordUser.id);
+                }
+            } catch (err) {
+                console.error('Bloxlink discord-to-roblox lookup failed:', err);
+            }
+
+            if (!robloxId) {
+                embed.addFields({ name: 'Bloxlink Status', value: 'No linked Roblox account found via Bloxlink.', inline: false });
+            } else {
+                const robloxUserData = await fetchRobloxUserById(robloxId);
+                const robloxInfo = [
+                    `Username: ${robloxUserData?.name ?? 'Unknown'}`,
+                    `Display Name: ${robloxUserData?.displayName ?? 'Unknown'}`,
+                    `ID: ${robloxId}`
+                ].join('\n');
+                embed.addFields({ name: 'Linked Roblox Account', value: robloxInfo, inline: false });
+
+                const avatarUrl = await fetchRobloxAvatarUrl(robloxId);
+                if (avatarUrl) {
+                    embed.setThumbnail(avatarUrl);
+                }
+            }
+        }
+
+        if (robloxUser) {
+            let resolvedRoblox = null;
+            if (isNumeric(robloxUser)) {
+                resolvedRoblox = await fetchRobloxUserById(robloxUser);
+            } else {
+                resolvedRoblox = await fetchRobloxUserByUsername(robloxUser);
+            }
+
+            if (!resolvedRoblox || !resolvedRoblox.id) {
+                embed.addFields({ name: 'Roblox Lookup', value: `Could not resolve Roblox user: ${robloxUser}`, inline: false });
+            } else {
+                const resolvedId = String(resolvedRoblox.id);
+                const robloxLabel = [
+                    `Username: ${resolvedRoblox.name}`,
+                    `Display Name: ${resolvedRoblox.displayName || 'No display name'}`,
+                    `ID: ${resolvedId}`
+                ].join('\n');
+                embed.addFields({ name: 'Roblox Lookup', value: robloxLabel, inline: false });
+
+                const avatarUrl = await fetchRobloxAvatarUrl(resolvedId);
+                if (avatarUrl) {
+                    embed.setThumbnail(avatarUrl);
+                }
+
+                try {
+                    const response = await fetch(`https://api.blox.link/v4/public/guilds/${interaction.guild.id}/roblox-to-discord/${resolvedId}`, {
+                        headers: { Authorization: apiKey }
+                    });
+                    if (response.status === 404) {
+                        embed.addFields({ name: 'Bloxlink Status', value: 'No linked Discord accounts found for this Roblox user in this guild.', inline: false });
+                    } else if (!response.ok) {
+                        embed.addFields({ name: 'Bloxlink Status', value: `Lookup failed with status ${response.status}.`, inline: false });
+                    } else {
+                        const body = await response.json();
+                        const discordIds = Array.isArray(body.discordIDs) ? body.discordIDs : [];
+                        if (discordIds.length === 0) {
+                            embed.addFields({ name: 'Bloxlink Status', value: 'No linked Discord accounts found for this Roblox user in this guild.', inline: false });
+                        } else {
+                            const discordLinks = discordIds.map(id => `<@${id}>`).join('\n');
+                            embed.addFields({ name: 'Linked Discord Accounts', value: discordLinks, inline: false });
+                        }
+                    }
+                } catch (err) {
+                    console.error('Bloxlink roblox-to-discord lookup failed:', err);
+                    embed.addFields({ name: 'Bloxlink Status', value: 'An error occurred while querying Bloxlink.', inline: false });
+                }
+            }
+        }
+
+        return interaction.reply({ embeds: [embed] });
+    }
+};

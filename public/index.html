@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Custom Automations Dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="logo">🧢</div>
+      <div>
+        <h1>Custom Automations</h1>
+        <p>Bot dashboard for commands, status, and quick support links.</p>
+      </div>
+    </header>
+
+    <section class="panel status-panel">
+      <h2>Bot status</h2>
+      <div class="status-card">
+        <p><strong>Status:</strong> <span id="bot-status">Loading…</span></p>
+        <p><strong>Activity:</strong> <span id="bot-activity">Loading…</span></p>
+        <p><strong>Prefix:</strong> <span id="bot-prefix">?</span></p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Commands</h2>
+      <ul>
+        <li><strong>?read</strong> — list channels</li>
+        <li><strong>?ping</strong> — check latency</li>
+        <li><strong>?reload</strong> — reload commands</li>
+        <li><strong>?ban / ?unban</strong> — moderation</li>
+        <li><strong>?mute / ?unmute</strong> — timeout moderation</li>
+        <li><strong>/purge count:&lt;number&gt; [user:@user] [user2:@user] [user3:@user] [user4:@user]</strong> — delete recent messages from the channel or from multiple users</li>
+        <li><strong>/ban user:@user [user2:@user] [user3:@user] [user4:@user] [reason:text]</strong> — ban one or more users from the server</li>
+        <li><strong>/mute user:@user [user2:@user] [user3:@user] [user4:@user] duration:&lt;time&gt; [reason:text]</strong> — timeout one or more users for a duration</li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>Next steps</h2>
+      <p>If you want, you can add login and real bot data later using Discord OAuth, or connect this page to your bot process for live stats.</p>
+      <p>To run locally:</p>
+      <pre>npm install
+npm run dashboard</pre>
+    </section>
+  </div>
+
+  <script>
+    async function loadStatus() {
+      try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        document.getElementById('bot-status').textContent = data.ok ? 'online' : 'offline';
+        document.getElementById('bot-activity').textContent = data.activity || 'n/a';
+        document.getElementById('bot-prefix').textContent = data.prefix || '?';
+      } catch (error) {
+        document.getElementById('bot-status').textContent = 'offline';
+        document.getElementById('bot-activity').textContent = 'unable to load';
+      }
+    }
+
+    loadStatus();
+  </script>
+</body>
+</html>

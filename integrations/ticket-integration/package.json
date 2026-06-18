@@ -1,0 +1,14 @@
+{
+  "name": "ticket-integration",
+  "version": "1.0.0",
+  "description": "Minimal ticket integration for Developer Portal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.0.3"
+  }
+}
