@@ -392,28 +392,28 @@ client.logToChannel = async (guild, payload) => {
 client.logPermsAudit = async (interaction, selectedRoleNames) => {
     const hqGuildId = process.env.HQ_GUILD_ID || config.hqGuildId;
     const hqPermsLogChannelId = process.env.HQ_PERMS_LOG_CHANNEL_ID || config.hqPermsLogChannelId;
-    if (!hqGuildId || !hqPermsLogChannelId) return;
-
-    let hqGuild = client.guilds.cache.get(hqGuildId);
-    if (!hqGuild) {
-        try {
-            hqGuild = await client.guilds.fetch(hqGuildId);
-        } catch (err) {
-            console.error(`Failed to fetch HQ guild ${hqGuildId}:`, err);
-            return;
-        }
+    if (!hqGuildId || !hqPermsLogChannelId) {
+        console.warn('[PermsAudit] Missing HQ_GUILD_ID/hqGuildId or HQ_PERMS_LOG_CHANNEL_ID/hqPermsLogChannelId. Skipping perms audit log.');
+        return;
     }
 
-    let channel = hqGuild.channels.cache.get(hqPermsLogChannelId);
-    if (!channel) {
-        try {
-            channel = await hqGuild.channels.fetch(hqPermsLogChannelId);
-        } catch (err) {
-            console.error(`Failed to fetch HQ perms log channel ${hqPermsLogChannelId}:`, err);
-            return;
-        }
+    let channel;
+    try {
+        channel = await client.channels.fetch(hqPermsLogChannelId);
+    } catch (err) {
+        console.error(`[PermsAudit] Failed to fetch HQ perms log channel ${hqPermsLogChannelId}:`, err);
+        return;
     }
-    if (!channel || !channel.isTextBased()) return;
+
+    if (!channel || !channel.isTextBased()) {
+        console.error(`[PermsAudit] Channel ${hqPermsLogChannelId} is not text-based or is inaccessible.`);
+        return;
+    }
+
+    if (channel.guildId !== hqGuildId) {
+        console.error(`[PermsAudit] Channel guild mismatch. Channel guild: ${channel.guildId}, expected HQ guild: ${hqGuildId}.`);
+        return;
+    }
 
     const now = new Date();
     const unix = Math.floor(now.getTime() / 1000);
@@ -440,8 +440,9 @@ client.logPermsAudit = async (interaction, selectedRoleNames) => {
                 repliedUser: false
             }
         });
+        console.log(`[PermsAudit] Logged /perms update from guild ${sourceGuildId} to HQ channel ${hqPermsLogChannelId}.`);
     } catch (err) {
-        console.error('Failed to write /perms HQ audit log:', err);
+        console.error('[PermsAudit] Failed to write /perms HQ audit log:', err);
     }
 };
 
