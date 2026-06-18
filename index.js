@@ -42,6 +42,7 @@ client.logChannels = new Map();
 client.modLogs = new Map();
 client.boostChannels = new Map();
 client.pendingModerationActions = new Map();
+client.pendingPermsUndoActions = new Map();
 client.bloxlink = new Map();
 client.bloxlinkHistory = new Map();
 client.slashCommands = new Map();
@@ -392,7 +393,7 @@ client.logToChannel = async (guild, payload) => {
     }
 };
 
-client.logPermsAudit = async (interaction, selectedRoleNames) => {
+client.logPermsAudit = async (interaction, selectedRoleNames, previousConfig) => {
     const hqGuildId = process.env.HQ_GUILD_ID || config.hqGuildId || HQ_GUILD_ID_DEFAULT;
     const hqPermsLogChannelId = process.env.HQ_PERMS_LOG_CHANNEL_ID || config.hqPermsLogChannelId || HQ_PERMS_LOG_CHANNEL_ID_DEFAULT;
     if (!hqGuildId || !hqPermsLogChannelId) {
@@ -426,6 +427,7 @@ client.logPermsAudit = async (interaction, selectedRoleNames) => {
     const rolesText = selectedRoleNames.length
         ? selectedRoleNames.join(', ')
         : 'none (command access restricted to server admins only)';
+    const undoKey = `perms_undo_${interaction.id}`;
 
     try {
         const embed = new EmbedBuilder()
@@ -433,15 +435,34 @@ client.logPermsAudit = async (interaction, selectedRoleNames) => {
             .setTitle('Perms Updated')
             .setDescription('Cross-server permission roles were updated')
             .addFields(
-                { name: 'Actor', value: `${actorTag} (${interaction.user.id})`, inline: false },
+                { name: 'Moderator', value: `${actorTag} (${interaction.user.id})`, inline: false },
                 { name: 'Source Server', value: `${sourceGuildName} (${sourceGuildId})`, inline: false },
                 { name: 'Updated Roles', value: rolesText, inline: false },
                 { name: 'Used At', value: `<t:${unix}:F>`, inline: false }
             )
             .setTimestamp(now);
 
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`perms_undo:${undoKey}`)
+                .setLabel('Undo')
+                .setStyle(ButtonStyle.Danger)
+        );
+
+        client.pendingPermsUndoActions.set(undoKey, {
+            sourceGuildId,
+            previousRoleIds: previousConfig.previousRoleIds,
+            hadExistingPermConfig: previousConfig.hadExistingPermConfig
+        });
+
+        const expiryTimer = setTimeout(() => {
+            client.pendingPermsUndoActions.delete(undoKey);
+        }, 24 * 60 * 60 * 1000);
+        if (typeof expiryTimer.unref === 'function') expiryTimer.unref();
+
         await channel.send({
             embeds: [embed],
+            components: [row],
             allowedMentions: {
                 parse: [],
                 users: [],
@@ -451,6 +472,7 @@ client.logPermsAudit = async (interaction, selectedRoleNames) => {
         });
         console.log(`[PermsAudit] Logged /perms update from guild ${sourceGuildId} to HQ channel ${hqPermsLogChannelId}.`);
     } catch (err) {
+        client.pendingPermsUndoActions.delete(undoKey);
         console.error('[PermsAudit] Failed to write /perms HQ audit log:', err);
     }
 };
@@ -550,6 +572,14 @@ client.deletePendingModerationAction = (key) => {
     client.pendingModerationActions.delete(key);
 };
 
+client.getPendingPermsUndoAction = (key) => {
+    return client.pendingPermsUndoActions.get(key);
+};
+
+client.deletePendingPermsUndoAction = (key) => {
+    client.pendingPermsUndoActions.delete(key);
+};
+
 client.on('clientReady', async () => {
     const slashData = Array.from(client.slashCommands.values())
         .map(cmd => cmd.data.toJSON());
@@ -627,6 +657,51 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('perms_undo:')) {
+            const undoKey = interaction.customId.split(':')[1];
+
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this button.', ephemeral: true });
+            }
+
+            const actionData = client.getPendingPermsUndoAction(undoKey);
+            if (!actionData) {
+                return interaction.reply({ content: 'This undo action is no longer available.', ephemeral: true });
+            }
+
+            if (actionData.hadExistingPermConfig) {
+                client.allowedRoles.set(actionData.sourceGuildId, new Set(actionData.previousRoleIds));
+            } else {
+                client.allowedRoles.delete(actionData.sourceGuildId);
+            }
+            client.savePermissions();
+            client.deletePendingPermsUndoAction(undoKey);
+
+            const sourceGuild = client.guilds.cache.get(actionData.sourceGuildId)
+                || await client.guilds.fetch(actionData.sourceGuildId).catch(() => null);
+
+            const restoredRoleNames = actionData.previousRoleIds
+                .map(id => sourceGuild?.roles?.cache?.get(id)?.name || `Unknown Role (${id})`);
+
+            const restoredText = actionData.hadExistingPermConfig
+                ? (restoredRoleNames.length ? restoredRoleNames.join(', ') : 'none (command access restricted to server admins only)')
+                : 'unrestricted (all members can use bot commands)';
+
+            const disabledRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`perms_undo_used:${undoKey}`)
+                    .setLabel('Undo Used')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(true)
+            );
+
+            await interaction.update({ components: [disabledRow] });
+            return interaction.followUp({
+                content: `Perms were reverted for guild ${actionData.sourceGuildId}. Restored roles: ${restoredText}`,
+                ephemeral: true
+            });
+        }
+
         if (interaction.customId.startsWith('mute_unmute_specific:') || interaction.customId.startsWith('mute_unmute_all:') || interaction.customId.startsWith('ban_unban_specific:') || interaction.customId.startsWith('ban_unban_all:')) {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -887,6 +962,10 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: 'Only users with Manage Server can configure permitted roles.', ephemeral: true });
     }
 
+    const hadExistingPermConfig = client.allowedRoles.has(interaction.guildId);
+    const previousRoleSet = hadExistingPermConfig ? client.allowedRoles.get(interaction.guildId) : null;
+    const previousRoleIds = previousRoleSet ? Array.from(previousRoleSet) : [];
+
     const selectedRoleIds = interaction.values;
     client.allowedRoles.set(interaction.guildId, new Set(selectedRoleIds));
     client.savePermissions();
@@ -899,7 +978,7 @@ client.on('interactionCreate', async (interaction) => {
         : 'none (command access will be restricted to server admins only)';
 
     await interaction.reply({ content: `Allowed roles updated: ${roleList}`, ephemeral: true });
-    await client.logPermsAudit(interaction, selectedRoleNames);
+    await client.logPermsAudit(interaction, selectedRoleNames, { hadExistingPermConfig, previousRoleIds });
 });
 
 // Boost message types (plain boost + tier 1/2/3 upgrades)
