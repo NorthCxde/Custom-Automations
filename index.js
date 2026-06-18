@@ -1,6 +1,6 @@
 const config = require("./config.json");
 const token = process.env.DISCORD_TOKEN || config.token;
-const { Client, GatewayIntentBits, PermissionsBitField, ApplicationCommandPermissionType, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, PermissionsBitField, ApplicationCommandPermissionType, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, MessageType } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
@@ -32,10 +32,12 @@ const logsFile = path.join(dataPath, "logs.json");
 const modLogsFile = path.join(dataPath, "modlogs.json");
 const bloxlinkFile = path.join(dataPath, "bloxlink.json");
 const bloxlinkHistoryFile = path.join(dataPath, "bloxlinkHistory.json");
+const boostChannelFile = path.join(dataPath, "boostchannel.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
 client.modLogs = new Map();
+client.boostChannels = new Map();
 client.pendingModerationActions = new Map();
 client.bloxlink = new Map();
 client.bloxlinkHistory = new Map();
@@ -397,12 +399,30 @@ client.isMemberAllowed = (member) => {
     return member.roles.cache.some(role => allowed.has(role.id));
 };
 
+client.loadBoostChannels = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(boostChannelFile)) fs.writeFileSync(boostChannelFile, '{}', 'utf8');
+    let parsed = {};
+    try { parsed = JSON.parse(fs.readFileSync(boostChannelFile, 'utf8') || '{}'); } catch (err) { console.error('Failed to read boostchannel file:', err); }
+    client.boostChannels.clear();
+    for (const [guildId, channelId] of Object.entries(parsed)) {
+        if (typeof channelId === 'string') client.boostChannels.set(guildId, channelId);
+    }
+};
+
+client.saveBoostChannels = () => {
+    const out = {};
+    for (const [guildId, channelId] of client.boostChannels.entries()) out[guildId] = channelId;
+    fs.writeFileSync(boostChannelFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
 client.loadCommands();
 client.loadPermissions();
 client.loadLogChannels();
 client.loadModLogs();
 client.loadBloxlink();
 client.loadBloxlinkHistory();
+client.loadBoostChannels();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -510,7 +530,7 @@ client.on('guildMemberAdd', async (member) => {
 
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand()) {
-        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands') {
+        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
             }
@@ -813,6 +833,18 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.on('messageCreate', async (message) => {
+    // React with ❤️ to server boost system messages in the configured boost channel
+    if (message.type === MessageType.UserPremiumGuildSubscription && message.guild) {
+        const boostChannelId = client.boostChannels.get(message.guild.id);
+        if (boostChannelId && message.channel.id === boostChannelId) {
+            try {
+                await message.react('❤️');
+            } catch (err) {
+                console.error('Failed to react to boost message:', err);
+            }
+        }
+    }
+
     if (message.author.bot) return;
     if (!message.content || !message.content.startsWith(prefix)) return;
     if (!message.guild) return;
