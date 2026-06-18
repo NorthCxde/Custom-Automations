@@ -389,6 +389,62 @@ client.logToChannel = async (guild, payload) => {
     }
 };
 
+client.logPermsAudit = async (interaction, selectedRoleNames) => {
+    const hqGuildId = process.env.HQ_GUILD_ID || config.hqGuildId;
+    const hqPermsLogChannelId = process.env.HQ_PERMS_LOG_CHANNEL_ID || config.hqPermsLogChannelId;
+    if (!hqGuildId || !hqPermsLogChannelId) return;
+
+    let hqGuild = client.guilds.cache.get(hqGuildId);
+    if (!hqGuild) {
+        try {
+            hqGuild = await client.guilds.fetch(hqGuildId);
+        } catch (err) {
+            console.error(`Failed to fetch HQ guild ${hqGuildId}:`, err);
+            return;
+        }
+    }
+
+    let channel = hqGuild.channels.cache.get(hqPermsLogChannelId);
+    if (!channel) {
+        try {
+            channel = await hqGuild.channels.fetch(hqPermsLogChannelId);
+        } catch (err) {
+            console.error(`Failed to fetch HQ perms log channel ${hqPermsLogChannelId}:`, err);
+            return;
+        }
+    }
+    if (!channel || !channel.isTextBased()) return;
+
+    const now = new Date();
+    const unix = Math.floor(now.getTime() / 1000);
+    const actorTag = interaction.user?.tag || interaction.user?.username || 'Unknown User';
+    const sourceGuildName = interaction.guild?.name || 'Unknown Server';
+    const sourceGuildId = interaction.guildId || 'Unknown Guild ID';
+    const rolesText = selectedRoleNames.length
+        ? selectedRoleNames.join(', ')
+        : 'none (command access restricted to server admins only)';
+
+    try {
+        await channel.send({
+            content: [
+                '`/perms` updated',
+                `Actor: ${actorTag} (${interaction.user.id})`,
+                `Source Server: ${sourceGuildName} (${sourceGuildId})`,
+                `Used At: <t:${unix}:F> (${now.toISOString()})`,
+                `Updated Roles: ${rolesText}`
+            ].join('\n'),
+            allowedMentions: {
+                parse: [],
+                users: [],
+                roles: [],
+                repliedUser: false
+            }
+        });
+    } catch (err) {
+        console.error('Failed to write /perms HQ audit log:', err);
+    }
+};
+
 client.isMemberAllowed = (member) => {
     if (!member || !member.guild) return false;
     const allowed = client.getAllowedRoleIds(member.guild.id);
@@ -825,11 +881,15 @@ client.on('interactionCreate', async (interaction) => {
     client.allowedRoles.set(interaction.guildId, new Set(selectedRoleIds));
     client.savePermissions();
 
+    const selectedRoleNames = selectedRoleIds
+        .map(id => interaction.guild.roles.cache.get(id)?.name || `Unknown Role (${id})`);
+
     const roleList = selectedRoleIds.length
         ? selectedRoleIds.map(id => `<@&${id}>`).join(', ')
         : 'none (command access will be restricted to server admins only)';
 
     await interaction.reply({ content: `Allowed roles updated: ${roleList}`, ephemeral: true });
+    await client.logPermsAudit(interaction, selectedRoleNames);
 });
 
 // Boost message types (plain boost + tier 1/2/3 upgrades)
