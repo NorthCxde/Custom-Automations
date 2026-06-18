@@ -48,34 +48,62 @@ module.exports = {
                 .setRequired(false)),
     async execute({ client, message, args }) {
         if (!message.guild) return message.reply('This command must be used in a server channel.');
-        if (!args[0] || !args[1]) return message.reply('Usage: ?mute @user 1h or ?mute userId 30m');
+        if (!args[0] || !args[1]) return message.reply('Usage: ?mute @user [@user2 ...] 1h [reason]');
 
-        const targetId = args[0].replace(/[<@!>]/g, '');
-        const durationMs = parseDuration(args[1]);
-        const reason = args.slice(2).join(' ') || 'No reason provided';
-
-        if (!/^[0-9]{17,19}$/.test(targetId)) {
-            return message.reply('Please provide a valid user mention or user ID.');
+        const durationIndex = args.findIndex(arg => parseDuration(arg) !== null);
+        if (durationIndex <= 0) {
+            return message.reply('Please provide one or more users first, then a valid duration like 1m, 1h, or 1d.');
         }
+
+        const rawTargets = args.slice(0, durationIndex);
+        const uniqueTargetIds = [...new Set(rawTargets.map(target => target.replace(/[<@!>]/g, '')))].filter(Boolean);
+        const invalidTarget = uniqueTargetIds.find(id => !/^[0-9]{17,19}$/.test(id));
+        if (invalidTarget) {
+            return message.reply(`Invalid user ID or mention: ${invalidTarget}`);
+        }
+
+        const duration = args[durationIndex];
+        const durationMs = parseDuration(duration);
         if (durationMs === null) {
             return message.reply('Please provide a valid duration, e.g. 1m, 1h, or 1d.');
         }
+
+        const reason = args.slice(durationIndex + 1).join(' ') || 'No reason provided';
 
         try {
             if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
                 return message.reply('I do not have permission to timeout members.');
             }
 
-            const member = await message.guild.members.fetch(targetId);
-            if (!member) {
-                return message.reply('Could not find that member in this guild.');
+            const results = await Promise.all(uniqueTargetIds.map(async (targetId) => {
+                try {
+                    const member = await message.guild.members.fetch(targetId);
+                    if (!member) {
+                        return { targetId, success: false, reason: 'Member not found' };
+                    }
+                    await member.timeout(durationMs, reason);
+                    return { targetId, success: true };
+                } catch (error) {
+                    console.error(error);
+                    return { targetId, success: false, reason: error.message };
+                }
+            }));
+
+            const success = results.filter(result => result.success).map(result => `<@${result.targetId}>`);
+            const failures = results.filter(result => !result.success);
+
+            const replyParts = [];
+            if (success.length) {
+                replyParts.push(`Timed out ${success.length} user(s): ${success.join(', ')} for ${duration}. Reason: ${reason}`);
+            }
+            if (failures.length) {
+                replyParts.push(`${failures.length} user(s) could not be timed out.`);
             }
 
-            await member.timeout(durationMs, reason);
-            return message.channel.send(`Timed out <@${targetId}> for ${args[1]}. Reason: ${reason}`);
+            return message.channel.send(replyParts.join(' '));
         } catch (error) {
             console.error(error);
-            return message.reply('Unable to timeout that user. They may already be timed out, the ID may be invalid, or I may not have permission.');
+            return message.reply('Unable to timeout the provided users. Check IDs and permissions.');
         }
     },
     async executeInteraction({ client, interaction }) {

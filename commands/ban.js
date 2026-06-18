@@ -28,25 +28,57 @@ module.exports = {
                 .setRequired(false)),
     async execute({ client, message, args }) {
         if (!message.guild) return message.reply('This command must be used in a server channel.');
-        if (!args[0]) return message.reply('Usage: ?ban @user or ?ban userId');
+        if (!args[0]) return message.reply('Usage: ?ban @user [@user2 ...] [reason]');
 
-        const targetId = args[0].replace(/[<@!>]/g, '');
-        const reason = args.slice(1).join(' ') || 'No reason provided';
-
-        if (!/^[0-9]{17,19}$/.test(targetId)) {
-            return message.reply('Please provide a valid user mention or user ID.');
+        const parsedIds = [];
+        let reasonStartIndex = args.length;
+        for (let i = 0; i < args.length; i++) {
+            const normalized = args[i].replace(/[<@!>]/g, '');
+            if (/^[0-9]{17,19}$/.test(normalized)) {
+                parsedIds.push(normalized);
+                continue;
+            }
+            reasonStartIndex = i;
+            break;
         }
+
+        const uniqueTargetIds = [...new Set(parsedIds)];
+        if (!uniqueTargetIds.length) {
+            return message.reply('Please provide at least one valid user mention or user ID.');
+        }
+
+        const reason = args.slice(reasonStartIndex).join(' ') || 'No reason provided';
 
         try {
             if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
                 return message.reply('I do not have permission to ban members.');
             }
 
-            await message.guild.members.ban(targetId, { reason });
-            return message.channel.send(`Banned <@${targetId}>. Reason: ${reason}`);
+            const results = await Promise.all(uniqueTargetIds.map(async (targetId) => {
+                try {
+                    await message.guild.members.ban(targetId, { reason });
+                    return { targetId, success: true };
+                } catch (error) {
+                    console.error(error);
+                    return { targetId, success: false, reason: error.message };
+                }
+            }));
+
+            const success = results.filter(result => result.success).map(result => `<@${result.targetId}>`);
+            const failures = results.filter(result => !result.success);
+
+            const replyParts = [];
+            if (success.length) {
+                replyParts.push(`Banned ${success.length} user(s): ${success.join(', ')}. Reason: ${reason}`);
+            }
+            if (failures.length) {
+                replyParts.push(`${failures.length} user(s) could not be banned. Check permissions or existing bans.`);
+            }
+
+            return message.channel.send(replyParts.join(' '));
         } catch (error) {
             console.error(error);
-            return message.reply('Unable to ban that user. They may already be banned, the ID may be invalid, or I may not have permission.');
+            return message.reply('Unable to ban the provided users. Check IDs and permissions.');
         }
     },
     async executeInteraction({ client, interaction }) {
