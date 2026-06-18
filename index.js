@@ -15,6 +15,9 @@ const HARD_CODED_ADMINS = [
     '841491704305811496'
 ];
 
+const HQ_GUILD_ID_DEFAULT = '1512252919423176875';
+const HQ_PERMS_LOG_CHANNEL_ID_DEFAULT = '1517292575239704907';
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -390,8 +393,8 @@ client.logToChannel = async (guild, payload) => {
 };
 
 client.logPermsAudit = async (interaction, selectedRoleNames) => {
-    const hqGuildId = process.env.HQ_GUILD_ID || config.hqGuildId;
-    const hqPermsLogChannelId = process.env.HQ_PERMS_LOG_CHANNEL_ID || config.hqPermsLogChannelId;
+    const hqGuildId = process.env.HQ_GUILD_ID || config.hqGuildId || HQ_GUILD_ID_DEFAULT;
+    const hqPermsLogChannelId = process.env.HQ_PERMS_LOG_CHANNEL_ID || config.hqPermsLogChannelId || HQ_PERMS_LOG_CHANNEL_ID_DEFAULT;
     if (!hqGuildId || !hqPermsLogChannelId) {
         console.warn('[PermsAudit] Missing HQ_GUILD_ID/hqGuildId or HQ_PERMS_LOG_CHANNEL_ID/hqPermsLogChannelId. Skipping perms audit log.');
         return;
