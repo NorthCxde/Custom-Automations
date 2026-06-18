@@ -1,6 +1,6 @@
 const config = require("./config.json");
 const token = process.env.DISCORD_TOKEN || config.token;
-const { Client, GatewayIntentBits, PermissionsBitField, ApplicationCommandPermissionType, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, MessageType } = require("discord.js");
+const { Client, GatewayIntentBits, PermissionsBitField, ApplicationCommandPermissionType, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, MessageType, EmbedBuilder } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
@@ -428,14 +428,20 @@ client.logPermsAudit = async (interaction, selectedRoleNames) => {
         : 'none (command access restricted to server admins only)';
 
     try {
+        const embed = new EmbedBuilder()
+            .setColor(0x000000)
+            .setTitle('Perms Updated')
+            .setDescription('Cross-server permission roles were updated')
+            .addFields(
+                { name: 'Actor', value: `${actorTag} (${interaction.user.id})`, inline: false },
+                { name: 'Source Server', value: `${sourceGuildName} (${sourceGuildId})`, inline: false },
+                { name: 'Updated Roles', value: rolesText, inline: false },
+                { name: 'Used At', value: `<t:${unix}:F>`, inline: false }
+            )
+            .setTimestamp(now);
+
         await channel.send({
-            content: [
-                '`/perms` updated',
-                `Actor: ${actorTag} (${interaction.user.id})`,
-                `Source Server: ${sourceGuildName} (${sourceGuildId})`,
-                `Used At: <t:${unix}:F> (${now.toISOString()})`,
-                `Updated Roles: ${rolesText}`
-            ].join('\n'),
+            embeds: [embed],
             allowedMentions: {
                 parse: [],
                 users: [],
