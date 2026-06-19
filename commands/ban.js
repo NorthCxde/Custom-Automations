@@ -56,6 +56,12 @@ module.exports = {
 
             const results = await Promise.all(uniqueTargetIds.map(async (targetId) => {
                 try {
+                    await client.sendModerationDm({
+                        userId: targetId,
+                        guildName: message.guild.name,
+                        action: 'ban',
+                        reason
+                    });
                     await message.guild.members.ban(targetId, { reason });
                     return { targetId, success: true };
                 } catch (error) {
@@ -103,6 +109,12 @@ module.exports = {
 
         const results = await Promise.all(users.map(async (user) => {
             try {
+                await client.sendModerationDm({
+                    user,
+                    guildName: interaction.guild.name,
+                    action: 'ban',
+                    reason
+                });
                 await interaction.guild.members.ban(user.id, { reason });
                 let robloxId = null;
                 try {

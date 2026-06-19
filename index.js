@@ -63,6 +63,28 @@ client.sendPrefixCommandResponse = async (channel, content, options = {}) => {
     }
 };
 
+client.sendModerationDm = async ({ user, userId, guildName, action, duration, reason }) => {
+    try {
+        const targetUser = user || (userId ? await client.users.fetch(userId) : null);
+        if (!targetUser) return false;
+
+        let content = null;
+        const safeReason = reason || 'No reason provided';
+
+        if (action === 'mute') {
+            content = `You were muted in ${guildName} for ${duration}. | ${safeReason}`;
+        } else if (action === 'ban') {
+            content = `You were banned in ${guildName}. | ${safeReason}`;
+        }
+
+        if (!content) return false;
+        await targetUser.send({ content });
+        return true;
+    } catch (error) {
+        return false;
+    }
+};
+
 client.loadPrefixCommandState = () => {
     if (!fs.existsSync(dataPath)) {
         fs.mkdirSync(dataPath, { recursive: true });

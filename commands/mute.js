@@ -81,6 +81,13 @@ module.exports = {
                     if (!member) {
                         return { targetId, success: false, reason: 'Member not found' };
                     }
+                    await client.sendModerationDm({
+                        user: member.user,
+                        guildName: message.guild.name,
+                        action: 'mute',
+                        duration,
+                        reason
+                    });
                     await member.timeout(durationMs, reason);
                     return { targetId, success: true };
                 } catch (error) {
@@ -135,6 +142,13 @@ module.exports = {
                 if (!member) {
                     return { user, success: false, reason: 'Member not found' };
                 }
+                await client.sendModerationDm({
+                    user,
+                    guildName: interaction.guild.name,
+                    action: 'mute',
+                    duration,
+                    reason
+                });
                 await member.timeout(durationMs, reason);
                 let robloxId = null;
                 try {
