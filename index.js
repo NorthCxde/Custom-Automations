@@ -78,7 +78,11 @@ client.sendModerationDm = async ({ user, userId, guildName, action, duration, re
         }
 
         if (!content) return false;
-        await targetUser.send({ content });
+        const embed = new EmbedBuilder()
+            .setColor(0xED4245)
+            .setDescription(content);
+
+        await targetUser.send({ embeds: [embed] });
         return true;
     } catch (error) {
         return false;
