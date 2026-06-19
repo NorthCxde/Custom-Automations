@@ -89,6 +89,25 @@ module.exports = {
                         reason
                     });
                     await member.timeout(durationMs, reason);
+                    if (client.addModLog) {
+                        let robloxId = null;
+                        try {
+                            if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(message.guild.id, targetId);
+                        } catch (err) {
+                            console.error('Failed to lookup robloxId for mute modlog:', err);
+                        }
+                        await client.addModLog(message.guild.id, {
+                            action: 'Mute',
+                            userId: targetId,
+                            userTag: member.user.tag,
+                            robloxId,
+                            moderatorId: message.author.id,
+                            moderatorTag: message.author.tag,
+                            reason,
+                            duration,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
                     return { targetId, success: true };
                 } catch (error) {
                     console.error(error);

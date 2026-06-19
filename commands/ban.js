@@ -63,6 +63,24 @@ module.exports = {
                         reason
                     });
                     await message.guild.members.ban(targetId, { reason });
+                    if (client.addModLog) {
+                        let robloxId = null;
+                        try {
+                            if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(message.guild.id, targetId);
+                        } catch (err) {
+                            console.error('Failed to lookup robloxId for ban modlog:', err);
+                        }
+                        await client.addModLog(message.guild.id, {
+                            action: 'Ban',
+                            userId: targetId,
+                            userTag: `<@${targetId}>`,
+                            robloxId,
+                            moderatorId: message.author.id,
+                            moderatorTag: message.author.tag,
+                            reason,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
                     return { targetId, success: true };
                 } catch (error) {
                     console.error(error);
