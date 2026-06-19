@@ -31,7 +31,9 @@ const prefix = "?";
 const HARD_CODED_ADMINS = [
     // Put your user IDs here. Only these users will be able to see /perms and /logs.
     '1486503754617323530',
-    '841491704305811496'
+    '841491704305811496',
+    '1335476704407191563',
+    '582686715702018078'
 ];
 
 const HQ_GUILD_ID_DEFAULT = '1512252919423176875';
