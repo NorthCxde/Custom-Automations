@@ -45,6 +45,7 @@ client.modLogs = new Map();
 client.boostChannels = new Map();
 client.pendingModerationActions = new Map();
 client.pendingPermsUndoActions = new Map();
+client.pendingGlobalModUndoActions = new Map();
 client.bloxlink = new Map();
 client.bloxlinkHistory = new Map();
 client.slashCommands = new Map();
@@ -499,6 +500,8 @@ client.logGlobalModerationAudit = async (sourceGuildId, logEntry) => {
     const userId = logEntry?.userId || 'Unknown ID';
     const sourceGuild = sourceGuildId ? client.guilds.cache.get(sourceGuildId) : null;
     const sourceGuildName = sourceGuild?.name || 'Unknown Server';
+    const normalizedAction = String(action).toLowerCase();
+    const canUndo = normalizedAction === 'mute' || normalizedAction === 'ban';
 
     const fields = [
         { name: 'Moderator', value: `${moderatorTag} (${moderatorId})`, inline: false },
@@ -528,15 +531,46 @@ client.logGlobalModerationAudit = async (sourceGuildId, logEntry) => {
         .addFields(fields)
         .setTimestamp(now);
 
-    await channel.send({
-        embeds: [embed],
-        allowedMentions: {
-            parse: [],
-            users: [],
-            roles: [],
-            repliedUser: false
-        }
-    });
+    let components = [];
+    let undoKey = null;
+    if (canUndo && sourceGuildId && userId && moderatorId) {
+        undoKey = `globalmod_undo_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`globalmod_undo:${undoKey}`)
+                .setLabel('Undo')
+                .setStyle(ButtonStyle.Danger)
+        );
+        components = [row];
+
+        client.pendingGlobalModUndoActions.set(undoKey, {
+            sourceGuildId,
+            action,
+            userId,
+            userTag
+        });
+
+        const expiryTimer = setTimeout(() => {
+            client.pendingGlobalModUndoActions.delete(undoKey);
+        }, 24 * 60 * 60 * 1000);
+        if (typeof expiryTimer.unref === 'function') expiryTimer.unref();
+    }
+
+    try {
+        await channel.send({
+            embeds: [embed],
+            components,
+            allowedMentions: {
+                parse: [],
+                users: [],
+                roles: [],
+                repliedUser: false
+            }
+        });
+    } catch (err) {
+        if (undoKey) client.pendingGlobalModUndoActions.delete(undoKey);
+        throw err;
+    }
 };
 
 client.logPermsAudit = async (interaction, selectedRoleNames, previousConfig) => {
@@ -727,6 +761,14 @@ client.deletePendingPermsUndoAction = (key) => {
     client.pendingPermsUndoActions.delete(key);
 };
 
+client.getPendingGlobalModUndoAction = (key) => {
+    return client.pendingGlobalModUndoActions.get(key);
+};
+
+client.deletePendingGlobalModUndoAction = (key) => {
+    client.pendingGlobalModUndoActions.delete(key);
+};
+
 client.on('clientReady', async () => {
     const slashData = Array.from(client.slashCommands.values())
         .map(cmd => cmd.data.toJSON());
@@ -804,6 +846,82 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('globalmod_undo:')) {
+            const undoKey = interaction.customId.split(':')[1];
+
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this button.', ephemeral: true });
+            }
+
+            const actionData = client.getPendingGlobalModUndoAction(undoKey);
+            if (!actionData) {
+                return interaction.reply({ content: 'This undo action is no longer available.', ephemeral: true });
+            }
+
+            const sourceGuild = client.guilds.cache.get(actionData.sourceGuildId)
+                || await client.guilds.fetch(actionData.sourceGuildId).catch(() => null);
+            if (!sourceGuild) {
+                return interaction.reply({ content: 'Source server is unavailable for undo.', ephemeral: true });
+            }
+
+            const actionLower = String(actionData.action || '').toLowerCase();
+            let revertedAction = null;
+
+            try {
+                if (actionLower === 'mute') {
+                    const member = await sourceGuild.members.fetch(actionData.userId).catch(() => null);
+                    if (!member) {
+                        return interaction.reply({ content: 'Member is no longer in the source server, so mute cannot be undone.', ephemeral: true });
+                    }
+                    await member.timeout(null, 'Undone from HQ global logs');
+                    revertedAction = 'Unmute';
+                } else if (actionLower === 'ban') {
+                    await sourceGuild.members.unban(actionData.userId);
+                    revertedAction = 'Unban';
+                } else {
+                    return interaction.reply({ content: 'This action type cannot be undone from global logs.', ephemeral: true });
+                }
+
+                if (client.addModLog) {
+                    let robloxId = null;
+                    try {
+                        if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(sourceGuild.id, actionData.userId);
+                    } catch (err) {
+                        console.error('Failed to lookup robloxId for global undo modlog:', err);
+                    }
+                    client.addModLog(sourceGuild.id, {
+                        action: revertedAction,
+                        userId: actionData.userId,
+                        userTag: actionData.userTag || `<@${actionData.userId}>`,
+                        robloxId,
+                        moderatorId: interaction.user.id,
+                        moderatorTag: interaction.user.tag,
+                        reason: 'Undone from HQ global logs',
+                        timestamp: new Date().toISOString()
+                    });
+                }
+
+                client.deletePendingGlobalModUndoAction(undoKey);
+
+                const disabledRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`globalmod_undo_used:${undoKey}`)
+                        .setLabel('Undo Used')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(true)
+                );
+
+                await interaction.update({ components: [disabledRow] });
+                return interaction.followUp({
+                    content: `${revertedAction} completed in ${sourceGuild.name} for <@${actionData.userId}>.`,
+                    ephemeral: true
+                });
+            } catch (err) {
+                console.error('[GlobalAudit] Undo failed:', err);
+                return interaction.reply({ content: 'Failed to undo this action. Check permissions and current target state.', ephemeral: true });
+            }
+        }
+
         if (interaction.customId.startsWith('perms_undo:')) {
             const undoKey = interaction.customId.split(':')[1];
 
