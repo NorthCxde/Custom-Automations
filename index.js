@@ -75,6 +75,7 @@ client.autoresponderDrafts = new Map();
 client.autoresponderCooldowns = new Map();
 client.giveaways = new Map();
 client.giveawayTimers = new Map();
+client.giveawayDrafts = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 
@@ -451,6 +452,58 @@ client.parseGiveawayRoleBonuses = (rawInput, guild) => {
 
     const bonuses = Array.from(bonusesMap.entries()).map(([roleId, extraEntries]) => ({ roleId, extraEntries }));
     return { bonuses, invalidTokens };
+};
+
+client.getGiveawayDraftKey = (guildId, userId) => `${guildId}:${userId}`;
+
+client.buildGiveawayDraftPayload = (draft) => {
+    const preview = {
+        ...draft,
+        ended: false,
+        winnerIds: [],
+        entries: [],
+        endAt: draft.endAt || (Date.now() + (draft.durationMs || 60_000))
+    };
+
+    const embed = client.buildGiveawayEmbed(preview)
+        .setTitle(`${draft.prize || 'Giveaway'} (Preview)`);
+
+    const selector = new RoleSelectMenuBuilder()
+        .setCustomId('gv_bonus_roles')
+        .setPlaceholder('Select bonus role(s)')
+        .setMinValues(0)
+        .setMaxValues(25);
+    if (Array.isArray(draft.selectedBonusRoleIds) && draft.selectedBonusRoleIds.length) {
+        selector.setDefaultRoles(draft.selectedBonusRoleIds.slice(0, 25));
+    }
+
+    const controls = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('gv_bonus_set')
+            .setLabel('Set +Entries')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('gv_bonus_create')
+            .setLabel('Create Giveaway')
+            .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId('gv_bonus_cancel')
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Danger)
+    );
+
+    const selectedText = (draft.selectedBonusRoleIds || []).length
+        ? (draft.selectedBonusRoleIds || []).map(id => `<@&${id}>`).join(', ')
+        : 'None selected';
+
+    return {
+        content: `Select bonus roles, then click **Set +Entries**.\nSelected roles: ${selectedText}`,
+        embeds: [embed],
+        components: [
+            new ActionRowBuilder().addComponents(selector),
+            controls
+        ]
+    };
 };
 
 client.formatGiveawayWinnersValue = (ids) => {
@@ -1533,7 +1586,6 @@ client.on('interactionCreate', async (interaction) => {
             const winnersRaw = interaction.fields.getTextInputValue('gv_winners').trim();
             const prize = interaction.fields.getTextInputValue('gv_prize').trim();
             const description = (interaction.fields.getTextInputValue('gv_description') || '').trim();
-            const roleBonusRaw = (interaction.fields.getTextInputValue('gv_role_bonus') || '').trim();
 
             const durationMs = client.parseGiveawayDurationMs(durationRaw);
             const winnerCount = Number(winnersRaw);
@@ -1554,20 +1606,11 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: 'Prize is required.', ephemeral: true });
             }
 
-            const parsedBonuses = client.parseGiveawayRoleBonuses(roleBonusRaw, interaction.guild);
-            if (roleBonusRaw && parsedBonuses.bonuses.length === 0) {
-                return interaction.reply({
-                    content: 'Bonus role format is invalid. Use: `<@&roleId>:2` or `roleId:2` (comma-separated).',
-                    ephemeral: true
-                });
-            }
-
             const now = Date.now();
-            const giveaway = {
-                id: String(BigInt(now) * 1000000n + BigInt(Math.floor(Math.random() * 1_000_000))),
+            const draftKey = client.getGiveawayDraftKey(interaction.guildId, interaction.user.id);
+            const draft = {
                 guildId: interaction.guildId,
                 channelId: interaction.channelId,
-                messageId: '',
                 hostId: interaction.user.id,
                 prize,
                 description,
@@ -1575,25 +1618,50 @@ client.on('interactionCreate', async (interaction) => {
                 winnerCount,
                 createdAt: now,
                 endAt: now + durationMs,
-                entries: [],
-                ended: false,
-                winnerIds: [],
-                roleBonuses: parsedBonuses.bonuses
+                roleBonuses: [],
+                selectedBonusRoleIds: []
             };
 
-            const msg = await interaction.channel.send({
-                embeds: [client.buildGiveawayEmbed(giveaway)],
-                components: client.buildGiveawayComponents(giveaway)
-            });
-
-            giveaway.messageId = msg.id;
-            client.upsertGiveaway(interaction.guildId, giveaway);
-            client.scheduleGiveaway(giveaway);
+            client.giveawayDrafts.set(draftKey, draft);
 
             return interaction.reply({
-                content: parsedBonuses.invalidTokens.length
-                    ? `The giveaway was successfully created! ID: ${giveaway.id}\nIgnored invalid bonus entries: ${parsedBonuses.invalidTokens.join(', ')}`
-                    : `The giveaway was successfully created! ID: ${giveaway.id}`,
+                ...client.buildGiveawayDraftPayload(draft),
+                ephemeral: true
+            });
+        }
+
+        if (interaction.customId === 'gv_bonus_amount_modal') {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+
+            const draftKey = client.getGiveawayDraftKey(interaction.guildId, interaction.user.id);
+            const draft = client.giveawayDrafts.get(draftKey);
+            if (!draft) {
+                return interaction.reply({ content: 'No giveaway setup draft found. Run /gcreate again.', ephemeral: true });
+            }
+
+            const selected = Array.isArray(draft.selectedBonusRoleIds) ? draft.selectedBonusRoleIds : [];
+            if (!selected.length) {
+                return interaction.reply({ content: 'Select one or more roles first.', ephemeral: true });
+            }
+
+            const amountRaw = interaction.fields.getTextInputValue('gv_bonus_amount').trim();
+            const extraEntries = Number(amountRaw);
+            if (!Number.isInteger(extraEntries) || extraEntries < 1 || extraEntries > 50) {
+                return interaction.reply({ content: 'Extra entries must be a whole number between 1 and 50.', ephemeral: true });
+            }
+
+            const bonusMap = new Map((draft.roleBonuses || []).map(item => [item.roleId, item.extraEntries]));
+            for (const roleId of selected) {
+                bonusMap.set(roleId, extraEntries);
+            }
+            draft.roleBonuses = Array.from(bonusMap.entries()).map(([roleId, value]) => ({ roleId, extraEntries: value }));
+            client.giveawayDrafts.set(draftKey, draft);
+
+            return interaction.reply({
+                content: 'Bonus entries updated.',
+                ...client.buildGiveawayDraftPayload(draft),
                 ephemeral: true
             });
         }
@@ -1640,6 +1708,88 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId === 'gv_bonus_set' || interaction.customId === 'gv_bonus_create' || interaction.customId === 'gv_bonus_cancel') {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+
+            const draftKey = client.getGiveawayDraftKey(interaction.guildId, interaction.user.id);
+            const draft = client.giveawayDrafts.get(draftKey);
+            if (!draft) {
+                return interaction.reply({ content: 'No giveaway setup draft found. Run /gcreate again.', ephemeral: true });
+            }
+
+            if (interaction.customId === 'gv_bonus_cancel') {
+                client.giveawayDrafts.delete(draftKey);
+                return interaction.update({ content: 'Giveaway setup canceled.', embeds: [], components: [] });
+            }
+
+            if (interaction.customId === 'gv_bonus_set') {
+                const selected = Array.isArray(draft.selectedBonusRoleIds) ? draft.selectedBonusRoleIds : [];
+                if (!selected.length) {
+                    return interaction.reply({ content: 'Select one or more roles first.', ephemeral: true });
+                }
+
+                const modal = new ModalBuilder()
+                    .setCustomId('gv_bonus_amount_modal')
+                    .setTitle('Set Bonus Entries');
+
+                const amountInput = new TextInputBuilder()
+                    .setCustomId('gv_bonus_amount')
+                    .setLabel('Extra entries per selected role')
+                    .setPlaceholder('2')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setMaxLength(2);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(amountInput));
+                return interaction.showModal(modal);
+            }
+
+            if (interaction.customId === 'gv_bonus_create') {
+                const now = Date.now();
+                const giveaway = {
+                    id: String(BigInt(now) * 1000000n + BigInt(Math.floor(Math.random() * 1_000_000))),
+                    guildId: draft.guildId,
+                    channelId: draft.channelId,
+                    messageId: '',
+                    hostId: draft.hostId,
+                    prize: draft.prize,
+                    description: draft.description,
+                    durationMs: draft.durationMs,
+                    winnerCount: draft.winnerCount,
+                    createdAt: now,
+                    endAt: now + draft.durationMs,
+                    entries: [],
+                    ended: false,
+                    winnerIds: [],
+                    roleBonuses: Array.isArray(draft.roleBonuses) ? draft.roleBonuses : []
+                };
+
+                const channel = interaction.guild.channels.cache.get(draft.channelId)
+                    || await interaction.guild.channels.fetch(draft.channelId).catch(() => null);
+                if (!channel || !channel.isTextBased()) {
+                    return interaction.reply({ content: 'Original channel is unavailable. Run /gcreate again.', ephemeral: true });
+                }
+
+                const msg = await channel.send({
+                    embeds: [client.buildGiveawayEmbed(giveaway)],
+                    components: client.buildGiveawayComponents(giveaway)
+                });
+
+                giveaway.messageId = msg.id;
+                client.upsertGiveaway(interaction.guildId, giveaway);
+                client.scheduleGiveaway(giveaway);
+                client.giveawayDrafts.delete(draftKey);
+
+                return interaction.update({
+                    content: `The giveaway was successfully created! ID: ${giveaway.id}`,
+                    embeds: [],
+                    components: []
+                });
+            }
+        }
+
         if (interaction.customId.startsWith('gv_join:') || interaction.customId.startsWith('gv_leave:')) {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This button must be used in a server channel.', ephemeral: true });
@@ -2261,6 +2411,23 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (!interaction.isRoleSelectMenu()) return;
+
+    if (interaction.customId === 'gv_bonus_roles') {
+        if (!interaction.guild) {
+            return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+        }
+
+        const draftKey = client.getGiveawayDraftKey(interaction.guildId, interaction.user.id);
+        const draft = client.giveawayDrafts.get(draftKey);
+        if (!draft) {
+            return interaction.reply({ content: 'No giveaway setup draft found. Run /gcreate again.', ephemeral: true });
+        }
+
+        draft.selectedBonusRoleIds = [...new Set(interaction.values.map(String))];
+        client.giveawayDrafts.set(draftKey, draft);
+
+        return interaction.update(client.buildGiveawayDraftPayload(draft));
+    }
 
     if (interaction.customId === 'ar_allowed_roles' || interaction.customId === 'ar_ignored_roles') {
         if (!interaction.guild) {
