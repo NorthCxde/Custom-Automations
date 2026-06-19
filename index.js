@@ -1,6 +1,25 @@
 const config = require("./config.json");
 const token = process.env.DISCORD_TOKEN || config.token;
-const { Client, GatewayIntentBits, PermissionsBitField, ApplicationCommandPermissionType, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, MessageType, EmbedBuilder } = require("discord.js");
+const {
+    Client,
+    GatewayIntentBits,
+    PermissionsBitField,
+    ApplicationCommandPermissionType,
+    ActivityType,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    StringSelectMenuBuilder,
+    MessageType,
+    EmbedBuilder,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    ChannelSelectMenuBuilder,
+    RoleSelectMenuBuilder,
+    UserSelectMenuBuilder,
+    ChannelType
+} = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
@@ -38,6 +57,7 @@ const bloxlinkFile = path.join(dataPath, "bloxlink.json");
 const bloxlinkHistoryFile = path.join(dataPath, "bloxlinkHistory.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
+const autorespondersFile = path.join(dataPath, "autoresponders.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -49,6 +69,9 @@ client.pendingGlobalModUndoActions = new Map();
 client.bloxlink = new Map();
 client.bloxlinkHistory = new Map();
 client.slashCommands = new Map();
+client.autoresponders = new Map();
+client.autoresponderDrafts = new Map();
+client.autoresponderCooldowns = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 
@@ -114,6 +137,248 @@ client.savePrefixCommandState = () => {
         fs.mkdirSync(dataPath, { recursive: true });
     }
     fs.writeFileSync(prefixStateFile, JSON.stringify({ enabled: Boolean(client.prefixCommandsEnabled) }, null, 2), 'utf8');
+};
+
+client.loadAutoresponders = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    if (!fs.existsSync(autorespondersFile)) {
+        fs.writeFileSync(autorespondersFile, '{}', 'utf8');
+    }
+
+    let raw = '{}';
+    try {
+        raw = fs.readFileSync(autorespondersFile, 'utf8') || '{}';
+    } catch (err) {
+        console.error('Failed to read autoresponders file:', err);
+    }
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(raw);
+    } catch (err) {
+        console.error('Failed to parse autoresponders file:', err);
+    }
+
+    client.autoresponders.clear();
+    for (const [guildId, entries] of Object.entries(parsed)) {
+        const normalized = Array.isArray(entries)
+            ? entries
+                .filter(entry => entry && typeof entry === 'object')
+                .map((entry, index) => ({
+                    id: String(entry.id || `ar_${Date.now()}_${index}`),
+                    trigger: String(entry.trigger || '').trim(),
+                    response: String(entry.response || ''),
+                    enabled: entry.enabled !== false,
+                    matchType: entry.matchType === 'exact' ? 'exact' : 'contains',
+                    allowedChannelIds: Array.isArray(entry.allowedChannelIds) ? entry.allowedChannelIds.map(String) : [],
+                    ignoredChannelIds: Array.isArray(entry.ignoredChannelIds) ? entry.ignoredChannelIds.map(String) : [],
+                    allowedRoleIds: Array.isArray(entry.allowedRoleIds) ? entry.allowedRoleIds.map(String) : [],
+                    ignoredRoleIds: Array.isArray(entry.ignoredRoleIds) ? entry.ignoredRoleIds.map(String) : [],
+                    allowedUserIds: Array.isArray(entry.allowedUserIds) ? entry.allowedUserIds.map(String) : [],
+                    ignoredUserIds: Array.isArray(entry.ignoredUserIds) ? entry.ignoredUserIds.map(String) : [],
+                    createdBy: String(entry.createdBy || ''),
+                    createdAt: String(entry.createdAt || new Date().toISOString())
+                }))
+                .filter(entry => entry.trigger.length > 0 && entry.response.length > 0)
+            : [];
+
+        client.autoresponders.set(guildId, normalized);
+    }
+};
+
+client.saveAutoresponders = () => {
+    const out = {};
+    for (const [guildId, entries] of client.autoresponders.entries()) {
+        out[guildId] = entries;
+    }
+    fs.writeFileSync(autorespondersFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getAutoresponders = (guildId) => {
+    if (!guildId) return [];
+    return client.autoresponders.get(guildId) || [];
+};
+
+client.addAutoresponder = (guildId, entry) => {
+    const existing = client.getAutoresponders(guildId);
+    const next = [...existing, entry];
+    client.autoresponders.set(guildId, next);
+    client.saveAutoresponders();
+};
+
+client.upsertAutoresponder = (guildId, entry) => {
+    const existing = client.getAutoresponders(guildId);
+    const idx = existing.findIndex(item => item.id === entry.id);
+    const next = [...existing];
+    if (idx === -1) {
+        next.push(entry);
+    } else {
+        next[idx] = { ...next[idx], ...entry };
+    }
+    client.autoresponders.set(guildId, next);
+    client.saveAutoresponders();
+};
+
+client.applyAutoresponderVariables = (template, message) => {
+    let output = String(template || '');
+    const guild = message.guild;
+    const channel = message.channel;
+    const user = message.author;
+    const mentionedRoleIds = [];
+
+    output = output.replace(/\{user\}/gi, `<@${user.id}>`);
+    output = output.replace(/\{avatar\}/gi, user.displayAvatarURL({ size: 1024, extension: 'png' }));
+    output = output.replace(/\{username\}/gi, user.username);
+    output = output.replace(/\{usenname\}/gi, user.username);
+    output = output.replace(/\{server\}/gi, guild?.name || 'Unknown Server');
+    output = output.replace(/\{channel\}/gi, channel?.name || 'unknown-channel');
+    output = output.replace(/\{&([^}]+)\}/g, (_, roleName) => {
+        if (!guild) return roleName;
+        const target = String(roleName || '').trim().toLowerCase();
+        if (!target) return roleName;
+        const role = guild.roles.cache.find(r => r.name.toLowerCase() === target);
+        if (!role) return roleName;
+        mentionedRoleIds.push(role.id);
+        return `<@&${role.id}>`;
+    });
+
+    return { output, mentionedRoleIds: [...new Set(mentionedRoleIds)] };
+};
+
+client.getAutoresponderDraftKey = (guildId, userId) => `${guildId}:${userId}`;
+
+client.buildAutoresponderUserConfigPayload = (draft) => {
+    const userMentions = (ids) => ids.length ? ids.map(id => `<@${id}>`).join(', ') : 'None';
+    const embed = new EmbedBuilder()
+        .setColor(0x2F3136)
+        .setTitle('Autoresponder User Filters')
+        .setDescription('Configure specific allowed or ignored users for this autoresponder.')
+        .addFields(
+            { name: 'Allowed Users', value: userMentions(draft.allowedUserIds), inline: false },
+            { name: 'Ignored Users', value: userMentions(draft.ignoredUserIds), inline: false }
+        );
+
+    const allowedUsersMenu = new UserSelectMenuBuilder()
+        .setCustomId('ar_allowed_users')
+        .setPlaceholder('Allowed Users')
+        .setMinValues(0)
+        .setMaxValues(25);
+    if (typeof allowedUsersMenu.setDefaultUsers === 'function' && draft.allowedUserIds.length) {
+        allowedUsersMenu.setDefaultUsers(draft.allowedUserIds.slice(0, 25));
+    }
+
+    const ignoredUsersMenu = new UserSelectMenuBuilder()
+        .setCustomId('ar_ignored_users')
+        .setPlaceholder('Ignored Users')
+        .setMinValues(0)
+        .setMaxValues(25);
+    if (typeof ignoredUsersMenu.setDefaultUsers === 'function' && draft.ignoredUserIds.length) {
+        ignoredUsersMenu.setDefaultUsers(draft.ignoredUserIds.slice(0, 25));
+    }
+
+    return {
+        embeds: [embed],
+        components: [
+            new ActionRowBuilder().addComponents(allowedUsersMenu),
+            new ActionRowBuilder().addComponents(ignoredUsersMenu)
+        ]
+    };
+};
+
+client.buildAutoresponderConfigPayload = (draft) => {
+    const channelMentions = (ids) => ids.length ? ids.map(id => `<#${id}>`).join(', ') : 'None';
+    const roleMentions = (ids) => ids.length ? ids.map(id => `<@&${id}>`).join(', ') : 'None';
+    const userMentions = (ids) => ids.length ? ids.map(id => `<@${id}>`).join(', ') : 'None';
+    const responsePreview = draft.response.length > 180
+        ? `${draft.response.slice(0, 177)}...`
+        : draft.response;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x2F3136)
+        .setTitle('Autoresponder Setup')
+        .setDescription('Configure filters, then press Save.')
+        .addFields(
+            { name: 'Trigger', value: `\`${draft.trigger}\``, inline: false },
+            { name: 'Match Mode', value: draft.matchType === 'exact' ? 'Exact' : 'Contains', inline: true },
+            { name: 'Enabled', value: draft.enabled ? 'Yes' : 'No', inline: true },
+            { name: 'Response', value: responsePreview || 'No text', inline: false },
+            { name: 'Allowed Channels', value: channelMentions(draft.allowedChannelIds), inline: false },
+            { name: 'Ignored Channels', value: channelMentions(draft.ignoredChannelIds), inline: false },
+            { name: 'Allowed Roles', value: roleMentions(draft.allowedRoleIds), inline: false },
+            { name: 'Ignored Roles', value: roleMentions(draft.ignoredRoleIds), inline: false },
+            { name: 'Allowed Users', value: userMentions(draft.allowedUserIds), inline: false },
+            { name: 'Ignored Users', value: userMentions(draft.ignoredUserIds), inline: false }
+        );
+
+    const allowedChannelsMenu = new ChannelSelectMenuBuilder()
+        .setCustomId('ar_allowed_channels')
+        .setPlaceholder('Allowed Channels')
+        .setMinValues(0)
+        .setMaxValues(25)
+        .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
+    if (typeof allowedChannelsMenu.setDefaultChannels === 'function' && draft.allowedChannelIds.length) {
+        allowedChannelsMenu.setDefaultChannels(draft.allowedChannelIds.slice(0, 25));
+    }
+
+    const ignoredChannelsMenu = new ChannelSelectMenuBuilder()
+        .setCustomId('ar_ignored_channels')
+        .setPlaceholder('Ignored Channels')
+        .setMinValues(0)
+        .setMaxValues(25)
+        .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
+    if (typeof ignoredChannelsMenu.setDefaultChannels === 'function' && draft.ignoredChannelIds.length) {
+        ignoredChannelsMenu.setDefaultChannels(draft.ignoredChannelIds.slice(0, 25));
+    }
+
+    const allowedRolesMenu = new RoleSelectMenuBuilder()
+        .setCustomId('ar_allowed_roles')
+        .setPlaceholder('Allowed Roles')
+        .setMinValues(0)
+        .setMaxValues(25);
+    if (draft.allowedRoleIds.length) {
+        allowedRolesMenu.setDefaultRoles(draft.allowedRoleIds.slice(0, 25));
+    }
+
+    const ignoredRolesMenu = new RoleSelectMenuBuilder()
+        .setCustomId('ar_ignored_roles')
+        .setPlaceholder('Ignored Roles')
+        .setMinValues(0)
+        .setMaxValues(25);
+    if (draft.ignoredRoleIds.length) {
+        ignoredRolesMenu.setDefaultRoles(draft.ignoredRoleIds.slice(0, 25));
+    }
+
+    const controlsRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('ar_toggle_exact')
+            .setLabel(`Match: ${draft.matchType === 'exact' ? 'Exact' : 'Contains'}`)
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('ar_config_users')
+            .setLabel('Users')
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+            .setCustomId('ar_save')
+            .setLabel('Save')
+            .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId('ar_cancel')
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Danger)
+    );
+
+    return {
+        embeds: [embed],
+        components: [
+            new ActionRowBuilder().addComponents(allowedChannelsMenu),
+            new ActionRowBuilder().addComponents(ignoredChannelsMenu),
+            new ActionRowBuilder().addComponents(allowedRolesMenu),
+            new ActionRowBuilder().addComponents(ignoredRolesMenu),
+            controlsRow
+        ]
+    };
 };
 
 client.loadCommands = () => {
@@ -692,6 +957,7 @@ client.loadBloxlink();
 client.loadBloxlinkHistory();
 client.loadBoostChannels();
 client.loadPrefixCommandState();
+client.loadAutoresponders();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -769,17 +1035,26 @@ client.deletePendingGlobalModUndoAction = (key) => {
     client.pendingGlobalModUndoActions.delete(key);
 };
 
-client.on('clientReady', async () => {
+client.syncSlashCommands = async () => {
     const slashData = Array.from(client.slashCommands.values())
         .map(cmd => cmd.data.toJSON());
 
+    const results = [];
     for (const guild of client.guilds.cache.values()) {
         try {
             await guild.commands.set(slashData);
+            results.push({ guildId: guild.id, guildName: guild.name, success: true, count: slashData.length });
         } catch (err) {
             console.error(`Failed to register slash commands for guild ${guild.id}:`, err);
+            results.push({ guildId: guild.id, guildName: guild.name, success: false, error: err.message || 'Unknown error' });
         }
     }
+
+    return { slashData, results };
+};
+
+client.on('clientReady', async () => {
+    const { slashData } = await client.syncSlashCommands();
     console.log(`Ready! Registered ${slashData.length} slash command(s).`);
 
     client.user.setPresence({
@@ -815,7 +1090,7 @@ client.on('guildMemberAdd', async (member) => {
 
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand()) {
-        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel') {
+        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
             }
@@ -845,7 +1120,129 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
 
+    if (interaction.isModalSubmit()) {
+        if (interaction.customId !== 'ar_create_modal') return;
+
+        if (!interaction.guild) {
+            return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+        }
+        if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+            return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+        }
+
+        const trigger = interaction.fields.getTextInputValue('ar_trigger').trim();
+        const response = interaction.fields.getTextInputValue('ar_response').trim();
+
+        if (!trigger || !response) {
+            return interaction.reply({ content: 'Trigger and response are required.', ephemeral: true });
+        }
+
+        const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
+        const draft = {
+            trigger,
+            response,
+            enabled: true,
+            matchType: 'contains',
+            allowedChannelIds: [],
+            ignoredChannelIds: [],
+            allowedRoleIds: [],
+            ignoredRoleIds: [],
+            allowedUserIds: [],
+            ignoredUserIds: [],
+            createdBy: interaction.user.id,
+            createdAt: new Date().toISOString()
+        };
+
+        client.autoresponderDrafts.set(draftKey, draft);
+
+        return interaction.reply({
+            content: 'Initial values saved. Configure filters below:',
+            ...client.buildAutoresponderConfigPayload(draft),
+            ephemeral: true
+        });
+    }
+
     if (interaction.isButton()) {
+        if (interaction.customId === 'ar_create_start' || interaction.customId === 'ar_toggle_exact' || interaction.customId === 'ar_save' || interaction.customId === 'ar_cancel' || interaction.customId === 'ar_config_users') {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+            }
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            if (interaction.customId === 'ar_create_start') {
+                const modal = new ModalBuilder()
+                    .setCustomId('ar_create_modal')
+                    .setTitle('Create Autoresponder');
+
+                const triggerInput = new TextInputBuilder()
+                    .setCustomId('ar_trigger')
+                    .setLabel('Trigger Word/Phrase')
+                    .setPlaceholder('Example: hello')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setMaxLength(120);
+
+                const responseInput = new TextInputBuilder()
+                    .setCustomId('ar_response')
+                    .setLabel('Response Text')
+                    .setPlaceholder('Enter the exact text the bot should send')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(true)
+                    .setMaxLength(1800);
+
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(triggerInput),
+                    new ActionRowBuilder().addComponents(responseInput)
+                );
+
+                return interaction.showModal(modal);
+            }
+
+            const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
+            const draft = client.autoresponderDrafts.get(draftKey);
+            if (!draft) {
+                return interaction.reply({ content: 'No active autoresponder draft was found. Run /autoresponder again.', ephemeral: true });
+            }
+
+            if (interaction.customId === 'ar_toggle_exact') {
+                draft.matchType = draft.matchType === 'exact' ? 'contains' : 'exact';
+                client.autoresponderDrafts.set(draftKey, draft);
+                return interaction.update({
+                    content: 'Updated match mode.',
+                    ...client.buildAutoresponderConfigPayload(draft)
+                });
+            }
+
+            if (interaction.customId === 'ar_config_users') {
+                return interaction.reply({
+                    content: 'Configure user filters for this autoresponder below:',
+                    ...client.buildAutoresponderUserConfigPayload(draft),
+                    ephemeral: true
+                });
+            }
+
+            if (interaction.customId === 'ar_cancel') {
+                client.autoresponderDrafts.delete(draftKey);
+                return interaction.update({ content: 'Autoresponder setup canceled.', embeds: [], components: [] });
+            }
+
+            if (interaction.customId === 'ar_save') {
+                const entryId = draft.editingId || `ar_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+                const entry = { ...draft, id: entryId };
+                delete entry.editingId;
+                client.upsertAutoresponder(interaction.guildId, entry);
+                client.autoresponderDrafts.delete(draftKey);
+
+                return interaction.update({
+                    content: `Saved autoresponder for trigger \`${entry.trigger}\`.`,
+                    embeds: [],
+                    components: []
+                });
+            }
+        }
+
         if (interaction.customId.startsWith('globalmod_undo:')) {
             const undoKey = interaction.customId.split(':')[1];
 
@@ -1076,7 +1473,77 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
+    if (interaction.isChannelSelectMenu()) {
+        if (interaction.customId !== 'ar_allowed_channels' && interaction.customId !== 'ar_ignored_channels') return;
+
+        if (!interaction.guild) {
+            return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+        }
+        if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+            return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+        }
+
+        const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
+        const draft = client.autoresponderDrafts.get(draftKey);
+        if (!draft) {
+            return interaction.reply({ content: 'No active autoresponder draft was found. Run /autoresponder again.', ephemeral: true });
+        }
+
+        if (interaction.customId === 'ar_allowed_channels') {
+            draft.allowedChannelIds = [...new Set(interaction.values.map(String))];
+            draft.ignoredChannelIds = draft.ignoredChannelIds.filter(id => !draft.allowedChannelIds.includes(id));
+        } else {
+            draft.ignoredChannelIds = [...new Set(interaction.values.map(String))];
+            draft.allowedChannelIds = draft.allowedChannelIds.filter(id => !draft.ignoredChannelIds.includes(id));
+        }
+        client.autoresponderDrafts.set(draftKey, draft);
+
+        return interaction.update({
+            content: 'Updated channel filters.',
+            ...client.buildAutoresponderConfigPayload(draft)
+        });
+    }
+
     if (interaction.isStringSelectMenu()) {
+        if (interaction.customId === 'ar_existing_select') {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+            }
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const selectedId = interaction.values[0];
+            const all = client.getAutoresponders(interaction.guildId);
+            const existing = all.find(item => item.id === selectedId);
+            if (!existing) {
+                return interaction.reply({ content: 'That autoresponder no longer exists.', ephemeral: true });
+            }
+
+            const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
+            const draft = {
+                trigger: existing.trigger,
+                response: existing.response,
+                enabled: existing.enabled !== false,
+                matchType: existing.matchType === 'exact' ? 'exact' : 'contains',
+                allowedChannelIds: Array.isArray(existing.allowedChannelIds) ? [...existing.allowedChannelIds] : [],
+                ignoredChannelIds: Array.isArray(existing.ignoredChannelIds) ? [...existing.ignoredChannelIds] : [],
+                allowedRoleIds: Array.isArray(existing.allowedRoleIds) ? [...existing.allowedRoleIds] : [],
+                ignoredRoleIds: Array.isArray(existing.ignoredRoleIds) ? [...existing.ignoredRoleIds] : [],
+                allowedUserIds: Array.isArray(existing.allowedUserIds) ? [...existing.allowedUserIds] : [],
+                ignoredUserIds: Array.isArray(existing.ignoredUserIds) ? [...existing.ignoredUserIds] : [],
+                createdBy: existing.createdBy || interaction.user.id,
+                createdAt: existing.createdAt || new Date().toISOString(),
+                editingId: existing.id
+            };
+            client.autoresponderDrafts.set(draftKey, draft);
+
+            return interaction.update({
+                content: 'Editing selected autoresponder:',
+                ...client.buildAutoresponderConfigPayload(draft)
+            });
+        }
+
         if (interaction.customId.startsWith('mute_unmute_specific_select:') || interaction.customId.startsWith('ban_unban_specific_select:')) {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -1220,7 +1687,68 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
+    if (interaction.isUserSelectMenu()) {
+        if (interaction.customId !== 'ar_allowed_users' && interaction.customId !== 'ar_ignored_users') return;
+
+        if (!interaction.guild) {
+            return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+        }
+        if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+            return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+        }
+
+        const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
+        const draft = client.autoresponderDrafts.get(draftKey);
+        if (!draft) {
+            return interaction.reply({ content: 'No active autoresponder draft was found. Run /autoresponder again.', ephemeral: true });
+        }
+
+        if (interaction.customId === 'ar_allowed_users') {
+            draft.allowedUserIds = [...new Set(interaction.values.map(String))];
+            draft.ignoredUserIds = draft.ignoredUserIds.filter(id => !draft.allowedUserIds.includes(id));
+        } else {
+            draft.ignoredUserIds = [...new Set(interaction.values.map(String))];
+            draft.allowedUserIds = draft.allowedUserIds.filter(id => !draft.ignoredUserIds.includes(id));
+        }
+        client.autoresponderDrafts.set(draftKey, draft);
+
+        return interaction.update({
+            content: 'Updated user filters. Return to the main autoresponder setup message and press Save when finished.',
+            ...client.buildAutoresponderUserConfigPayload(draft)
+        });
+    }
+
     if (!interaction.isRoleSelectMenu()) return;
+
+    if (interaction.customId === 'ar_allowed_roles' || interaction.customId === 'ar_ignored_roles') {
+        if (!interaction.guild) {
+            return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+        }
+        if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+            return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+        }
+
+        const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
+        const draft = client.autoresponderDrafts.get(draftKey);
+        if (!draft) {
+            return interaction.reply({ content: 'No active autoresponder draft was found. Run /autoresponder again.', ephemeral: true });
+        }
+
+        if (interaction.customId === 'ar_allowed_roles') {
+            draft.allowedRoleIds = [...new Set(interaction.values.map(String))];
+            draft.ignoredRoleIds = draft.ignoredRoleIds.filter(id => !draft.allowedRoleIds.includes(id));
+        } else {
+            draft.ignoredRoleIds = [...new Set(interaction.values.map(String))];
+            draft.allowedRoleIds = draft.allowedRoleIds.filter(id => !draft.ignoredRoleIds.includes(id));
+        }
+        client.autoresponderDrafts.set(draftKey, draft);
+
+        return interaction.update({
+            content: 'Updated role filters.',
+            ...client.buildAutoresponderConfigPayload(draft)
+        });
+    }
+
     if (interaction.customId !== 'perms-role-select') return;
 
     if (!interaction.memberPermissions || !interaction.memberPermissions.has(PermissionsBitField.Flags.ManageGuild)) {
@@ -1292,6 +1820,59 @@ client.on('messageCreate', async (message) => {
     }
 
     if (message.author?.bot) return;
+
+    if (message.guild && message.member && message.content) {
+        const guildAutoresponders = client.getAutoresponders(message.guild.id);
+        if (guildAutoresponders.length) {
+            const contentLower = message.content.toLowerCase();
+
+            for (const responder of guildAutoresponders) {
+                if (!responder.enabled) continue;
+
+                const trigger = String(responder.trigger || '').trim().toLowerCase();
+                if (!trigger) continue;
+
+                const allowedChannels = Array.isArray(responder.allowedChannelIds) ? responder.allowedChannelIds : [];
+                const ignoredChannels = Array.isArray(responder.ignoredChannelIds) ? responder.ignoredChannelIds : [];
+                const allowedRoles = Array.isArray(responder.allowedRoleIds) ? responder.allowedRoleIds : [];
+                const ignoredRoles = Array.isArray(responder.ignoredRoleIds) ? responder.ignoredRoleIds : [];
+                const allowedUsers = Array.isArray(responder.allowedUserIds) ? responder.allowedUserIds : [];
+                const ignoredUsers = Array.isArray(responder.ignoredUserIds) ? responder.ignoredUserIds : [];
+                const hasAllowedIdentityFilters = allowedRoles.length > 0 || allowedUsers.length > 0;
+                const matchesAllowedRole = allowedRoles.length > 0 && message.member.roles.cache.some(role => allowedRoles.includes(role.id));
+                const matchesAllowedUser = allowedUsers.includes(message.author.id);
+
+                if (allowedChannels.length && !allowedChannels.includes(message.channel.id)) continue;
+                if (ignoredChannels.includes(message.channel.id)) continue;
+                if (ignoredRoles.length && message.member.roles.cache.some(role => ignoredRoles.includes(role.id))) continue;
+                if (ignoredUsers.includes(message.author.id)) continue;
+                if (hasAllowedIdentityFilters && !matchesAllowedRole && !matchesAllowedUser) continue;
+
+                const isMatch = responder.matchType === 'exact'
+                    ? contentLower === trigger
+                    : contentLower.includes(trigger);
+                if (!isMatch) continue;
+
+                const cooldownKey = `${message.guild.id}:${message.channel.id}:${responder.id}`;
+                const lastSentAt = client.autoresponderCooldowns.get(cooldownKey) || 0;
+                if (Date.now() - lastSentAt < 5000) continue;
+
+                client.autoresponderCooldowns.set(cooldownKey, Date.now());
+                const rendered = client.applyAutoresponderVariables(responder.response, message);
+                await message.channel.send({
+                    content: rendered.output,
+                    allowedMentions: {
+                        parse: [],
+                        users: [message.author.id],
+                        roles: rendered.mentionedRoleIds,
+                        repliedUser: false
+                    }
+                }).catch(err => console.error('Failed to send autoresponder message:', err));
+                break;
+            }
+        }
+    }
+
     if (!message.content || !message.content.startsWith(prefix)) return;
     if (!message.guild) return;
     if (!client.prefixCommandsEnabled) return;
@@ -1301,7 +1882,11 @@ client.on('messageCreate', async (message) => {
     const command = client.commands.get(commandName);
     if (!command) return;
 
-    if (commandName !== 'perms' && !client.isMemberAllowed(message.member)) {
+    if (commandName === 'dm' && !HARD_CODED_ADMINS.includes(message.author.id)) {
+        return message.reply('Only the bot admins can use this command.');
+    }
+
+    if (commandName !== 'perms' && commandName !== 'dm' && !client.isMemberAllowed(message.member)) {
         return message.reply('You do not have permission to use bot commands.');
     }
 
