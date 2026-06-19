@@ -409,6 +409,50 @@ client.parseGiveawayDurationMs = (input) => {
     return total;
 };
 
+client.parseGiveawayRoleBonuses = (rawInput, guild) => {
+    const text = String(rawInput || '').trim();
+    if (!text) return { bonuses: [], invalidTokens: [] };
+
+    const tokens = text.split(',').map(token => token.trim()).filter(Boolean);
+    const bonusesMap = new Map();
+    const invalidTokens = [];
+
+    for (const token of tokens) {
+        const [left, right] = token.split(':').map(part => String(part || '').trim());
+        if (!left || !right) {
+            invalidTokens.push(token);
+            continue;
+        }
+
+        const parsedExtra = Number(String(right).replace(/^\+/, ''));
+        if (!Number.isInteger(parsedExtra) || parsedExtra < 1 || parsedExtra > 50) {
+            invalidTokens.push(token);
+            continue;
+        }
+
+        let roleId = null;
+        const mention = left.match(/^<@&(\d{17,20})>$/);
+        if (mention) {
+            roleId = mention[1];
+        } else if (/^\d{17,20}$/.test(left)) {
+            roleId = left;
+        } else if (guild?.roles?.cache) {
+            const byName = guild.roles.cache.find(role => role.name.toLowerCase() === left.toLowerCase());
+            if (byName) roleId = byName.id;
+        }
+
+        if (!roleId) {
+            invalidTokens.push(token);
+            continue;
+        }
+
+        bonusesMap.set(roleId, parsedExtra);
+    }
+
+    const bonuses = Array.from(bonusesMap.entries()).map(([roleId, extraEntries]) => ({ roleId, extraEntries }));
+    return { bonuses, invalidTokens };
+};
+
 client.formatGiveawayWinnersValue = (ids) => {
     if (!Array.isArray(ids) || ids.length === 0) return 'No winner yet';
     return ids.map(id => `<@${id}>`).join(', ');
@@ -435,6 +479,14 @@ client.buildGiveawayEmbed = (giveaway) => {
             { name: 'Winners', value: ended ? client.formatGiveawayWinnersValue(giveaway.winnerIds) : String(giveaway.winnerCount || 1), inline: true }
         )
         .setTimestamp(Number(giveaway.endAt));
+
+    if (Array.isArray(giveaway.roleBonuses) && giveaway.roleBonuses.length) {
+        const bonusText = giveaway.roleBonuses
+            .map(item => `<@&${item.roleId}> +${item.extraEntries}`)
+            .join('\n')
+            .slice(0, 1024);
+        embed.addFields({ name: 'Bonus Entries', value: bonusText || 'None', inline: false });
+    }
 
     return embed;
 };
@@ -494,7 +546,13 @@ client.loadGiveaways = () => {
                     endAt: Number(item.endAt || Date.now()),
                     entries: Array.isArray(item.entries) ? [...new Set(item.entries.map(String))] : [],
                     ended: Boolean(item.ended),
-                    winnerIds: Array.isArray(item.winnerIds) ? [...new Set(item.winnerIds.map(String))] : []
+                    winnerIds: Array.isArray(item.winnerIds) ? [...new Set(item.winnerIds.map(String))] : [],
+                    roleBonuses: Array.isArray(item.roleBonuses)
+                        ? item.roleBonuses
+                            .filter(b => b && typeof b === 'object')
+                            .map(b => ({ roleId: String(b.roleId || ''), extraEntries: Math.max(1, Number(b.extraEntries || 1)) }))
+                            .filter(b => b.roleId)
+                        : []
                 }))
                 .filter(item => item.channelId && item.messageId && item.hostId && item.prize)
             : [];
@@ -564,6 +622,55 @@ client.pickRandomUnique = (source, count, excluded = new Set()) => {
     return picked;
 };
 
+client.pickWeightedWinners = async (giveaway, count, excluded = new Set()) => {
+    const entries = Array.isArray(giveaway.entries) ? [...new Set(giveaway.entries)] : [];
+    if (!entries.length) return [];
+
+    const guild = client.guilds.cache.get(giveaway.guildId) || await client.guilds.fetch(giveaway.guildId).catch(() => null);
+    if (!guild) {
+        return client.pickRandomUnique(entries, count, excluded);
+    }
+
+    const weightedPool = [];
+    const bonusRules = Array.isArray(giveaway.roleBonuses) ? giveaway.roleBonuses : [];
+
+    for (const userId of entries) {
+        if (excluded.has(userId)) continue;
+
+        let tickets = 1;
+        if (bonusRules.length) {
+            const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+            if (member) {
+                for (const rule of bonusRules) {
+                    if (member.roles.cache.has(rule.roleId)) {
+                        tickets += Math.max(1, Number(rule.extraEntries || 1));
+                    }
+                }
+            }
+        }
+
+        const safeTickets = Math.min(100, Math.max(1, tickets));
+        for (let i = 0; i < safeTickets; i++) {
+            weightedPool.push(userId);
+        }
+    }
+
+    if (!weightedPool.length) return [];
+
+    const winners = [];
+    while (winners.length < count && weightedPool.length > 0) {
+        const idx = Math.floor(Math.random() * weightedPool.length);
+        const selected = weightedPool[idx];
+        winners.push(selected);
+
+        for (let i = weightedPool.length - 1; i >= 0; i--) {
+            if (weightedPool[i] === selected) weightedPool.splice(i, 1);
+        }
+    }
+
+    return winners;
+};
+
 client.resolveGiveawayMessage = async (giveaway) => {
     const guild = client.guilds.cache.get(giveaway.guildId) || await client.guilds.fetch(giveaway.guildId).catch(() => null);
     if (!guild) return null;
@@ -582,7 +689,7 @@ client.finalizeGiveaway = async (guildId, giveawayId) => {
     if (!giveaway || giveaway.ended) return giveaway || null;
 
     giveaway.ended = true;
-    const winners = client.pickRandomUnique(giveaway.entries || [], giveaway.winnerCount || 1);
+    const winners = await client.pickWeightedWinners(giveaway, giveaway.winnerCount || 1);
     giveaway.winnerIds = winners;
     client.upsertGiveaway(guildId, giveaway);
 
@@ -613,7 +720,7 @@ client.rerollGiveaway = async (guildId, giveawayId, count = 1, actorId = null) =
     if (!giveaway || !giveaway.ended) return { giveaway: null, winners: [] };
 
     const excluded = new Set(giveaway.winnerIds || []);
-    const winners = client.pickRandomUnique(giveaway.entries || [], Math.max(1, count), excluded);
+    const winners = await client.pickWeightedWinners(giveaway, Math.max(1, count), excluded);
     if (!winners.length) return { giveaway, winners: [] };
 
     giveaway.winnerIds = [...new Set([...(giveaway.winnerIds || []), ...winners])];
@@ -1426,6 +1533,7 @@ client.on('interactionCreate', async (interaction) => {
             const winnersRaw = interaction.fields.getTextInputValue('gv_winners').trim();
             const prize = interaction.fields.getTextInputValue('gv_prize').trim();
             const description = (interaction.fields.getTextInputValue('gv_description') || '').trim();
+            const roleBonusRaw = (interaction.fields.getTextInputValue('gv_role_bonus') || '').trim();
 
             const durationMs = client.parseGiveawayDurationMs(durationRaw);
             const winnerCount = Number(winnersRaw);
@@ -1446,6 +1554,14 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: 'Prize is required.', ephemeral: true });
             }
 
+            const parsedBonuses = client.parseGiveawayRoleBonuses(roleBonusRaw, interaction.guild);
+            if (roleBonusRaw && parsedBonuses.bonuses.length === 0) {
+                return interaction.reply({
+                    content: 'Bonus role format is invalid. Use: `<@&roleId>:2` or `roleId:2` (comma-separated).',
+                    ephemeral: true
+                });
+            }
+
             const now = Date.now();
             const giveaway = {
                 id: String(BigInt(now) * 1000000n + BigInt(Math.floor(Math.random() * 1_000_000))),
@@ -1461,7 +1577,8 @@ client.on('interactionCreate', async (interaction) => {
                 endAt: now + durationMs,
                 entries: [],
                 ended: false,
-                winnerIds: []
+                winnerIds: [],
+                roleBonuses: parsedBonuses.bonuses
             };
 
             const msg = await interaction.channel.send({
@@ -1474,7 +1591,9 @@ client.on('interactionCreate', async (interaction) => {
             client.scheduleGiveaway(giveaway);
 
             return interaction.reply({
-                content: `The giveaway was successfully created! ID: ${giveaway.id}`,
+                content: parsedBonuses.invalidTokens.length
+                    ? `The giveaway was successfully created! ID: ${giveaway.id}\nIgnored invalid bonus entries: ${parsedBonuses.invalidTokens.join(', ')}`
+                    : `The giveaway was successfully created! ID: ${giveaway.id}`,
                 ephemeral: true
             });
         }

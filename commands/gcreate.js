@@ -48,11 +48,20 @@ module.exports = {
             .setRequired(false)
             .setMaxLength(500);
 
+        const roleBonus = new TextInputBuilder()
+            .setCustomId('gv_role_bonus')
+            .setLabel('Bonus Entries By Role (optional)')
+            .setPlaceholder('<@&roleId>:2, <@&roleId>:1')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(300);
+
         modal.addComponents(
             new ActionRowBuilder().addComponents(duration),
             new ActionRowBuilder().addComponents(winners),
             new ActionRowBuilder().addComponents(prize),
-            new ActionRowBuilder().addComponents(description)
+            new ActionRowBuilder().addComponents(description),
+            new ActionRowBuilder().addComponents(roleBonus)
         );
 
         return interaction.showModal(modal);
