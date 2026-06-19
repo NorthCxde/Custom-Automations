@@ -12,11 +12,18 @@ module.exports = {
                 .setRequired(true)),
     async execute({ client, message, args }) {
         if (!message.guild) return message.reply('This command must be used in a server channel.');
-        if (!args[0]) return message.reply('Usage: ?unmute @user or ?unmute userId');
+        if (!args[0]) return message.reply('Usage: ?unmute @user [@user2 ...]');
 
-        const targetId = args[0].replace(/[<@!>]/g, '');
-        if (!/^[0-9]{17,19}$/.test(targetId)) {
-            return message.reply('Please provide a valid user mention or user ID.');
+        const parsedIds = [];
+        for (const arg of args) {
+            const normalized = arg.replace(/[<@!>]/g, '');
+            if (!/^[0-9]{17,19}$/.test(normalized)) break;
+            parsedIds.push(normalized);
+        }
+
+        const targetIds = [...new Set(parsedIds)];
+        if (!targetIds.length) {
+            return message.reply('Please provide at least one valid user mention or user ID.');
         }
 
         try {
@@ -24,48 +31,72 @@ module.exports = {
                 return message.reply('I do not have permission to untimeout members.');
             }
 
-            const member = await message.guild.members.fetch(targetId);
-            if (!member) {
-                return message.reply('Could not find that member in this guild.');
-            }
-
-            await member.timeout(null, 'Removing timeout');
-            if (client.addModLog) {
-                let robloxId = null;
+            const results = await Promise.all(targetIds.map(async (targetId) => {
                 try {
-                    if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(message.guild.id, targetId);
-                } catch (err) {
-                    console.error('Failed to lookup robloxId for unmute modlog:', err);
-                }
-                client.addModLog(message.guild.id, {
-                    action: 'Unmute',
-                    userId: targetId,
-                    userTag: `<@${targetId}>`,
-                    robloxId,
-                    moderatorId: message.author.id,
-                    moderatorTag: message.author.tag,
-                    timestamp: new Date().toISOString()
-                });
-                if (client.logToChannel) {
-                    const embed = new EmbedBuilder()
-                        .setColor(0x000000)
-                        .setTitle('Unmute Action')
-                        .setDescription(`Case by ${message.author.tag}`)
-                        .addFields(
-                            { name: 'User(s)', value: `<@${targetId}>`, inline: true },
-                            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
-                            { name: 'Reason', value: 'Removing timeout', inline: false },
-                            { name: 'Target IDs', value: targetId, inline: false }
-                        )
-                        .setTimestamp();
+                    const member = await message.guild.members.fetch(targetId);
+                    if (!member) {
+                        return { targetId, success: false, reason: 'Member not found' };
+                    }
 
-                    await client.logToChannel(message.guild, { embeds: [embed] });
+                    await member.timeout(null, 'Removing timeout');
+                    let robloxId = null;
+                    try {
+                        if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(message.guild.id, targetId);
+                    } catch (err) {
+                        console.error('Failed to lookup robloxId for unmute modlog:', err);
+                    }
+
+                    if (client.addModLog) {
+                        client.addModLog(message.guild.id, {
+                            action: 'Unmute',
+                            userId: targetId,
+                            userTag: `<@${targetId}>`,
+                            robloxId,
+                            moderatorId: message.author.id,
+                            moderatorTag: message.author.tag,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+
+                    return { targetId, success: true };
+                } catch (error) {
+                    console.error(error);
+                    return { targetId, success: false, reason: error.message };
                 }
+            }));
+
+            const successIds = results.filter(result => result.success).map(result => result.targetId);
+            const failedCount = results.length - successIds.length;
+
+            if (successIds.length && client.logToChannel) {
+                const mentions = successIds.map(id => `<@${id}>`).join(', ');
+                const embed = new EmbedBuilder()
+                    .setColor(0x000000)
+                    .setTitle('Unmute Action')
+                    .setDescription(`Case by ${message.author.tag}`)
+                    .addFields(
+                        { name: 'User(s)', value: mentions, inline: true },
+                        { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
+                        { name: 'Reason', value: 'Removing timeout', inline: false },
+                        { name: 'Target IDs', value: successIds.join(', '), inline: false }
+                    )
+                    .setTimestamp();
+
+                await client.logToChannel(message.guild, { embeds: [embed] });
             }
-            return message.channel.send(`Removed timeout from <@${targetId}>.`);
+
+            const replyParts = [];
+            if (successIds.length) {
+                replyParts.push(`Removed timeout from ${successIds.map(id => `<@${id}>`).join(', ')}.`);
+            }
+            if (failedCount) {
+                replyParts.push(`${failedCount} user(s) could not be unmuted.`);
+            }
+
+            return client.sendPrefixCommandResponse(message.channel, replyParts.join(' '));
         } catch (error) {
             console.error(error);
-            return message.reply('Unable to remove timeout. The user may not be timed out, or the ID may be invalid.');
+            return message.reply('Unable to remove timeout for the provided users.');
         }
     },
     async executeInteraction({ client, interaction }) {

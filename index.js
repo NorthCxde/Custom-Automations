@@ -36,6 +36,7 @@ const modLogsFile = path.join(dataPath, "modlogs.json");
 const bloxlinkFile = path.join(dataPath, "bloxlink.json");
 const bloxlinkHistoryFile = path.join(dataPath, "bloxlinkHistory.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
+const prefixStateFile = path.join(dataPath, "prefix-state.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -46,7 +47,46 @@ client.pendingPermsUndoActions = new Map();
 client.bloxlink = new Map();
 client.bloxlinkHistory = new Map();
 client.slashCommands = new Map();
-client.prefixCommandsEnabled = false; // disabled by default; use /enablecommands to turn on
+client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
+client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
+
+client.sendPrefixCommandResponse = async (channel, content, options = {}) => {
+    try {
+        const msg = await channel.send({ content, ...options });
+        if (client.prefixCommandReactionEmojiId) {
+            await msg.react(client.prefixCommandReactionEmojiId).catch(err => console.error('Failed to react to prefix command response:', err));
+        }
+        return msg;
+    } catch (error) {
+        console.error('Failed to send prefix command response:', error);
+        return null;
+    }
+};
+
+client.loadPrefixCommandState = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    if (!fs.existsSync(prefixStateFile)) {
+        fs.writeFileSync(prefixStateFile, JSON.stringify({ enabled: false }, null, 2), 'utf8');
+    }
+
+    let parsed = { enabled: false };
+    try {
+        parsed = JSON.parse(fs.readFileSync(prefixStateFile, 'utf8') || '{"enabled":false}');
+    } catch (err) {
+        console.error('Failed to read prefix state file:', err);
+    }
+
+    client.prefixCommandsEnabled = Boolean(parsed.enabled);
+};
+
+client.savePrefixCommandState = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    fs.writeFileSync(prefixStateFile, JSON.stringify({ enabled: Boolean(client.prefixCommandsEnabled) }, null, 2), 'utf8');
+};
 
 client.loadCommands = () => {
     client.commands.clear();
@@ -511,6 +551,7 @@ client.loadModLogs();
 client.loadBloxlink();
 client.loadBloxlinkHistory();
 client.loadBoostChannels();
+client.loadPrefixCommandState();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;

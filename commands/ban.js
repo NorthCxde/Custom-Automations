@@ -75,7 +75,7 @@ module.exports = {
                 replyParts.push(`${failures.length} user(s) could not be banned. Check permissions or existing bans.`);
             }
 
-            return message.channel.send(replyParts.join(' '));
+            return client.sendPrefixCommandResponse(message.channel, replyParts.join(' '));
         } catch (error) {
             console.error(error);
             return message.reply('Unable to ban the provided users. Check IDs and permissions.');

@@ -100,7 +100,7 @@ module.exports = {
                 replyParts.push(`${failures.length} user(s) could not be timed out.`);
             }
 
-            return message.channel.send(replyParts.join(' '));
+            return client.sendPrefixCommandResponse(message.channel, replyParts.join(' '));
         } catch (error) {
             console.error(error);
             return message.reply('Unable to timeout the provided users. Check IDs and permissions.');

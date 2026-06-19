@@ -44,7 +44,7 @@ module.exports = {
                 });
                 if (client.logToChannel) await client.logToChannel(message.guild, `Unban: <@${targetId}> by ${message.author.tag}`);
             }
-            return message.channel.send(`Unbanned <@${targetId}>.`);
+            return client.sendPrefixCommandResponse(message.channel, `Unbanned <@${targetId}>.`);
         } catch (error) {
             console.error(error);
             return message.reply('Unable to unban that user. They may not be banned or the ID may be invalid.');
