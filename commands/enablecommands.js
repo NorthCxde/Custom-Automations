@@ -18,10 +18,13 @@ module.exports = {
     async executeInteraction({ client, interaction }) {
         const action = interaction.options.getString('action');
         client.prefixCommandsEnabled = action === 'enable';
+        if (typeof client.savePrefixCommandState === 'function') {
+            client.savePrefixCommandState();
+        }
 
         const state = client.prefixCommandsEnabled ? 'enabled' : 'disabled';
         await interaction.reply({
-            content: `Prefix commands (e.g. \`?ban\`) are now **${state}**.`,
+            content: `Prefix commands (e.g. \`?ban\`) are now **${state}** and this setting is saved across restarts.`,
             ephemeral: true
         });
     }
