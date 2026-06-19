@@ -58,6 +58,7 @@ const bloxlinkHistoryFile = path.join(dataPath, "bloxlinkHistory.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
 const autorespondersFile = path.join(dataPath, "autoresponders.json");
+const giveawaysFile = path.join(dataPath, "giveaways.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -72,6 +73,8 @@ client.slashCommands = new Map();
 client.autoresponders = new Map();
 client.autoresponderDrafts = new Map();
 client.autoresponderCooldowns = new Map();
+client.giveaways = new Map();
+client.giveawayTimers = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 
@@ -379,6 +382,276 @@ client.buildAutoresponderConfigPayload = (draft) => {
             controlsRow
         ]
     };
+};
+
+client.parseGiveawayDurationMs = (input) => {
+    if (!input || typeof input !== 'string') return null;
+    const normalized = input.trim().toLowerCase();
+    const regex = /(\d+)\s*(d|day|days|h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds)/g;
+    let total = 0;
+    let matched = false;
+    let match;
+
+    while ((match = regex.exec(normalized)) !== null) {
+        matched = true;
+        const value = Number(match[1]);
+        const unit = match[2];
+        if (!Number.isFinite(value) || value <= 0) continue;
+
+        if (unit.startsWith('d')) total += value * 24 * 60 * 60 * 1000;
+        else if (unit.startsWith('h')) total += value * 60 * 60 * 1000;
+        else if (unit.startsWith('m')) total += value * 60 * 1000;
+        else total += value * 1000;
+    }
+
+    if (!matched) return null;
+    if (total < 5_000) return null;
+    return total;
+};
+
+client.formatGiveawayWinnersValue = (ids) => {
+    if (!Array.isArray(ids) || ids.length === 0) return 'No winner yet';
+    return ids.map(id => `<@${id}>`).join(', ');
+};
+
+client.buildGiveawayEmbed = (giveaway) => {
+    const endUnix = Math.floor(Number(giveaway.endAt) / 1000);
+    const ended = Boolean(giveaway.ended) || Date.now() >= Number(giveaway.endAt);
+
+    const embed = new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle(giveaway.prize || 'Giveaway')
+        .setDescription(giveaway.description || null)
+        .addFields(
+            {
+                name: ended ? 'Ended' : 'Ends',
+                value: ended
+                    ? `<t:${endUnix}:R> (<t:${endUnix}:F>)`
+                    : `<t:${endUnix}:R> (<t:${endUnix}:F>)`,
+                inline: false
+            },
+            { name: 'Hosted by', value: `<@${giveaway.hostId}>`, inline: true },
+            { name: 'Entries', value: String(Array.isArray(giveaway.entries) ? giveaway.entries.length : 0), inline: true },
+            { name: 'Winners', value: ended ? client.formatGiveawayWinnersValue(giveaway.winnerIds) : String(giveaway.winnerCount || 1), inline: true }
+        )
+        .setTimestamp(Number(giveaway.endAt));
+
+    return embed;
+};
+
+client.buildGiveawayActionRow = (giveaway) => {
+    if (giveaway.ended) {
+        return new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setLabel('Giveaway Summary')
+                .setStyle(ButtonStyle.Link)
+                .setURL(`https://discord.com/channels/${giveaway.guildId}/${giveaway.channelId}/${giveaway.messageId}`)
+        );
+    }
+
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`gv_join:${giveaway.id}`)
+            .setLabel('🎉')
+            .setStyle(ButtonStyle.Primary)
+    );
+};
+
+client.loadGiveaways = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(giveawaysFile)) fs.writeFileSync(giveawaysFile, '{}', 'utf8');
+
+    let raw = '{}';
+    try {
+        raw = fs.readFileSync(giveawaysFile, 'utf8') || '{}';
+    } catch (err) {
+        console.error('Failed to read giveaways file:', err);
+    }
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(raw);
+    } catch (err) {
+        console.error('Failed to parse giveaways file:', err);
+    }
+
+    client.giveaways.clear();
+    for (const [guildId, entries] of Object.entries(parsed)) {
+        const normalized = Array.isArray(entries)
+            ? entries
+                .filter(item => item && typeof item === 'object')
+                .map(item => ({
+                    id: String(item.id || `gv_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`),
+                    guildId: String(guildId),
+                    channelId: String(item.channelId || ''),
+                    messageId: String(item.messageId || ''),
+                    hostId: String(item.hostId || ''),
+                    prize: String(item.prize || ''),
+                    description: String(item.description || ''),
+                    durationMs: Number(item.durationMs || 0),
+                    winnerCount: Math.max(1, Number(item.winnerCount || 1)),
+                    createdAt: Number(item.createdAt || Date.now()),
+                    endAt: Number(item.endAt || Date.now()),
+                    entries: Array.isArray(item.entries) ? [...new Set(item.entries.map(String))] : [],
+                    ended: Boolean(item.ended),
+                    winnerIds: Array.isArray(item.winnerIds) ? [...new Set(item.winnerIds.map(String))] : []
+                }))
+                .filter(item => item.channelId && item.messageId && item.hostId && item.prize)
+            : [];
+
+        client.giveaways.set(guildId, normalized);
+    }
+};
+
+client.saveGiveaways = () => {
+    const out = {};
+    for (const [guildId, entries] of client.giveaways.entries()) {
+        out[guildId] = entries;
+    }
+    fs.writeFileSync(giveawaysFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getGuildGiveaways = (guildId) => {
+    return client.giveaways.get(guildId) || [];
+};
+
+client.getGiveaway = (guildId, giveawayId) => {
+    return client.getGuildGiveaways(guildId).find(item => item.id === giveawayId) || null;
+};
+
+client.upsertGiveaway = (guildId, giveaway) => {
+    const existing = client.getGuildGiveaways(guildId);
+    const idx = existing.findIndex(item => item.id === giveaway.id);
+    const next = [...existing];
+    if (idx === -1) next.push(giveaway);
+    else next[idx] = { ...next[idx], ...giveaway };
+    client.giveaways.set(guildId, next);
+    client.saveGiveaways();
+};
+
+client.cancelGiveawayTimer = (guildId, giveawayId) => {
+    const timerKey = `${guildId}:${giveawayId}`;
+    const timer = client.giveawayTimers.get(timerKey);
+    if (timer) {
+        clearTimeout(timer);
+        client.giveawayTimers.delete(timerKey);
+    }
+};
+
+client.deleteGiveawayRecord = (guildId, giveawayId) => {
+    const existing = client.getGuildGiveaways(guildId);
+    const next = existing.filter(item => item.id !== giveawayId);
+    client.giveaways.set(guildId, next);
+    client.saveGiveaways();
+    client.cancelGiveawayTimer(guildId, giveawayId);
+};
+
+client.pickRandomUnique = (source, count, excluded = new Set()) => {
+    const pool = source.filter(id => !excluded.has(id));
+    const picked = [];
+    while (pool.length > 0 && picked.length < count) {
+        const idx = Math.floor(Math.random() * pool.length);
+        picked.push(pool[idx]);
+        pool.splice(idx, 1);
+    }
+    return picked;
+};
+
+client.resolveGiveawayMessage = async (giveaway) => {
+    const guild = client.guilds.cache.get(giveaway.guildId) || await client.guilds.fetch(giveaway.guildId).catch(() => null);
+    if (!guild) return null;
+
+    const channel = guild.channels.cache.get(giveaway.channelId) || await guild.channels.fetch(giveaway.channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) return null;
+
+    const message = await channel.messages.fetch(giveaway.messageId).catch(() => null);
+    if (!message) return null;
+
+    return { guild, channel, message };
+};
+
+client.finalizeGiveaway = async (guildId, giveawayId) => {
+    const giveaway = client.getGiveaway(guildId, giveawayId);
+    if (!giveaway || giveaway.ended) return giveaway || null;
+
+    giveaway.ended = true;
+    const winners = client.pickRandomUnique(giveaway.entries || [], giveaway.winnerCount || 1);
+    giveaway.winnerIds = winners;
+    client.upsertGiveaway(guildId, giveaway);
+
+    const resolved = await client.resolveGiveawayMessage(giveaway);
+    if (resolved) {
+        const { channel, message } = resolved;
+        await message.edit({
+            embeds: [client.buildGiveawayEmbed(giveaway)],
+            components: [client.buildGiveawayActionRow(giveaway)]
+        }).catch(() => null);
+
+        if (winners.length) {
+            await channel.send({
+                content: `Congratulations ${winners.map(id => `<@${id}>`).join(', ')}! You won the **${giveaway.prize}**!`
+            }).catch(() => null);
+        } else {
+            await channel.send({ content: `Giveaway **${giveaway.prize}** ended with no valid entries.` }).catch(() => null);
+        }
+    }
+
+    client.cancelGiveawayTimer(guildId, giveawayId);
+
+    return giveaway;
+};
+
+client.rerollGiveaway = async (guildId, giveawayId, count = 1, actorId = null) => {
+    const giveaway = client.getGiveaway(guildId, giveawayId);
+    if (!giveaway || !giveaway.ended) return { giveaway: null, winners: [] };
+
+    const excluded = new Set(giveaway.winnerIds || []);
+    const winners = client.pickRandomUnique(giveaway.entries || [], Math.max(1, count), excluded);
+    if (!winners.length) return { giveaway, winners: [] };
+
+    giveaway.winnerIds = [...new Set([...(giveaway.winnerIds || []), ...winners])];
+    client.upsertGiveaway(guildId, giveaway);
+
+    const resolved = await client.resolveGiveawayMessage(giveaway);
+    if (resolved) {
+        const { channel } = resolved;
+        const actorPrefix = actorId ? `<@${actorId}> rerolled the giveaway!` : 'Giveaway rerolled!';
+        await channel.send({
+            content: `${actorPrefix} Congratulations ${winners.map(id => `<@${id}>`).join(', ')}!`
+        }).catch(() => null);
+    }
+
+    return { giveaway, winners };
+};
+
+client.scheduleGiveaway = (giveaway) => {
+    if (!giveaway || giveaway.ended) return;
+    const timerKey = `${giveaway.guildId}:${giveaway.id}`;
+
+    const existing = client.giveawayTimers.get(timerKey);
+    if (existing) clearTimeout(existing);
+
+    const delay = Math.max(0, Number(giveaway.endAt) - Date.now());
+    const timer = setTimeout(() => {
+        client.finalizeGiveaway(giveaway.guildId, giveaway.id)
+            .catch(err => console.error('Failed to finalize giveaway:', err));
+    }, delay);
+    if (typeof timer.unref === 'function') timer.unref();
+    client.giveawayTimers.set(timerKey, timer);
+};
+
+client.scheduleGiveawaysOnStartup = () => {
+    for (const entries of client.giveaways.values()) {
+        for (const giveaway of entries) {
+            if (giveaway.ended) continue;
+            if (Date.now() >= giveaway.endAt) {
+                client.finalizeGiveaway(giveaway.guildId, giveaway.id)
+                    .catch(err => console.error('Failed to finalize overdue giveaway:', err));
+            } else {
+                client.scheduleGiveaway(giveaway);
+            }
+        }
+    }
 };
 
 client.loadCommands = () => {
@@ -958,6 +1231,7 @@ client.loadBloxlinkHistory();
 client.loadBoostChannels();
 client.loadPrefixCommandState();
 client.loadAutoresponders();
+client.loadGiveaways();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -1035,6 +1309,11 @@ client.deletePendingGlobalModUndoAction = (key) => {
     client.pendingGlobalModUndoActions.delete(key);
 };
 
+client.isIgnorableInteractionError = (error) => {
+    const code = Number(error?.code ?? error?.rawError?.code);
+    return code === 40060 || code === 10062;
+};
+
 client.syncSlashCommands = async () => {
     const slashData = Array.from(client.slashCommands.values())
         .map(cmd => cmd.data.toJSON());
@@ -1063,6 +1342,7 @@ client.on('clientReady', async () => {
     });
 
     client.scheduleBloxlinkCacheRefresh();
+    client.scheduleGiveawaysOnStartup();
 });
 
 client.on('guildBanAdd', async (ban) => {
@@ -1089,6 +1369,7 @@ client.on('guildMemberAdd', async (member) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
+    try {
     if (interaction.isChatInputCommand()) {
         if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
@@ -1106,6 +1387,10 @@ client.on('interactionCreate', async (interaction) => {
         try {
             await command.executeInteraction({ client, interaction });
         } catch (err) {
+            if (client.isIgnorableInteractionError(err)) {
+                console.warn(`[Interaction] Ignoring already-acknowledged/expired command interaction for /${interaction.commandName}.`);
+                return;
+            }
             console.error(err);
             try {
                 if (interaction.replied || interaction.deferred) {
@@ -1114,13 +1399,79 @@ client.on('interactionCreate', async (interaction) => {
                     await interaction.reply({ content: 'There was an error executing that command.', ephemeral: true });
                 }
             } catch (replyErr) {
-                console.error('Failed to send error response to interaction:', replyErr);
+                if (client.isIgnorableInteractionError(replyErr)) {
+                    console.warn('[Interaction] Failed to send command error response because the interaction was already acknowledged or expired.');
+                } else {
+                    console.error('Failed to send error response to interaction:', replyErr);
+                }
             }
         }
         return;
     }
 
     if (interaction.isModalSubmit()) {
+        if (interaction.customId === 'gv_create_modal') {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+            }
+
+            const durationRaw = interaction.fields.getTextInputValue('gv_duration').trim();
+            const winnersRaw = interaction.fields.getTextInputValue('gv_winners').trim();
+            const prize = interaction.fields.getTextInputValue('gv_prize').trim();
+            const description = (interaction.fields.getTextInputValue('gv_description') || '').trim();
+
+            const durationMs = client.parseGiveawayDurationMs(durationRaw);
+            const winnerCount = Number(winnersRaw);
+
+            if (!durationMs) {
+                return interaction.reply({
+                    content: 'Invalid duration. Examples: `10 minutes`, `1h`, `2d 3h`.',
+                    ephemeral: true
+                });
+            }
+            if (!Number.isInteger(winnerCount) || winnerCount < 1 || winnerCount > 25) {
+                return interaction.reply({
+                    content: 'Number of winners must be a whole number between 1 and 25.',
+                    ephemeral: true
+                });
+            }
+            if (!prize) {
+                return interaction.reply({ content: 'Prize is required.', ephemeral: true });
+            }
+
+            const now = Date.now();
+            const giveaway = {
+                id: String(BigInt(now) * 1000000n + BigInt(Math.floor(Math.random() * 1_000_000))),
+                guildId: interaction.guildId,
+                channelId: interaction.channelId,
+                messageId: '',
+                hostId: interaction.user.id,
+                prize,
+                description,
+                durationMs,
+                winnerCount,
+                createdAt: now,
+                endAt: now + durationMs,
+                entries: [],
+                ended: false,
+                winnerIds: []
+            };
+
+            const msg = await interaction.channel.send({
+                embeds: [client.buildGiveawayEmbed(giveaway)],
+                components: [client.buildGiveawayActionRow(giveaway)]
+            });
+
+            giveaway.messageId = msg.id;
+            client.upsertGiveaway(interaction.guildId, giveaway);
+            client.scheduleGiveaway(giveaway);
+
+            return interaction.reply({
+                content: `The giveaway was successfully created! ID: ${giveaway.id}`,
+                ephemeral: true
+            });
+        }
+
         if (interaction.customId !== 'ar_create_modal') return;
 
         if (!interaction.guild) {
@@ -1163,6 +1514,71 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('gv_join:') || interaction.customId.startsWith('gv_leave:')) {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This button must be used in a server channel.', ephemeral: true });
+            }
+
+            const giveawayId = interaction.customId.split(':')[1];
+            const giveaway = client.getGiveaway(interaction.guildId, giveawayId);
+            if (!giveaway) {
+                return interaction.reply({ content: 'This giveaway could not be found.', ephemeral: true });
+            }
+            if (giveaway.ended) {
+                return interaction.reply({ content: 'This giveaway has already ended.', ephemeral: true });
+            }
+
+            const isJoined = giveaway.entries.includes(interaction.user.id);
+
+            if (interaction.customId.startsWith('gv_join:')) {
+                if (isJoined) {
+                    const row = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`gv_leave:${giveaway.id}`)
+                            .setLabel('Leave Giveaway')
+                            .setStyle(ButtonStyle.Danger)
+                    );
+
+                    return interaction.reply({
+                        content: 'You have already entered this giveaway!',
+                        components: [row],
+                        ephemeral: true
+                    });
+                }
+
+                giveaway.entries.push(interaction.user.id);
+                giveaway.entries = [...new Set(giveaway.entries)];
+                client.upsertGiveaway(interaction.guildId, giveaway);
+
+                const resolved = await client.resolveGiveawayMessage(giveaway);
+                if (resolved) {
+                    await resolved.message.edit({
+                        embeds: [client.buildGiveawayEmbed(giveaway)],
+                        components: [client.buildGiveawayActionRow(giveaway)]
+                    }).catch(() => null);
+                }
+
+                return interaction.reply({ content: 'You are now entered in this giveaway.', ephemeral: true });
+            }
+
+            if (!isJoined) {
+                return interaction.reply({ content: 'You are not currently entered in this giveaway.', ephemeral: true });
+            }
+
+            giveaway.entries = giveaway.entries.filter(id => id !== interaction.user.id);
+            client.upsertGiveaway(interaction.guildId, giveaway);
+
+            const resolved = await client.resolveGiveawayMessage(giveaway);
+            if (resolved) {
+                await resolved.message.edit({
+                    embeds: [client.buildGiveawayEmbed(giveaway)],
+                    components: [client.buildGiveawayActionRow(giveaway)]
+                }).catch(() => null);
+            }
+
+            return interaction.reply({ content: 'You have left this giveaway.', ephemeral: true });
+        }
+
         if (interaction.customId === 'ar_create_start' || interaction.customId === 'ar_toggle_exact' || interaction.customId === 'ar_save' || interaction.customId === 'ar_cancel' || interaction.customId === 'ar_config_users') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -1772,6 +2188,14 @@ client.on('interactionCreate', async (interaction) => {
 
     await interaction.reply({ content: `Allowed roles updated: ${roleList}`, ephemeral: true });
     await client.logPermsAudit(interaction, selectedRoleNames, { hadExistingPermConfig, previousRoleIds });
+    } catch (err) {
+        if (client.isIgnorableInteractionError(err)) {
+            const label = interaction.commandName || interaction.customId || interaction.type;
+            console.warn(`[Interaction] Ignoring already-acknowledged/expired interaction: ${label}`);
+            return;
+        }
+        console.error('[Interaction] Unhandled interaction error:', err);
+    }
 });
 
 // Boost message types (plain boost + tier 1/2/3 upgrades)
