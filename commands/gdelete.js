@@ -9,7 +9,7 @@ module.exports = {
         .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
         .addStringOption(option =>
             option.setName('giveaway_id')
-                .setDescription('ID of giveaway to delete')
+                .setDescription('Giveaway ID or giveaway message ID to delete')
                 .setRequired(true)
         ),
     async executeInteraction({ client, interaction }) {
@@ -18,13 +18,13 @@ module.exports = {
         }
 
         const giveawayId = interaction.options.getString('giveaway_id');
-        const giveaway = client.getGiveaway(interaction.guildId, giveawayId);
+        const giveaway = client.findGiveawayByInput(interaction.guildId, giveawayId);
         if (!giveaway) {
             return interaction.reply({ content: 'Giveaway not found for this server.', ephemeral: true });
         }
 
         if (!giveaway.ended) {
-            await client.finalizeGiveaway(interaction.guildId, giveawayId);
+            await client.finalizeGiveaway(interaction.guildId, giveaway.id);
         }
 
         const resolved = await client.resolveGiveawayMessage(giveaway).catch(() => null);
@@ -32,7 +32,7 @@ module.exports = {
             await resolved.message.delete().catch(() => null);
         }
 
-        client.deleteGiveawayRecord(interaction.guildId, giveawayId);
+        client.deleteGiveawayRecord(interaction.guildId, giveaway.id);
 
         return interaction.reply({
             content: `Giveaway ended and deleted. ID: ${giveawayId}`,

@@ -9,7 +9,7 @@ module.exports = {
         .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
         .addStringOption(option =>
             option.setName('giveaway_id')
-                .setDescription('The giveaway ID shown when it was created')
+                .setDescription('Giveaway ID or giveaway message ID')
                 .setRequired(true)
         )
         .addIntegerOption(option =>
@@ -27,7 +27,7 @@ module.exports = {
         const giveawayId = interaction.options.getString('giveaway_id');
         const count = interaction.options.getInteger('count') || 1;
 
-        const giveaway = client.getGiveaway(interaction.guildId, giveawayId);
+        const giveaway = client.findGiveawayByInput(interaction.guildId, giveawayId);
         if (!giveaway) {
             return interaction.reply({ content: 'Giveaway not found for this server.', ephemeral: true });
         }
@@ -35,7 +35,7 @@ module.exports = {
             return interaction.reply({ content: 'You can only reroll a giveaway after it has ended.', ephemeral: true });
         }
 
-        const result = await client.rerollGiveaway(interaction.guildId, giveawayId, count, interaction.user.id);
+        const result = await client.rerollGiveaway(interaction.guildId, giveaway.id, count, interaction.user.id);
         if (!result.giveaway) {
             return interaction.reply({ content: 'Giveaway not found.', ephemeral: true });
         }

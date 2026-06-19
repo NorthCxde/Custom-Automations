@@ -419,7 +419,7 @@ client.buildGiveawayEmbed = (giveaway) => {
     const ended = Boolean(giveaway.ended) || Date.now() >= Number(giveaway.endAt);
 
     const embed = new EmbedBuilder()
-        .setColor(0x5865F2)
+        .setColor(0x2F3136)
         .setTitle(giveaway.prize || 'Giveaway')
         .setDescription(giveaway.description || null)
         .addFields(
@@ -441,12 +441,7 @@ client.buildGiveawayEmbed = (giveaway) => {
 
 client.buildGiveawayActionRow = (giveaway) => {
     if (giveaway.ended) {
-        return new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setLabel('Giveaway Summary')
-                .setStyle(ButtonStyle.Link)
-                .setURL(`https://discord.com/channels/${giveaway.guildId}/${giveaway.channelId}/${giveaway.messageId}`)
-        );
+        return null;
     }
 
     return new ActionRowBuilder().addComponents(
@@ -455,6 +450,11 @@ client.buildGiveawayActionRow = (giveaway) => {
             .setLabel('🎉')
             .setStyle(ButtonStyle.Primary)
     );
+};
+
+client.buildGiveawayComponents = (giveaway) => {
+    const row = client.buildGiveawayActionRow(giveaway);
+    return row ? [row] : [];
 };
 
 client.loadGiveaways = () => {
@@ -517,6 +517,13 @@ client.getGuildGiveaways = (guildId) => {
 
 client.getGiveaway = (guildId, giveawayId) => {
     return client.getGuildGiveaways(guildId).find(item => item.id === giveawayId) || null;
+};
+
+client.findGiveawayByInput = (guildId, input) => {
+    const normalized = String(input || '').trim();
+    if (!normalized) return null;
+    const giveaways = client.getGuildGiveaways(guildId);
+    return giveaways.find(item => item.id === normalized || item.messageId === normalized) || null;
 };
 
 client.upsertGiveaway = (guildId, giveaway) => {
@@ -584,7 +591,7 @@ client.finalizeGiveaway = async (guildId, giveawayId) => {
         const { channel, message } = resolved;
         await message.edit({
             embeds: [client.buildGiveawayEmbed(giveaway)],
-            components: [client.buildGiveawayActionRow(giveaway)]
+            components: client.buildGiveawayComponents(giveaway)
         }).catch(() => null);
 
         if (winners.length) {
@@ -1459,7 +1466,7 @@ client.on('interactionCreate', async (interaction) => {
 
             const msg = await interaction.channel.send({
                 embeds: [client.buildGiveawayEmbed(giveaway)],
-                components: [client.buildGiveawayActionRow(giveaway)]
+                components: client.buildGiveawayComponents(giveaway)
             });
 
             giveaway.messageId = msg.id;
@@ -1554,7 +1561,7 @@ client.on('interactionCreate', async (interaction) => {
                 if (resolved) {
                     await resolved.message.edit({
                         embeds: [client.buildGiveawayEmbed(giveaway)],
-                        components: [client.buildGiveawayActionRow(giveaway)]
+                        components: client.buildGiveawayComponents(giveaway)
                     }).catch(() => null);
                 }
 
@@ -1572,7 +1579,7 @@ client.on('interactionCreate', async (interaction) => {
             if (resolved) {
                 await resolved.message.edit({
                     embeds: [client.buildGiveawayEmbed(giveaway)],
-                    components: [client.buildGiveawayActionRow(giveaway)]
+                    components: client.buildGiveawayComponents(giveaway)
                 }).catch(() => null);
             }
 

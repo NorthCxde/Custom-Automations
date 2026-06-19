@@ -9,7 +9,7 @@ module.exports = {
         .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
         .addStringOption(option =>
             option.setName('giveaway_id')
-                .setDescription('ID of giveaway to end')
+                .setDescription('Giveaway ID or giveaway message ID to end')
                 .setRequired(true)
         ),
     async executeInteraction({ client, interaction }) {
@@ -18,7 +18,7 @@ module.exports = {
         }
 
         const giveawayId = interaction.options.getString('giveaway_id');
-        const giveaway = client.getGiveaway(interaction.guildId, giveawayId);
+        const giveaway = client.findGiveawayByInput(interaction.guildId, giveawayId);
         if (!giveaway) {
             return interaction.reply({ content: 'Giveaway not found for this server.', ephemeral: true });
         }
@@ -27,7 +27,7 @@ module.exports = {
             return interaction.reply({ content: 'This giveaway has already ended.', ephemeral: true });
         }
 
-        const ended = await client.finalizeGiveaway(interaction.guildId, giveawayId);
+        const ended = await client.finalizeGiveaway(interaction.guildId, giveaway.id);
         if (!ended) {
             return interaction.reply({ content: 'Failed to end giveaway. Try again.', ephemeral: true });
         }
