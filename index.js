@@ -59,6 +59,7 @@ const boostChannelFile = path.join(dataPath, "boostchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
 const autorespondersFile = path.join(dataPath, "autoresponders.json");
 const giveawaysFile = path.join(dataPath, "giveaways.json");
+const entryRolesFile = path.join(dataPath, "entryroles.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -76,6 +77,7 @@ client.autoresponderCooldowns = new Map();
 client.giveaways = new Map();
 client.giveawayTimers = new Map();
 client.giveawayDrafts = new Map();
+client.entryRoles = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 
@@ -456,6 +458,13 @@ client.parseGiveawayRoleBonuses = (rawInput, guild) => {
 
 client.getGiveawayDraftKey = (guildId, userId) => `${guildId}:${userId}`;
 
+client.getGiveawayRoleBonusesFromPresetSelection = (guildId, selectedRoleIds = []) => {
+    const selectedSet = new Set((selectedRoleIds || []).map(String));
+    return client.getGiveawayEntryRoles(guildId)
+        .filter(item => selectedSet.has(item.roleId))
+        .map(item => ({ roleId: item.roleId, extraEntries: item.extraEntries }));
+};
+
 client.buildGiveawayDraftPayload = (draft) => {
     const preview = {
         ...draft,
@@ -468,20 +477,13 @@ client.buildGiveawayDraftPayload = (draft) => {
     const embed = client.buildGiveawayEmbed(preview)
         .setTitle(`${draft.prize || 'Giveaway'} (Preview)`);
 
-    const selector = new RoleSelectMenuBuilder()
-        .setCustomId('gv_bonus_roles')
-        .setPlaceholder('Select bonus role(s)')
-        .setMinValues(0)
-        .setMaxValues(25);
-    if (Array.isArray(draft.selectedBonusRoleIds) && draft.selectedBonusRoleIds.length) {
-        selector.setDefaultRoles(draft.selectedBonusRoleIds.slice(0, 25));
-    }
+    const entryRoleRules = client.getGiveawayEntryRoles(draft.guildId);
+    const selectedRoleIds = (draft.selectedBonusRoleIds || []).map(String);
+    const selectedBonuses = client.getGiveawayRoleBonusesFromPresetSelection(draft.guildId, selectedRoleIds);
+    const selectedBonusMap = new Map(selectedBonuses.map(item => [item.roleId, item.extraEntries]));
+    const guild = draft.guildId ? client.guilds.cache.get(draft.guildId) : null;
 
     const controls = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId('gv_bonus_set')
-            .setLabel('Set +Entries')
-            .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
             .setCustomId('gv_bonus_create')
             .setLabel('Create Giveaway')
@@ -492,23 +494,78 @@ client.buildGiveawayDraftPayload = (draft) => {
             .setStyle(ButtonStyle.Danger)
     );
 
-    const selectedText = (draft.selectedBonusRoleIds || []).length
-        ? (draft.selectedBonusRoleIds || []).map(id => `<@&${id}>`).join(', ')
+    const selectedText = selectedBonuses.length
+        ? selectedBonuses.map(item => `<@&${item.roleId}> (+${item.extraEntries})`).join(', ')
         : 'None selected';
 
+    const components = [controls];
+    let content = 'Select bonus roles and create the giveaway.';
+
+    if (entryRoleRules.length) {
+        const options = entryRoleRules.slice(0, 25).map(item => {
+            const roleName = guild?.roles?.cache?.get(item.roleId)?.name || `Role ${item.roleId}`;
+            return {
+                label: roleName.slice(0, 100),
+                value: item.roleId,
+                description: `+${item.extraEntries} entries`,
+                default: selectedBonusMap.has(item.roleId)
+            };
+        });
+
+        const selector = new StringSelectMenuBuilder()
+            .setCustomId('gv_bonus_roles')
+            .setPlaceholder('Select preset bonus role(s)')
+            .setMinValues(0)
+            .setMaxValues(Math.max(1, options.length))
+            .addOptions(options);
+
+        components.unshift(new ActionRowBuilder().addComponents(selector));
+        content = `Choose any preset bonus roles below.\nSelected roles: ${selectedText}`;
+    } else {
+        content = 'No preset entry roles configured yet. Use /entryroles to add them, or click Create Giveaway to continue with no bonus roles.';
+    }
+
     return {
-        content: `Select bonus roles, then click **Set +Entries**.\nSelected roles: ${selectedText}`,
+        content,
         embeds: [embed],
-        components: [
-            new ActionRowBuilder().addComponents(selector),
-            controls
-        ]
+        components
     };
 };
 
 client.formatGiveawayWinnersValue = (ids) => {
     if (!Array.isArray(ids) || ids.length === 0) return 'No winner yet';
     return ids.map(id => `<@${id}>`).join(', ');
+};
+
+client.calculateGiveawayTicketsForMember = (member, roleBonuses = []) => {
+    let tickets = 1;
+    if (!member?.roles?.cache) return tickets;
+
+    for (const rule of roleBonuses) {
+        if (member.roles.cache.has(rule.roleId)) {
+            tickets += Math.max(1, Number(rule.extraEntries || 1));
+        }
+    }
+
+    return Math.min(100, Math.max(1, tickets));
+};
+
+client.getGiveawayTotalTickets = (giveaway) => {
+    const entries = Array.isArray(giveaway?.entries) ? giveaway.entries : [];
+    if (!entries.length) return 0;
+
+    const weights = giveaway?.entryWeights && typeof giveaway.entryWeights === 'object'
+        ? giveaway.entryWeights
+        : null;
+
+    if (!weights) return entries.length;
+
+    let total = 0;
+    for (const userId of entries) {
+        const v = Number(weights[userId]);
+        total += Number.isFinite(v) && v > 0 ? Math.floor(v) : 1;
+    }
+    return total;
 };
 
 client.buildGiveawayEmbed = (giveaway) => {
@@ -528,7 +585,7 @@ client.buildGiveawayEmbed = (giveaway) => {
                 inline: false
             },
             { name: 'Hosted by', value: `<@${giveaway.hostId}>`, inline: true },
-            { name: 'Entries', value: String(Array.isArray(giveaway.entries) ? giveaway.entries.length : 0), inline: true },
+            { name: 'Entries', value: String(client.getGiveawayTotalTickets(giveaway)), inline: true },
             { name: 'Winners', value: ended ? client.formatGiveawayWinnersValue(giveaway.winnerIds) : String(giveaway.winnerCount || 1), inline: true }
         )
         .setTimestamp(Number(giveaway.endAt));
@@ -598,6 +655,11 @@ client.loadGiveaways = () => {
                     createdAt: Number(item.createdAt || Date.now()),
                     endAt: Number(item.endAt || Date.now()),
                     entries: Array.isArray(item.entries) ? [...new Set(item.entries.map(String))] : [],
+                    entryWeights: item.entryWeights && typeof item.entryWeights === 'object'
+                        ? Object.fromEntries(
+                            Object.entries(item.entryWeights).map(([k, v]) => [String(k), Math.max(1, Number(v) || 1)])
+                        )
+                        : {},
                     ended: Boolean(item.ended),
                     winnerIds: Array.isArray(item.winnerIds) ? [...new Set(item.winnerIds.map(String))] : [],
                     roleBonuses: Array.isArray(item.roleBonuses)
@@ -612,6 +674,80 @@ client.loadGiveaways = () => {
 
         client.giveaways.set(guildId, normalized);
     }
+};
+
+client.loadEntryRoles = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(entryRolesFile)) fs.writeFileSync(entryRolesFile, '{}', 'utf8');
+
+    let raw = '{}';
+    try {
+        raw = fs.readFileSync(entryRolesFile, 'utf8') || '{}';
+    } catch (err) {
+        console.error('Failed to read entryroles file:', err);
+    }
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(raw);
+    } catch (err) {
+        console.error('Failed to parse entryroles file:', err);
+    }
+
+    client.entryRoles.clear();
+    for (const [guildId, rules] of Object.entries(parsed)) {
+        const normalized = Array.isArray(rules)
+            ? rules
+                .filter(item => item && typeof item === 'object')
+                .map(item => ({
+                    roleId: String(item.roleId || ''),
+                    extraEntries: Math.max(1, Math.min(50, Number(item.extraEntries || 1)))
+                }))
+                .filter(item => item.roleId)
+            : [];
+
+        client.entryRoles.set(String(guildId), normalized);
+    }
+};
+
+client.saveEntryRoles = () => {
+    const out = {};
+    for (const [guildId, rules] of client.entryRoles.entries()) {
+        out[guildId] = rules;
+    }
+    fs.writeFileSync(entryRolesFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getGiveawayEntryRoles = (guildId) => {
+    return client.entryRoles.get(String(guildId)) || [];
+};
+
+client.upsertGiveawayEntryRole = (guildId, roleId, extraEntries) => {
+    const rules = [...client.getGiveawayEntryRoles(guildId)];
+    const idx = rules.findIndex(item => item.roleId === String(roleId));
+    const nextRule = {
+        roleId: String(roleId),
+        extraEntries: Math.max(1, Math.min(50, Number(extraEntries || 1)))
+    };
+    if (idx === -1) rules.push(nextRule);
+    else rules[idx] = nextRule;
+
+    client.entryRoles.set(String(guildId), rules);
+    client.saveEntryRoles();
+    return nextRule;
+};
+
+client.removeGiveawayEntryRole = (guildId, roleId) => {
+    const rules = client.getGiveawayEntryRoles(guildId);
+    const next = rules.filter(item => item.roleId !== String(roleId));
+    client.entryRoles.set(String(guildId), next);
+    client.saveEntryRoles();
+    return next.length !== rules.length;
+};
+
+client.clearGiveawayEntryRoles = (guildId) => {
+    client.entryRoles.set(String(guildId), []);
+    client.saveEntryRoles();
 };
 
 client.saveGiveaways = () => {
@@ -679,6 +815,10 @@ client.pickWeightedWinners = async (giveaway, count, excluded = new Set()) => {
     const entries = Array.isArray(giveaway.entries) ? [...new Set(giveaway.entries)] : [];
     if (!entries.length) return [];
 
+    giveaway.entryWeights = giveaway.entryWeights && typeof giveaway.entryWeights === 'object'
+        ? giveaway.entryWeights
+        : {};
+
     const guild = client.guilds.cache.get(giveaway.guildId) || await client.guilds.fetch(giveaway.guildId).catch(() => null);
     if (!guild) {
         return client.pickRandomUnique(entries, count, excluded);
@@ -690,14 +830,14 @@ client.pickWeightedWinners = async (giveaway, count, excluded = new Set()) => {
     for (const userId of entries) {
         if (excluded.has(userId)) continue;
 
-        let tickets = 1;
-        if (bonusRules.length) {
-            const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
-            if (member) {
-                for (const rule of bonusRules) {
-                    if (member.roles.cache.has(rule.roleId)) {
-                        tickets += Math.max(1, Number(rule.extraEntries || 1));
-                    }
+        let tickets = Number(giveaway.entryWeights[userId]);
+        if (!Number.isFinite(tickets) || tickets < 1) {
+            tickets = 1;
+            if (bonusRules.length) {
+                const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+                if (member) {
+                    tickets = client.calculateGiveawayTicketsForMember(member, bonusRules);
+                    giveaway.entryWeights[userId] = tickets;
                 }
             }
         }
@@ -1399,6 +1539,7 @@ client.loadBoostChannels();
 client.loadPrefixCommandState();
 client.loadAutoresponders();
 client.loadGiveaways();
+client.loadEntryRoles();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -1630,42 +1771,6 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
-        if (interaction.customId === 'gv_bonus_amount_modal') {
-            if (!interaction.guild) {
-                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
-            }
-
-            const draftKey = client.getGiveawayDraftKey(interaction.guildId, interaction.user.id);
-            const draft = client.giveawayDrafts.get(draftKey);
-            if (!draft) {
-                return interaction.reply({ content: 'No giveaway setup draft found. Run /gcreate again.', ephemeral: true });
-            }
-
-            const selected = Array.isArray(draft.selectedBonusRoleIds) ? draft.selectedBonusRoleIds : [];
-            if (!selected.length) {
-                return interaction.reply({ content: 'Select one or more roles first.', ephemeral: true });
-            }
-
-            const amountRaw = interaction.fields.getTextInputValue('gv_bonus_amount').trim();
-            const extraEntries = Number(amountRaw);
-            if (!Number.isInteger(extraEntries) || extraEntries < 1 || extraEntries > 50) {
-                return interaction.reply({ content: 'Extra entries must be a whole number between 1 and 50.', ephemeral: true });
-            }
-
-            const bonusMap = new Map((draft.roleBonuses || []).map(item => [item.roleId, item.extraEntries]));
-            for (const roleId of selected) {
-                bonusMap.set(roleId, extraEntries);
-            }
-            draft.roleBonuses = Array.from(bonusMap.entries()).map(([roleId, value]) => ({ roleId, extraEntries: value }));
-            client.giveawayDrafts.set(draftKey, draft);
-
-            return interaction.reply({
-                content: 'Bonus entries updated.',
-                ...client.buildGiveawayDraftPayload(draft),
-                ephemeral: true
-            });
-        }
-
         if (interaction.customId !== 'ar_create_modal') return;
 
         if (!interaction.guild) {
@@ -1708,7 +1813,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
-        if (interaction.customId === 'gv_bonus_set' || interaction.customId === 'gv_bonus_create' || interaction.customId === 'gv_bonus_cancel') {
+        if (interaction.customId === 'gv_bonus_create' || interaction.customId === 'gv_bonus_cancel') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
             }
@@ -1724,30 +1829,11 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.update({ content: 'Giveaway setup canceled.', embeds: [], components: [] });
             }
 
-            if (interaction.customId === 'gv_bonus_set') {
-                const selected = Array.isArray(draft.selectedBonusRoleIds) ? draft.selectedBonusRoleIds : [];
-                if (!selected.length) {
-                    return interaction.reply({ content: 'Select one or more roles first.', ephemeral: true });
-                }
-
-                const modal = new ModalBuilder()
-                    .setCustomId('gv_bonus_amount_modal')
-                    .setTitle('Set Bonus Entries');
-
-                const amountInput = new TextInputBuilder()
-                    .setCustomId('gv_bonus_amount')
-                    .setLabel('Extra entries per selected role')
-                    .setPlaceholder('2')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setMaxLength(2);
-
-                modal.addComponents(new ActionRowBuilder().addComponents(amountInput));
-                return interaction.showModal(modal);
-            }
-
             if (interaction.customId === 'gv_bonus_create') {
                 const now = Date.now();
+                const selectedRoleIds = Array.isArray(draft.selectedBonusRoleIds)
+                    ? draft.selectedBonusRoleIds.map(String)
+                    : [];
                 const giveaway = {
                     id: String(BigInt(now) * 1000000n + BigInt(Math.floor(Math.random() * 1_000_000))),
                     guildId: draft.guildId,
@@ -1761,9 +1847,10 @@ client.on('interactionCreate', async (interaction) => {
                     createdAt: now,
                     endAt: now + draft.durationMs,
                     entries: [],
+                    entryWeights: {},
                     ended: false,
                     winnerIds: [],
-                    roleBonuses: Array.isArray(draft.roleBonuses) ? draft.roleBonuses : []
+                    roleBonuses: client.getGiveawayRoleBonusesFromPresetSelection(draft.guildId, selectedRoleIds)
                 };
 
                 const channel = interaction.guild.channels.cache.get(draft.channelId)
@@ -1824,6 +1911,10 @@ client.on('interactionCreate', async (interaction) => {
 
                 giveaway.entries.push(interaction.user.id);
                 giveaway.entries = [...new Set(giveaway.entries)];
+                giveaway.entryWeights = giveaway.entryWeights && typeof giveaway.entryWeights === 'object'
+                    ? giveaway.entryWeights
+                    : {};
+                giveaway.entryWeights[interaction.user.id] = client.calculateGiveawayTicketsForMember(interaction.member, giveaway.roleBonuses || []);
                 client.upsertGiveaway(interaction.guildId, giveaway);
 
                 const resolved = await client.resolveGiveawayMessage(giveaway);
@@ -1842,6 +1933,9 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             giveaway.entries = giveaway.entries.filter(id => id !== interaction.user.id);
+            if (giveaway.entryWeights && typeof giveaway.entryWeights === 'object') {
+                delete giveaway.entryWeights[interaction.user.id];
+            }
             client.upsertGiveaway(interaction.guildId, giveaway);
 
             const resolved = await client.resolveGiveawayMessage(giveaway);
@@ -2197,6 +2291,24 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isStringSelectMenu()) {
+        if (interaction.customId === 'gv_bonus_roles') {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+
+            const draftKey = client.getGiveawayDraftKey(interaction.guildId, interaction.user.id);
+            const draft = client.giveawayDrafts.get(draftKey);
+            if (!draft) {
+                return interaction.reply({ content: 'No giveaway setup draft found. Run /gcreate again.', ephemeral: true });
+            }
+
+            draft.selectedBonusRoleIds = [...new Set(interaction.values.map(String))];
+            draft.roleBonuses = client.getGiveawayRoleBonusesFromPresetSelection(interaction.guildId, draft.selectedBonusRoleIds);
+            client.giveawayDrafts.set(draftKey, draft);
+
+            return interaction.update(client.buildGiveawayDraftPayload(draft));
+        }
+
         if (interaction.customId === 'ar_existing_select') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -2411,23 +2523,6 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (!interaction.isRoleSelectMenu()) return;
-
-    if (interaction.customId === 'gv_bonus_roles') {
-        if (!interaction.guild) {
-            return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
-        }
-
-        const draftKey = client.getGiveawayDraftKey(interaction.guildId, interaction.user.id);
-        const draft = client.giveawayDrafts.get(draftKey);
-        if (!draft) {
-            return interaction.reply({ content: 'No giveaway setup draft found. Run /gcreate again.', ephemeral: true });
-        }
-
-        draft.selectedBonusRoleIds = [...new Set(interaction.values.map(String))];
-        client.giveawayDrafts.set(draftKey, draft);
-
-        return interaction.update(client.buildGiveawayDraftPayload(draft));
-    }
 
     if (interaction.customId === 'ar_allowed_roles' || interaction.customId === 'ar_ignored_roles') {
         if (!interaction.guild) {
