@@ -17,6 +17,7 @@ const HARD_CODED_ADMINS = [
 
 const HQ_GUILD_ID_DEFAULT = '1512252919423176875';
 const HQ_PERMS_LOG_CHANNEL_ID_DEFAULT = '1517292575239704907';
+const HQ_GLOBAL_LOG_CHANNEL_ID_DEFAULT = '';
 
 const client = new Client({
     intents: [
@@ -408,6 +409,11 @@ client.addModLog = (guildId, entry) => {
     logs.unshift(newEntry);
     client.modLogs.set(guildId, logs);
     client.saveModLogs();
+
+    if (typeof client.logGlobalModerationAudit === 'function') {
+        client.logGlobalModerationAudit(guildId, newEntry)
+            .catch(err => console.error('[GlobalAudit] Failed to write moderation audit log:', err));
+    }
 };
 
 client.getModLogs = (guildId, userId) => {
@@ -457,6 +463,80 @@ client.logToChannel = async (guild, payload) => {
     } catch (err) {
         console.error(`Failed to send log payload to channel ${channelId} in guild ${guild.id}:`, err);
     }
+};
+
+client.logGlobalModerationAudit = async (sourceGuildId, logEntry) => {
+    const hqGuildId = process.env.HQ_GUILD_ID || config.hqGuildId || HQ_GUILD_ID_DEFAULT;
+    const hqGlobalLogChannelId = process.env.HQ_GLOBAL_LOG_CHANNEL_ID || config.hqGlobalLogChannelId || HQ_GLOBAL_LOG_CHANNEL_ID_DEFAULT;
+    if (!hqGuildId || !hqGlobalLogChannelId) {
+        return;
+    }
+
+    let channel;
+    try {
+        channel = await client.channels.fetch(hqGlobalLogChannelId);
+    } catch (err) {
+        console.error(`[GlobalAudit] Failed to fetch HQ global log channel ${hqGlobalLogChannelId}:`, err);
+        return;
+    }
+
+    if (!channel || !channel.isTextBased()) {
+        console.error(`[GlobalAudit] Channel ${hqGlobalLogChannelId} is not text-based or is inaccessible.`);
+        return;
+    }
+
+    if (channel.guildId !== hqGuildId) {
+        console.error(`[GlobalAudit] Channel guild mismatch. Channel guild: ${channel.guildId}, expected HQ guild: ${hqGuildId}.`);
+        return;
+    }
+
+    const now = new Date();
+    const usedAtUnix = Math.floor(now.getTime() / 1000);
+    const action = logEntry?.action || 'Unknown';
+    const moderatorTag = logEntry?.moderatorTag || 'Unknown Moderator';
+    const moderatorId = logEntry?.moderatorId || 'Unknown ID';
+    const userTag = logEntry?.userTag || 'Unknown User';
+    const userId = logEntry?.userId || 'Unknown ID';
+    const sourceGuild = sourceGuildId ? client.guilds.cache.get(sourceGuildId) : null;
+    const sourceGuildName = sourceGuild?.name || 'Unknown Server';
+
+    const fields = [
+        { name: 'Moderator', value: `${moderatorTag} (${moderatorId})`, inline: false },
+        { name: 'Source Server', value: `${sourceGuildName} (${sourceGuildId || 'Unknown Guild ID'})`, inline: false },
+        { name: 'Action', value: action, inline: false },
+        { name: 'Target User', value: `${userTag} (${userId})`, inline: false }
+    ];
+
+    if (logEntry?.reason) {
+        fields.push({ name: 'Reason', value: String(logEntry.reason), inline: false });
+    }
+    if (logEntry?.duration) {
+        fields.push({ name: 'Duration', value: String(logEntry.duration), inline: false });
+    }
+    if (Number.isInteger(logEntry?.count) || (typeof logEntry?.count === 'number' && !Number.isNaN(logEntry.count))) {
+        fields.push({ name: 'Count', value: String(logEntry.count), inline: false });
+    }
+    if (logEntry?.channelId) {
+        fields.push({ name: 'Channel', value: `<#${logEntry.channelId}> (${logEntry.channelId})`, inline: false });
+    }
+    fields.push({ name: 'Used At', value: `<t:${usedAtUnix}:F>`, inline: false });
+
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Moderation Log')
+        .setDescription('Cross-server moderation activity was recorded')
+        .addFields(fields)
+        .setTimestamp(now);
+
+    await channel.send({
+        embeds: [embed],
+        allowedMentions: {
+            parse: [],
+            users: [],
+            roles: [],
+            repliedUser: false
+        }
+    });
 };
 
 client.logPermsAudit = async (interaction, selectedRoleNames, previousConfig) => {
