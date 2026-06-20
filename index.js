@@ -65,6 +65,7 @@ const giveawaysFile = path.join(dataPath, "giveaways.json");
 const entryRolesFile = path.join(dataPath, "entryroles.json");
 const infractionsFile = path.join(dataPath, "infractions.json");
 const manualLogsChannelsFile = path.join(dataPath, "manualLogsChannels.json");
+const publicPermsFile = path.join(dataPath, "publicperms.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -85,9 +86,11 @@ client.giveawayDrafts = new Map();
 client.entryRoles = new Map();
 client.infractionRules = new Map();
 client.manualLogsChannels = new Map();
+client.publicAllowedRoles = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.hardcodedAdmins = new Set(HARD_CODED_ADMINS);
+client.publicCommandNames = new Set(['profile']);
 
 client.sendPrefixCommandResponse = async (channel, content, options = {}) => {
     try {
@@ -1559,6 +1562,49 @@ client.loadManualLogsChannels = () => {
     }
 };
 
+client.loadPublicPermissions = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(publicPermsFile)) fs.writeFileSync(publicPermsFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(publicPermsFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read public perms file:', err);
+    }
+
+    client.publicAllowedRoles.clear();
+    for (const [guildId, roleIds] of Object.entries(parsed)) {
+        client.publicAllowedRoles.set(guildId, Array.isArray(roleIds) ? new Set(roleIds.map(String)) : null);
+    }
+};
+
+client.savePublicPermissions = () => {
+    const out = {};
+    for (const [guildId, roleSet] of client.publicAllowedRoles.entries()) {
+        out[guildId] = roleSet === null ? [] : Array.from(roleSet);
+    }
+    fs.writeFileSync(publicPermsFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getPublicRoleIds = (guildId) => {
+    if (!client.publicAllowedRoles.has(guildId)) return null;
+    return client.publicAllowedRoles.get(guildId);
+};
+
+client.isPublicMemberAllowed = (member) => {
+    if (!member || !member.guild) return false;
+
+    const hasAdminBypass = member.permissions.has(PermissionsBitField.Flags.Administrator)
+        || member.permissions.has(PermissionsBitField.Flags.ManageGuild);
+
+    const allowed = client.getPublicRoleIds(member.guild.id);
+    if (allowed === null) return true;
+    if (allowed.size === 0) return hasAdminBypass;
+    if (hasAdminBypass) return true;
+    return member.roles.cache.some(role => allowed.has(role.id));
+};
+
 client.saveManualLogsChannels = () => {
     const out = {};
     for (const [guildId, value] of client.manualLogsChannels.entries()) {
@@ -1709,6 +1755,7 @@ client.loadGiveaways();
 client.loadEntryRoles();
 client.loadInfractionRules();
 client.loadManualLogsChannels();
+client.loadPublicPermissions();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -1852,12 +1899,16 @@ client.on('guildMemberAdd', async (member) => {
 client.on('interactionCreate', async (interaction) => {
     try {
     if (interaction.isChatInputCommand()) {
-        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel') {
+        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
             }
         } else {
-            if (!client.isMemberAllowed(interaction.member)) {
+            if (client.publicCommandNames.has(interaction.commandName)) {
+                if (!client.isPublicMemberAllowed(interaction.member)) {
+                    return interaction.reply({ content: 'You do not have permission to use this public command. Ask an admin to configure /publicperms.', ephemeral: true });
+                }
+            } else if (!client.isMemberAllowed(interaction.member)) {
                 return interaction.reply({ content: 'You do not have permission to use bot commands. Use /perms to configure allowed roles.', ephemeral: true });
             }
         }
@@ -2006,6 +2057,43 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId === 'publicperms_save' || interaction.customId === 'publicperms_cancel') {
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+
+            const draftKey = `${interaction.guild.id}:${interaction.user.id}`;
+            client.publicPermDrafts = client.publicPermDrafts || new Map();
+            const draft = client.publicPermDrafts.get(draftKey);
+
+            if (interaction.customId === 'publicperms_cancel') {
+                client.publicPermDrafts.delete(draftKey);
+                return interaction.update({ content: 'Public perms setup canceled.', components: [] });
+            }
+
+            if (!draft) {
+                return interaction.reply({ content: 'No active public perms draft found. Run /publicperms set again.', ephemeral: true });
+            }
+
+            const selectedRoleIds = Array.isArray(draft.selectedRoleIds) ? draft.selectedRoleIds : [];
+            client.publicAllowedRoles.set(interaction.guild.id, new Set(selectedRoleIds));
+            client.savePublicPermissions();
+            client.publicPermDrafts.delete(draftKey);
+
+            const roleList = selectedRoleIds.length
+                ? selectedRoleIds.map(roleId => `<@&${roleId}>`).join(', ')
+                : 'none (only admins/managers will be able to use public commands)';
+
+            return interaction.update({
+                content: `Public command roles updated: ${roleList}`,
+                components: []
+            });
+        }
+
         if (interaction.customId.startsWith('moddec_')) {
             const muteCommand = client.slashCommands.get('mute');
             if (muteCommand && typeof muteCommand.handleButton === 'function') {
@@ -2713,6 +2801,29 @@ client.on('interactionCreate', async (interaction) => {
             client.saveModLogs();
 
             return interaction.reply({ content: `Removed Case ${removedLog.caseNumber ?? removedLog.caseId}.`, ephemeral: true });
+        }
+    }
+
+    if (interaction.isRoleSelectMenu()) {
+        if (interaction.customId === 'publicperms_role_select') {
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+
+            const draftKey = `${interaction.guild.id}:${interaction.user.id}`;
+            client.publicPermDrafts = client.publicPermDrafts || new Map();
+            const draft = client.publicPermDrafts.get(draftKey) || {};
+            draft.selectedRoleIds = [...new Set(interaction.values.map(String))];
+            client.publicPermDrafts.set(draftKey, draft);
+
+            return interaction.update({
+                content: `Selected ${draft.selectedRoleIds.length} public role(s). Click Save to apply.`,
+                components: interaction.message.components
+            });
         }
     }
 
