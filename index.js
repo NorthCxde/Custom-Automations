@@ -1176,15 +1176,34 @@ client.getKnownBannedRobloxIds = (guildId) => {
     return new Set(history.robloxToBannedDiscord.keys());
 };
 
+client.getBloxlinkApiKey = (guildId) => {
+    const guildSpecificEnvKey = guildId ? process.env[`BLOXLINK_API_KEY_${guildId}`] : null;
+    if (guildSpecificEnvKey) return guildSpecificEnvKey;
+
+    const perGuildConfig = config.bloxlinkApiKeys && guildId
+        ? config.bloxlinkApiKeys[String(guildId)]
+        : null;
+    if (perGuildConfig) return perGuildConfig;
+
+    return process.env.BLOXLINK_API_KEY || config.bloxlinkApiKey || null;
+};
+
 client.getLinkedRobloxId = async (guildId, discordId) => {
-    // check cache
-    const cached = client.bloxlink.get(discordId);
+    if (!guildId || !discordId) return null;
+
+    const cacheKey = `${guildId}:${discordId}`;
+    const cached = client.bloxlink.get(cacheKey) || client.bloxlink.get(discordId);
     const now = Date.now();
     if (cached && cached.robloxId && (!cached.expires || cached.expires > now)) {
+        if (client.bloxlink.has(discordId) && !client.bloxlink.has(cacheKey)) {
+            client.bloxlink.set(cacheKey, cached);
+            client.bloxlink.delete(discordId);
+            client.saveBloxlink();
+        }
         return cached.robloxId;
     }
 
-    const apiKey = process.env.BLOXLINK_API_KEY || config.bloxlinkApiKey;
+    const apiKey = client.getBloxlinkApiKey(guildId);
     if (!apiKey) return null;
 
     const url = `https://api.blox.link/v4/public/guilds/${guildId}/discord-to-roblox/${discordId}`;
@@ -1193,9 +1212,10 @@ client.getLinkedRobloxId = async (guildId, discordId) => {
         if (res.status === 404) return null;
         if (!res.ok) return null;
         const body = await res.json();
-        const robloxId = body.robloxID || body.robloxId || null;
+        const robloxId = body.robloxID || body.robloxId || body?.user?.robloxID || body?.user?.robloxId || body?.user?.id || null;
         const ttl = Number(config.bloxlinkCacheTtlMs) || 5 * 60 * 1000;
-        client.bloxlink.set(discordId, { robloxId, expires: Date.now() + ttl });
+        client.bloxlink.set(cacheKey, { robloxId, expires: Date.now() + ttl });
+        if (client.bloxlink.has(discordId)) client.bloxlink.delete(discordId);
         client.saveBloxlink();
         return robloxId;
     } catch (err) {

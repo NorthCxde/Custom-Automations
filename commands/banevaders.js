@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
-const config = require('../config.json');
 
 async function fetchRobloxUserById(id) {
     try {
@@ -27,9 +26,9 @@ module.exports = {
             return interaction.reply({ content: 'You need Ban Members permission to run this command.', ephemeral: true });
         }
 
-        const apiKey = process.env.BLOXLINK_API_KEY || config.bloxlinkApiKey;
+        const apiKey = client.getBloxlinkApiKey ? client.getBloxlinkApiKey(interaction.guild.id) : null;
         if (!apiKey) {
-            return interaction.reply({ content: 'Bloxlink API key is not configured. Set BLOXLINK_API_KEY or bloxlinkApiKey in config.json.', ephemeral: true });
+            return interaction.reply({ content: 'Bloxlink API key is not configured for this server.', ephemeral: true });
         }
 
         await interaction.deferReply();

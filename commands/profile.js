@@ -70,13 +70,6 @@ module.exports = {
             discordLines.push(`Joined Server: <t:${Math.floor(member.joinedTimestamp / 1000)}:F>`);
         }
 
-        const roleMentions = member
-            ? member.roles.cache
-                .filter(role => role.id !== interaction.guild.id)
-                .map(role => `<@&${role.id}>`)
-            : [];
-        discordLines.push(`Roles: ${roleMentions.length ? roleMentions.slice(0, 20).join(', ') : 'None'}`);
-
         const robloxLines = robloxId
             ? [
                 `Linked: Yes`,

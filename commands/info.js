@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const config = require('../config.json');
 
 function isNumeric(value) {
     return /^[0-9]+$/.test(value);
@@ -67,9 +66,9 @@ module.exports = {
             return interaction.reply({ content: 'Please provide either a Discord user or a Roblox username/ID.', ephemeral: true });
         }
 
-        const apiKey = process.env.BLOXLINK_API_KEY || config.bloxlinkApiKey;
+        const apiKey = client.getBloxlinkApiKey ? client.getBloxlinkApiKey(interaction.guild.id) : null;
         if (!apiKey) {
-            return interaction.reply({ content: 'Bloxlink API key is not configured. Set BLOXLINK_API_KEY or bloxlinkApiKey in config.json.', ephemeral: true });
+            return interaction.reply({ content: 'Bloxlink API key is not configured for this server.', ephemeral: true });
         }
 
         const embed = new EmbedBuilder()
