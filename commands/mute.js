@@ -443,6 +443,22 @@ module.exports = {
             option.setName('user4')
                 .setDescription('Another user to timeout')
                 .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('evidence1')
+                .setDescription('Screenshot evidence 1')
+                .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('evidence2')
+                .setDescription('Screenshot evidence 2')
+                .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('evidence3')
+                .setDescription('Screenshot evidence 3')
+                .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('evidence4')
+                .setDescription('Screenshot evidence 4')
+                .setRequired(false))
         .addStringOption(option =>
             option.setName('reason')
                 .setDescription('Reason for the timeout')
@@ -543,6 +559,12 @@ module.exports = {
             interaction.options.getUser('user2'),
             interaction.options.getUser('user3'),
             interaction.options.getUser('user4')
+        ].filter(Boolean);
+        const evidenceFiles = [
+            interaction.options.getAttachment('evidence1'),
+            interaction.options.getAttachment('evidence2'),
+            interaction.options.getAttachment('evidence3'),
+            interaction.options.getAttachment('evidence4')
         ].filter(Boolean);
         const manualDuration = interaction.options.getString('duration');
         const ruleKey = interaction.options.getString('rule');
@@ -702,6 +724,7 @@ module.exports = {
                 ruleKey,
                 ruleLabel: ruleConfig?.label || 'Unknown Rule',
                 baseReason,
+                evidenceFiles: evidenceFiles.map(file => ({ url: file.url, name: file.name })),
                 users: moderatorDecisionTargets
             });
 
@@ -732,6 +755,7 @@ module.exports = {
                 { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
                 { name: 'Duration', value: ruleConfig ? 'Auto (by infraction rule)' : (manualDuration || 'N/A'), inline: true },
                 { name: 'Rule', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
+                { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                 { name: 'Reason', value: baseReason || 'No reason provided', inline: false },
                 { name: 'Target IDs', value: users.map(u => u.id).join(', ') || 'None', inline: false }
             )
@@ -762,7 +786,11 @@ module.exports = {
             logComponents.push(decisionRow);
         }
 
-        await client.logToChannel(interaction.guild, { embeds: logEmbeds, components: logComponents });
+        await client.logToChannel(interaction.guild, {
+            embeds: logEmbeds,
+            components: logComponents,
+            files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+        });
 
         const replyEmbeds = [embed];
         const replyComponents = [buildUnmuteRow()];

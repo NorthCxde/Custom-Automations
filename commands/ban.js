@@ -22,6 +22,22 @@ module.exports = {
             option.setName('user4')
                 .setDescription('Another user to ban')
                 .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('evidence1')
+                .setDescription('Screenshot evidence 1')
+                .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('evidence2')
+                .setDescription('Screenshot evidence 2')
+                .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('evidence3')
+                .setDescription('Screenshot evidence 3')
+                .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('evidence4')
+                .setDescription('Screenshot evidence 4')
+                .setRequired(false))
         .addStringOption(option =>
             option.setName('reason')
                 .setDescription('Reason for the bans')
@@ -119,6 +135,12 @@ module.exports = {
             interaction.options.getUser('user3'),
             interaction.options.getUser('user4')
         ].filter(Boolean);
+        const evidenceFiles = [
+            interaction.options.getAttachment('evidence1'),
+            interaction.options.getAttachment('evidence2'),
+            interaction.options.getAttachment('evidence3'),
+            interaction.options.getAttachment('evidence4')
+        ].filter(Boolean);
         const reason = interaction.options.getString('reason') || 'No reason provided';
 
         if (!interaction.guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
@@ -177,6 +199,7 @@ module.exports = {
             .addFields(
                 { name: 'User(s)', value: mentions || 'None', inline: true },
                 { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
+                { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                 { name: 'Reason', value: reason || 'No reason provided', inline: false },
                 { name: 'Target IDs', value: users.map(u => u.id).join(', ') || 'None', inline: false }
             )
@@ -200,7 +223,10 @@ module.exports = {
                 .setStyle(ButtonStyle.Success)
         );
 
-        await client.logToChannel(interaction.guild, { embeds: [embed] });
+        await client.logToChannel(interaction.guild, {
+            embeds: [embed],
+            files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+        });
         return interaction.reply({ content: response, embeds: [embed], components: [row], ephemeral: true });
     }
 };
