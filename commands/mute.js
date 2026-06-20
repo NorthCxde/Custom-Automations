@@ -1,4 +1,21 @@
-﻿const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+﻿const {
+    SlashCommandBuilder,
+    PermissionsBitField,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
+} = require('discord.js');
+
+const MOD_DECISION_PREFIX = 'moddec_';
+const MOD_DECISION_MODAL_PREFIX = 'moddec_modal:';
+const MOD_DECISION_DURATION_INPUT_ID = 'duration';
+const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
+const MAX_TIMER_DELAY_MS = 2147483647;
+const tempBanTimers = new Map();
 
 const INFRACTION_RULES = {
     spam: {
@@ -147,15 +164,15 @@ function getRuleMuteCount(client, guildId, userId, ruleKey) {
     }).length;
 }
 
-function getEscalationStep(ruleKey, previousCount) {
-    const rule = INFRACTION_RULES[ruleKey];
+function getEscalationStep(rules, ruleKey, previousCount) {
+    const rule = rules?.[ruleKey];
     if (!rule || !rule.steps?.length) return null;
     const index = Math.min(previousCount, rule.steps.length - 1);
     return rule.steps[index];
 }
 
 function parseDuration(duration) {
-    const match = duration.match(/^(\d+)([smhd])$/i);
+    const match = duration.match(/^(\d+)([smhdy])$/i);
     if (!match) return null;
 
     const amount = Number(match[1]);
@@ -166,8 +183,228 @@ function parseDuration(duration) {
         case 'm': return amount * 60 * 1000;
         case 'h': return amount * 60 * 60 * 1000;
         case 'd': return amount * 24 * 60 * 60 * 1000;
+        case 'y': return amount * 365 * 24 * 60 * 60 * 1000;
         default: return null;
     }
+}
+
+function buildModeratorDecisionRow(actionKey) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`${MOD_DECISION_PREFIX}mute:${actionKey}`)
+            .setLabel('Mute')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId(`${MOD_DECISION_PREFIX}kick:${actionKey}`)
+            .setLabel('Kick')
+            .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+            .setCustomId(`${MOD_DECISION_PREFIX}ban:${actionKey}`)
+            .setLabel('Ban')
+            .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+            .setCustomId(`${MOD_DECISION_PREFIX}temp_ban:${actionKey}`)
+            .setLabel('Temp Ban')
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+            .setCustomId(`${MOD_DECISION_PREFIX}close:${actionKey}`)
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Secondary)
+    );
+}
+
+function scheduleTempUnban(client, guildId, userId, userTag, unbanAt) {
+    const timerKey = `${guildId}:${userId}`;
+    const existing = tempBanTimers.get(timerKey);
+    if (existing) {
+        clearTimeout(existing);
+        tempBanTimers.delete(timerKey);
+    }
+
+    const run = () => {
+        const remaining = Number(unbanAt) - Date.now();
+        if (remaining <= 0) {
+            const guild = client.guilds.cache.get(guildId);
+            if (!guild) {
+                tempBanTimers.delete(timerKey);
+                return;
+            }
+
+            guild.members.unban(userId, 'Temporary ban expired')
+                .then(async () => {
+                    if (client.addModLog) {
+                        let robloxId = null;
+                        try {
+                            if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(guildId, userId);
+                        } catch (err) {
+                            console.error('Failed to lookup robloxId for temp unban modlog:', err);
+                        }
+                        client.addModLog(guildId, {
+                            action: 'Unban',
+                            userId,
+                            userTag: userTag || `<@${userId}>`,
+                            robloxId,
+                            moderatorId: client.user?.id || 'system',
+                            moderatorTag: client.user?.tag || 'TempBanScheduler',
+                            reason: 'Temporary ban expired',
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                })
+                .catch(err => console.error('Failed to auto-unban temp banned user:', err))
+                .finally(() => {
+                    tempBanTimers.delete(timerKey);
+                });
+            return;
+        }
+
+        const nextDelay = Math.min(remaining, MAX_TIMER_DELAY_MS);
+        const timer = setTimeout(run, nextDelay);
+        if (typeof timer.unref === 'function') timer.unref();
+        tempBanTimers.set(timerKey, timer);
+    };
+
+    run();
+}
+
+function canUseDecisionPanel(client, interaction, decision) {
+    if (!decision) return false;
+    if (interaction.user.id === decision.moderatorId) return true;
+    return Boolean(client.hardcodedAdmins && client.hardcodedAdmins.has(interaction.user.id));
+}
+
+function getRequiredPermission(action) {
+    if (action === 'mute') return PermissionsBitField.Flags.ModerateMembers;
+    if (action === 'kick') return PermissionsBitField.Flags.KickMembers;
+    return PermissionsBitField.Flags.BanMembers;
+}
+
+async function applyDecisionAction({ client, guild, decision, action, durationRaw, moderator }) {
+    const results = [];
+    let durationMs = null;
+
+    if (action === 'mute' || action === 'temp_ban') {
+        durationMs = parseDuration(durationRaw || '');
+        if (!durationMs) {
+            return { error: 'Please provide a valid duration such as 1m, 1h, 1d, or 1y.' };
+        }
+        if (action === 'mute' && durationMs > MAX_TIMEOUT_MS) {
+            return { error: 'Discord timeouts can only be up to 28 days.' };
+        }
+    }
+
+    for (const target of decision.users || []) {
+        const userId = target.id;
+        const userTag = target.tag || `<@${userId}>`;
+        const reasonPrefix = `[Rule: ${decision.ruleLabel || 'Unknown'}] [Infraction ${target.infractionCount || '?'}]`;
+        const reason = `${reasonPrefix} ${decision.baseReason || 'No reason provided'} | Moderator decision: ${action}${durationRaw ? ` ${durationRaw}` : ''}`;
+
+        try {
+            if (action === 'mute') {
+                const member = await guild.members.fetch(userId);
+                await client.sendModerationDm({
+                    user: member.user,
+                    guildName: guild.name,
+                    action: 'mute',
+                    duration: durationRaw,
+                    reason
+                });
+                await member.timeout(durationMs, reason);
+                if (client.addModLog) {
+                    let robloxId = null;
+                    try {
+                        if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(guild.id, userId);
+                    } catch (err) {
+                        console.error('Failed to lookup robloxId for moderator decision mute modlog:', err);
+                    }
+                    await client.addModLog(guild.id, {
+                        action: 'Mute',
+                        userId,
+                        userTag,
+                        robloxId,
+                        moderatorId: moderator.id,
+                        moderatorTag: moderator.tag,
+                        reason,
+                        duration: durationRaw,
+                        infractionRule: decision.ruleKey || null,
+                        infractionRuleLabel: decision.ruleLabel || null,
+                        infractionCount: target.infractionCount || null,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            } else if (action === 'kick') {
+                const member = await guild.members.fetch(userId);
+                await member.kick(reason);
+                if (client.addModLog) {
+                    let robloxId = null;
+                    try {
+                        if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(guild.id, userId);
+                    } catch (err) {
+                        console.error('Failed to lookup robloxId for moderator decision kick modlog:', err);
+                    }
+                    await client.addModLog(guild.id, {
+                        action: 'Kick',
+                        userId,
+                        userTag,
+                        robloxId,
+                        moderatorId: moderator.id,
+                        moderatorTag: moderator.tag,
+                        reason,
+                        infractionRule: decision.ruleKey || null,
+                        infractionRuleLabel: decision.ruleLabel || null,
+                        infractionCount: target.infractionCount || null,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            } else if (action === 'ban' || action === 'temp_ban') {
+                await client.sendModerationDm({
+                    userId,
+                    guildName: guild.name,
+                    action: 'ban',
+                    reason: action === 'temp_ban' ? `${reason} (Duration: ${durationRaw})` : reason
+                });
+                await guild.members.ban(userId, { reason });
+
+                if (action === 'temp_ban') {
+                    scheduleTempUnban(client, guild.id, userId, userTag, Date.now() + durationMs);
+                }
+
+                if (client.addModLog) {
+                    let robloxId = null;
+                    try {
+                        if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(guild.id, userId);
+                    } catch (err) {
+                        console.error('Failed to lookup robloxId for moderator decision ban modlog:', err);
+                    }
+                    await client.addModLog(guild.id, {
+                        action: action === 'temp_ban' ? 'Temp Ban' : 'Ban',
+                        userId,
+                        userTag,
+                        robloxId,
+                        moderatorId: moderator.id,
+                        moderatorTag: moderator.tag,
+                        reason,
+                        duration: action === 'temp_ban' ? durationRaw : null,
+                        infractionRule: decision.ruleKey || null,
+                        infractionRuleLabel: decision.ruleLabel || null,
+                        infractionCount: target.infractionCount || null,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            }
+
+            results.push({ userId, success: true });
+        } catch (error) {
+            console.error('Failed moderator decision action:', error);
+            results.push({ userId, success: false, reason: error.message || 'Unknown error' });
+        }
+    }
+
+    return {
+        error: null,
+        results,
+        durationRaw
+    };
 }
 
 module.exports = {
@@ -309,7 +546,8 @@ module.exports = {
         ].filter(Boolean);
         const manualDuration = interaction.options.getString('duration');
         const ruleKey = interaction.options.getString('rule');
-        const ruleConfig = ruleKey ? INFRACTION_RULES[ruleKey] : null;
+        const guildRules = client.getInfractionRules ? client.getInfractionRules(interaction.guild.id) : INFRACTION_RULES;
+        const ruleConfig = ruleKey ? guildRules?.[ruleKey] : null;
         const baseReason = interaction.options.getString('reason') || 'No reason provided';
 
         if (!ruleKey && !manualDuration) {
@@ -329,6 +567,7 @@ module.exports = {
             return interaction.reply({ content: 'I do not have permission to timeout members.', ephemeral: true });
         }
 
+        const moderatorDecisionTargets = [];
         const results = await Promise.all(users.map(async (user) => {
             try {
                 const member = await interaction.guild.members.fetch(user.id);
@@ -344,8 +583,31 @@ module.exports = {
                 if (ruleKey && ruleConfig) {
                     const priorRuleMutes = getRuleMuteCount(client, interaction.guild.id, user.id, ruleKey);
                     infractionCount = priorRuleMutes + 1;
-                    escalationStep = getEscalationStep(ruleKey, priorRuleMutes);
-                    if (!escalationStep || escalationStep.type !== 'timeout' || !escalationStep.duration) {
+                    escalationStep = getEscalationStep(guildRules, ruleKey, priorRuleMutes);
+
+                    if (!escalationStep) {
+                        return {
+                            user,
+                            success: false,
+                            reason: 'Escalation step could not be determined.'
+                        };
+                    }
+
+                    if (escalationStep.type === 'moderator_decision') {
+                        moderatorDecisionTargets.push({
+                            id: user.id,
+                            tag: user.tag,
+                            infractionCount
+                        });
+                        return {
+                            user,
+                            success: false,
+                            needsModeratorDecision: true,
+                            infractionCount
+                        };
+                    }
+
+                    if (escalationStep.type !== 'timeout' || !escalationStep.duration) {
                         return {
                             user,
                             success: false,
@@ -407,7 +669,8 @@ module.exports = {
 
         const successResults = results.filter(r => r.success);
         const successCount = successResults.length;
-        const failCount = results.length - successCount;
+        const decisionCount = results.filter(r => r.needsModeratorDecision).length;
+        const failCount = results.length - successCount - decisionCount;
         const mentions = results.map(r => `<@${r.user.id}>`).join(', ');
         const reply = [];
 
@@ -423,6 +686,40 @@ module.exports = {
         }
         if (failCount) {
             reply.push(`${failCount} user(s) could not be timed out.`);
+        }
+
+        let decisionRow = null;
+        let decisionEmbed = null;
+        let decisionReply = null;
+
+        if (moderatorDecisionTargets.length) {
+            const actionKey = `moddec_${interaction.id}`;
+            client.addPendingModerationAction(actionKey, {
+                type: 'moderator_decision',
+                guildId: interaction.guild.id,
+                moderatorId: interaction.user.id,
+                moderatorTag: interaction.user.tag,
+                ruleKey,
+                ruleLabel: ruleConfig?.label || 'Unknown Rule',
+                baseReason,
+                users: moderatorDecisionTargets
+            });
+
+            decisionRow = buildModeratorDecisionRow(actionKey);
+            decisionEmbed = new EmbedBuilder()
+                .setColor(0x000000)
+                .setTitle('Moderator Decision Required')
+                .setDescription(`Use the buttons below to decide action for ${moderatorDecisionTargets.length} user(s).`)
+                .addFields(
+                    { name: 'Rule', value: ruleConfig?.label || 'Unknown Rule', inline: true },
+                    { name: 'Requested By', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: 'User(s)', value: moderatorDecisionTargets.map(target => `<@${target.id}> (Infraction ${target.infractionCount})`).join('\n').slice(0, 1024), inline: false },
+                    { name: 'Reason', value: baseReason || 'No reason provided', inline: false }
+                )
+                .setTimestamp();
+
+            decisionReply = `Moderator decision required for ${moderatorDecisionTargets.length} user(s).`;
+            reply.push(decisionReply);
         }
 
         const response = reply.join(' ');
@@ -458,7 +755,162 @@ module.exports = {
                 .setStyle(ButtonStyle.Success)
         );
 
-        await client.logToChannel(interaction.guild, { embeds: [embed], components: [buildUnmuteRow()] });
-        return interaction.reply({ content: response, embeds: [embed], components: [buildUnmuteRow()], ephemeral: true });
+        const logEmbeds = [embed];
+        const logComponents = [buildUnmuteRow()];
+        if (decisionEmbed && decisionRow) {
+            logEmbeds.push(decisionEmbed);
+            logComponents.push(decisionRow);
+        }
+
+        await client.logToChannel(interaction.guild, { embeds: logEmbeds, components: logComponents });
+
+        const replyEmbeds = [embed];
+        const replyComponents = [buildUnmuteRow()];
+        if (decisionEmbed && decisionRow) {
+            replyEmbeds.push(decisionEmbed);
+            replyComponents.push(decisionRow);
+        }
+
+        return interaction.reply({ content: response, embeds: replyEmbeds, components: replyComponents, ephemeral: true });
+    },
+    async handleButton({ client, interaction }) {
+        if (!interaction.customId.startsWith(MOD_DECISION_PREFIX)) return false;
+        if (!interaction.guild) {
+            await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        const [, action, actionKey] = interaction.customId.match(/^moddec_([^:]+):(.+)$/) || [];
+        if (!action || !actionKey) return false;
+
+        const decision = client.getPendingModerationAction ? client.getPendingModerationAction(actionKey) : null;
+        if (!decision || decision.type !== 'moderator_decision') {
+            await interaction.reply({ content: 'This moderator decision panel has expired.', ephemeral: true });
+            return true;
+        }
+
+        if (!canUseDecisionPanel(client, interaction, decision)) {
+            await interaction.reply({ content: 'Only the assigned moderator (or bot admins) can use this panel.', ephemeral: true });
+            return true;
+        }
+
+        if (action === 'close') {
+            if (client.deletePendingModerationAction) client.deletePendingModerationAction(actionKey);
+            await interaction.update({
+                content: 'Moderator decision panel closed.',
+                embeds: interaction.message.embeds,
+                components: []
+            });
+            return true;
+        }
+
+        const requiredPerm = getRequiredPermission(action);
+        if (!interaction.memberPermissions || !interaction.memberPermissions.has(requiredPerm)) {
+            await interaction.reply({ content: 'You do not have permission to perform this moderation action.', ephemeral: true });
+            return true;
+        }
+
+        if (!interaction.guild.members.me.permissions.has(requiredPerm)) {
+            await interaction.reply({ content: 'I do not have the required permission to perform that action.', ephemeral: true });
+            return true;
+        }
+
+        if (action === 'mute' || action === 'temp_ban') {
+            const modal = new ModalBuilder()
+                .setCustomId(`${MOD_DECISION_MODAL_PREFIX}${action}:${actionKey}`)
+                .setTitle(action === 'mute' ? 'Moderator Decision - Mute' : 'Moderator Decision - Temp Ban');
+
+            const durationInput = new TextInputBuilder()
+                .setCustomId(MOD_DECISION_DURATION_INPUT_ID)
+                .setLabel('Duration (e.g. 1m, 1h, 7d, 1y)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setPlaceholder('Example: 1h');
+
+            modal.addComponents(new ActionRowBuilder().addComponents(durationInput));
+            await interaction.showModal(modal);
+            return true;
+        }
+
+        const applied = await applyDecisionAction({
+            client,
+            guild: interaction.guild,
+            decision,
+            action,
+            moderator: interaction.user
+        });
+
+        if (applied.error) {
+            await interaction.reply({ content: applied.error, ephemeral: true });
+            return true;
+        }
+
+        if (client.deletePendingModerationAction) client.deletePendingModerationAction(actionKey);
+
+        const successCount = applied.results.filter(result => result.success).length;
+        const failCount = applied.results.length - successCount;
+        await interaction.update({
+            content: `Moderator decision applied: ${action}. ${successCount} succeeded, ${failCount} failed.`,
+            embeds: interaction.message.embeds,
+            components: []
+        });
+        return true;
+    },
+    async handleModalSubmit({ client, interaction }) {
+        if (!interaction.customId.startsWith(MOD_DECISION_MODAL_PREFIX)) return false;
+        if (!interaction.guild) {
+            await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        const [, action, actionKey] = interaction.customId.match(/^moddec_modal:([^:]+):(.+)$/) || [];
+        if (!action || !actionKey) return false;
+
+        const decision = client.getPendingModerationAction ? client.getPendingModerationAction(actionKey) : null;
+        if (!decision || decision.type !== 'moderator_decision') {
+            await interaction.reply({ content: 'This moderator decision panel has expired.', ephemeral: true });
+            return true;
+        }
+
+        if (!canUseDecisionPanel(client, interaction, decision)) {
+            await interaction.reply({ content: 'Only the assigned moderator (or bot admins) can use this panel.', ephemeral: true });
+            return true;
+        }
+
+        const requiredPerm = getRequiredPermission(action);
+        if (!interaction.memberPermissions || !interaction.memberPermissions.has(requiredPerm)) {
+            await interaction.reply({ content: 'You do not have permission to perform this moderation action.', ephemeral: true });
+            return true;
+        }
+
+        if (!interaction.guild.members.me.permissions.has(requiredPerm)) {
+            await interaction.reply({ content: 'I do not have the required permission to perform that action.', ephemeral: true });
+            return true;
+        }
+
+        const durationRaw = interaction.fields.getTextInputValue(MOD_DECISION_DURATION_INPUT_ID).trim().toLowerCase();
+        const applied = await applyDecisionAction({
+            client,
+            guild: interaction.guild,
+            decision,
+            action,
+            durationRaw,
+            moderator: interaction.user
+        });
+
+        if (applied.error) {
+            await interaction.reply({ content: applied.error, ephemeral: true });
+            return true;
+        }
+
+        if (client.deletePendingModerationAction) client.deletePendingModerationAction(actionKey);
+
+        const successCount = applied.results.filter(result => result.success).length;
+        const failCount = applied.results.length - successCount;
+        await interaction.reply({
+            content: `Moderator decision applied: ${action} ${durationRaw}. ${successCount} succeeded, ${failCount} failed.`,
+            ephemeral: true
+        });
+        return true;
     }
 };

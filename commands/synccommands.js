@@ -29,7 +29,8 @@ module.exports = {
             .map(result => `- ${result.guildName}: ${result.error}`);
 
         const parts = [
-            `Re-synced ${slashData.length} slash command(s).`
+            `Re-synced ${slashData.length} slash command(s).`,
+            `Commands: ${slashData.map(cmd => `/${cmd.name}`).join(', ')}`
         ];
 
         if (successLines.length) {

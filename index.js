@@ -22,6 +22,7 @@ const {
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
+const { DEFAULT_INFRACTION_RULES, sanitizeInfractionRules, cloneInfractionRules, cloneInfractionRule } = require('./infractions');
 
 if (!token) {
     throw new Error("Missing Discord token. Set DISCORD_TOKEN or add token to config.json.");
@@ -62,6 +63,7 @@ const prefixStateFile = path.join(dataPath, "prefix-state.json");
 const autorespondersFile = path.join(dataPath, "autoresponders.json");
 const giveawaysFile = path.join(dataPath, "giveaways.json");
 const entryRolesFile = path.join(dataPath, "entryroles.json");
+const infractionsFile = path.join(dataPath, "infractions.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -80,8 +82,10 @@ client.giveaways = new Map();
 client.giveawayTimers = new Map();
 client.giveawayDrafts = new Map();
 client.entryRoles = new Map();
+client.infractionRules = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
+client.hardcodedAdmins = new Set(HARD_CODED_ADMINS);
 
 client.sendPrefixCommandResponse = async (channel, content, options = {}) => {
     try {
@@ -1532,6 +1536,70 @@ client.saveBoostChannels = () => {
     fs.writeFileSync(boostChannelFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
+client.loadInfractionRules = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(infractionsFile)) fs.writeFileSync(infractionsFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(infractionsFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read infractions file:', err);
+    }
+
+    client.infractionRules.clear();
+    for (const [guildId, rules] of Object.entries(parsed)) {
+        client.infractionRules.set(guildId, sanitizeInfractionRules(rules));
+    }
+};
+
+client.saveInfractionRules = () => {
+    const out = {};
+    for (const [guildId, rules] of client.infractionRules.entries()) {
+        out[guildId] = sanitizeInfractionRules(rules);
+    }
+    fs.writeFileSync(infractionsFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getInfractionRules = (guildId) => {
+    if (!guildId) return cloneInfractionRules(DEFAULT_INFRACTION_RULES);
+    if (!client.infractionRules.has(guildId)) {
+        client.infractionRules.set(guildId, cloneInfractionRules(DEFAULT_INFRACTION_RULES));
+    }
+    return client.infractionRules.get(guildId);
+};
+
+client.setInfractionRule = (guildId, ruleKey, ruleData) => {
+    if (!guildId || !ruleKey) return null;
+    if (!DEFAULT_INFRACTION_RULES[ruleKey]) return null;
+
+    const existing = client.getInfractionRules(guildId);
+    const next = sanitizeInfractionRules({
+        ...existing,
+        [ruleKey]: ruleData
+    });
+
+    client.infractionRules.set(guildId, next);
+    client.saveInfractionRules();
+    return next[ruleKey] || null;
+};
+
+client.resetInfractionRule = (guildId, ruleKey) => {
+    if (!guildId || !ruleKey) return null;
+    const defaults = DEFAULT_INFRACTION_RULES[ruleKey];
+    if (!defaults) return null;
+
+    const existing = client.getInfractionRules(guildId);
+    const next = sanitizeInfractionRules({
+        ...existing,
+        [ruleKey]: cloneInfractionRule(defaults)
+    });
+
+    client.infractionRules.set(guildId, next);
+    client.saveInfractionRules();
+    return next[ruleKey] || null;
+};
+
 client.loadCommands();
 client.loadPermissions();
 client.loadLogChannels();
@@ -1543,6 +1611,7 @@ client.loadPrefixCommandState();
 client.loadAutoresponders();
 client.loadGiveaways();
 client.loadEntryRoles();
+client.loadInfractionRules();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -1632,9 +1701,11 @@ client.syncSlashCommands = async () => {
     const results = [];
     for (const guild of client.guilds.cache.values()) {
         try {
-            // Force Discord to drop cached shapes before applying updated command options.
-            await guild.commands.set([]);
-            await guild.commands.set(slashData);
+            const syncPromise = guild.commands.set(slashData);
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Timed out while syncing this guild.')), 20000);
+            });
+            await Promise.race([syncPromise, timeoutPromise]);
             results.push({ guildId: guild.id, guildName: guild.name, success: true, count: slashData.length });
         } catch (err) {
             console.error(`Failed to register slash commands for guild ${guild.id}:`, err);
@@ -1684,7 +1755,7 @@ client.on('guildMemberAdd', async (member) => {
 client.on('interactionCreate', async (interaction) => {
     try {
     if (interaction.isChatInputCommand()) {
-        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands') {
+        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
             }
@@ -1723,6 +1794,26 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith('moddec_modal:')) {
+            const muteCommand = client.slashCommands.get('mute');
+            if (muteCommand && typeof muteCommand.handleModalSubmit === 'function') {
+                const handled = await muteCommand.handleModalSubmit({ client, interaction });
+                if (handled) return;
+            }
+        }
+
+        if (interaction.customId.startsWith('manage_infraction_modal:')) {
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const manageCommand = client.slashCommands.get('manage');
+            if (manageCommand && typeof manageCommand.handleModalSubmit === 'function') {
+                const handled = await manageCommand.handleModalSubmit({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId === 'gv_create_modal') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -1818,6 +1909,26 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('moddec_')) {
+            const muteCommand = client.slashCommands.get('mute');
+            if (muteCommand && typeof muteCommand.handleButton === 'function') {
+                const handled = await muteCommand.handleButton({ client, interaction });
+                if (handled) return;
+            }
+        }
+
+        if (interaction.customId.startsWith('manage_infraction_rule_')) {
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const manageCommand = client.slashCommands.get('manage');
+            if (manageCommand && typeof manageCommand.handleButton === 'function') {
+                const handled = await manageCommand.handleButton({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId === 'gv_bonus_create' || interaction.customId === 'gv_bonus_cancel') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
@@ -2296,6 +2407,18 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isStringSelectMenu()) {
+        if (interaction.customId === 'manage_infraction_rule_select') {
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const manageCommand = client.slashCommands.get('manage');
+            if (manageCommand && typeof manageCommand.handleStringSelect === 'function') {
+                const handled = await manageCommand.handleStringSelect({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId === 'gv_bonus_roles') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
