@@ -14,6 +14,10 @@ module.exports = {
             });
         }
 
+        if (typeof client.loadCommands === 'function') {
+            client.loadCommands();
+        }
+
         await interaction.deferReply({ ephemeral: true });
 
         const { slashData, results } = await client.syncSlashCommands();

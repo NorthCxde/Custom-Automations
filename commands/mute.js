@@ -1,5 +1,159 @@
 ﻿const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
+const INFRACTION_RULES = {
+    spam: {
+        label: 'Spam',
+        steps: [
+            { type: 'timeout', duration: '4h' },
+            { type: 'timeout', duration: '6h' },
+            { type: 'timeout', duration: '12h' },
+            { type: 'timeout', duration: '1d' },
+            { type: 'kick' }
+        ]
+    },
+    off_topic: {
+        label: 'Off Topic',
+        steps: [
+            { type: 'timeout', duration: '1h' },
+            { type: 'timeout', duration: '3h' },
+            { type: 'timeout', duration: '6h' },
+            { type: 'timeout', duration: '12h' },
+            { type: 'kick' }
+        ]
+    },
+    spam_pinging_owners: {
+        label: 'Spam Pinging Owners',
+        steps: [
+            { type: 'timeout', duration: '1h' },
+            { type: 'timeout', duration: '3h' },
+            { type: 'timeout', duration: '6h' },
+            { type: 'moderator_decision' }
+        ]
+    },
+    blacklisted_words_bypass: {
+        label: 'Bypassing Blacklisted Words',
+        steps: [
+            { type: 'timeout', duration: '6h' },
+            { type: 'timeout', duration: '9h' },
+            { type: 'timeout', duration: '12h' },
+            { type: 'timeout', duration: '1d' },
+            { type: 'temp_ban', duration: '7d' },
+            { type: 'moderator_decision' }
+        ]
+    },
+    nsfw_explicit_messages: {
+        label: 'NSFW or Explicit Messages',
+        steps: [
+            { type: 'timeout', duration: '1d' },
+            { type: 'timeout', duration: '3d' },
+            { type: 'timeout', duration: '7d' },
+            { type: 'ban' }
+        ]
+    },
+    direct_slurs: {
+        label: 'Direct Slurs',
+        steps: [
+            { type: 'timeout', duration: '1d' },
+            { type: 'temp_ban', duration: '7d' },
+            { type: 'ban' }
+        ]
+    },
+    harassment_disrespect: {
+        label: 'Harassment/Disrespect',
+        steps: [
+            { type: 'timeout', duration: '6h' },
+            { type: 'timeout', duration: '12h' },
+            { type: 'timeout', duration: '1d' },
+            { type: 'timeout', duration: '3d' },
+            { type: 'temp_ban', duration: '7d' },
+            { type: 'ban' }
+        ]
+    },
+    instigation: {
+        label: 'Instigation',
+        steps: [
+            { type: 'timeout', duration: '3h' },
+            { type: 'timeout', duration: '6h' },
+            { type: 'timeout', duration: '12h' },
+            { type: 'timeout', duration: '2d' },
+            { type: 'timeout', duration: '4d' },
+            { type: 'temp_ban' },
+            { type: 'moderator_decision' }
+        ]
+    },
+    promotion: {
+        label: 'Promotion',
+        steps: [
+            { type: 'timeout', duration: '12h' },
+            { type: 'ban' }
+        ]
+    },
+    controversial_topics: {
+        label: 'Controversial Topics',
+        steps: [
+            { type: 'timeout', duration: '6h' },
+            { type: 'timeout', duration: '12h' },
+            { type: 'temp_ban', duration: '7d' },
+            { type: 'ban' }
+        ]
+    },
+    roblox_tos_violation: {
+        label: 'Roblox TOS Violation',
+        steps: [
+            { type: 'timeout', duration: '1h' },
+            { type: 'timeout', duration: '6h' },
+            { type: 'timeout', duration: '1d' },
+            { type: 'temp_ban', duration: '7d' },
+            { type: 'moderator_decision' }
+        ]
+    },
+    troll_tickets: {
+        label: 'Troll Tickets',
+        steps: [
+            { type: 'ticket_blacklist' },
+            { type: 'ban' }
+        ]
+    }
+};
+
+const RULE_CHOICES = [
+    { name: 'Spam', value: 'spam' },
+    { name: 'Off Topic', value: 'off_topic' },
+    { name: 'Spam Pinging Owners', value: 'spam_pinging_owners' },
+    { name: 'Bypassing Blacklisted Words', value: 'blacklisted_words_bypass' },
+    { name: 'NSFW or Explicit Messages', value: 'nsfw_explicit_messages' },
+    { name: 'Direct Slurs', value: 'direct_slurs' },
+    { name: 'Harassment/Disrespect', value: 'harassment_disrespect' },
+    { name: 'Instigation', value: 'instigation' },
+    { name: 'Promotion', value: 'promotion' },
+    { name: 'Controversial Topics', value: 'controversial_topics' },
+    { name: 'Roblox TOS Violation', value: 'roblox_tos_violation' },
+    { name: 'Troll Tickets', value: 'troll_tickets' }
+];
+
+function formatEscalationAction(step) {
+    if (!step) return 'moderator decision';
+    if (step.type === 'timeout' && step.duration) return `timeout (${step.duration})`;
+    if (step.type === 'temp_ban' && step.duration) return `temp ban (${step.duration})`;
+    return step.type.replace(/_/g, ' ');
+}
+
+function getRuleMuteCount(client, guildId, userId, ruleKey) {
+    if (!client.getModLogs) return 0;
+    const logs = client.getModLogs(guildId, userId) || [];
+    return logs.filter(entry => {
+        const action = (entry.action || '').toString().toLowerCase();
+        return action === 'mute' && entry.infractionRule === ruleKey;
+    }).length;
+}
+
+function getEscalationStep(ruleKey, previousCount) {
+    const rule = INFRACTION_RULES[ruleKey];
+    if (!rule || !rule.steps?.length) return null;
+    const index = Math.min(previousCount, rule.steps.length - 1);
+    return rule.steps[index];
+}
+
 function parseDuration(duration) {
     const match = duration.match(/^(\d+)([smhd])$/i);
     if (!match) return null;
@@ -29,7 +183,17 @@ module.exports = {
         .addStringOption(option =>
             option.setName('duration')
                 .setDescription('Duration like 1m, 1h, or 1d')
-                .setRequired(true))
+                .setRequired(false))
+        .addStringOption(option => {
+            option
+                .setName('rule')
+                .setDescription('Infraction rule category for auto-escalation')
+                .setRequired(false);
+            for (const choice of RULE_CHOICES) {
+                option.addChoices(choice);
+            }
+            return option;
+        })
         .addUserOption(option =>
             option.setName('user2')
                 .setDescription('Another user to timeout')
@@ -143,11 +307,21 @@ module.exports = {
             interaction.options.getUser('user3'),
             interaction.options.getUser('user4')
         ].filter(Boolean);
-        const duration = interaction.options.getString('duration');
-        const reason = interaction.options.getString('reason') || 'No reason provided';
-        const durationMs = parseDuration(duration);
+        const manualDuration = interaction.options.getString('duration');
+        const ruleKey = interaction.options.getString('rule');
+        const ruleConfig = ruleKey ? INFRACTION_RULES[ruleKey] : null;
+        const baseReason = interaction.options.getString('reason') || 'No reason provided';
 
-        if (!durationMs) {
+        if (!ruleKey && !manualDuration) {
+            return interaction.reply({ content: 'Please provide either a duration or an infraction rule.', ephemeral: true });
+        }
+
+        if (ruleKey && !ruleConfig) {
+            return interaction.reply({ content: 'That rule is not configured yet. Please contact an administrator.', ephemeral: true });
+        }
+
+        const manualDurationMs = manualDuration ? parseDuration(manualDuration) : null;
+        if (manualDuration && !manualDurationMs) {
             return interaction.reply({ content: 'Please provide a valid duration like 1m, 1h, or 1d.', ephemeral: true });
         }
 
@@ -161,14 +335,43 @@ module.exports = {
                 if (!member) {
                     return { user, success: false, reason: 'Member not found' };
                 }
+
+                let duration = manualDuration;
+                let durationMs = manualDurationMs;
+                let infractionCount = null;
+                let escalationStep = null;
+
+                if (ruleKey && ruleConfig) {
+                    const priorRuleMutes = getRuleMuteCount(client, interaction.guild.id, user.id, ruleKey);
+                    infractionCount = priorRuleMutes + 1;
+                    escalationStep = getEscalationStep(ruleKey, priorRuleMutes);
+                    if (!escalationStep || escalationStep.type !== 'timeout' || !escalationStep.duration) {
+                        return {
+                            user,
+                            success: false,
+                            reason: `Escalation requires ${formatEscalationAction(escalationStep)} instead of timeout.`
+                        };
+                    }
+
+                    duration = escalationStep.duration;
+                    durationMs = parseDuration(duration);
+                    if (!durationMs) {
+                        return { user, success: false, reason: `Invalid configured duration for ${ruleConfig.label}.` };
+                    }
+                }
+
+                const effectiveReason = ruleConfig
+                    ? `[Rule: ${ruleConfig.label}] [Infraction ${infractionCount}] ${baseReason}`
+                    : baseReason;
+
                 await client.sendModerationDm({
                     user,
                     guildName: interaction.guild.name,
                     action: 'mute',
                     duration,
-                    reason
+                    reason: effectiveReason
                 });
-                await member.timeout(durationMs, reason);
+                await member.timeout(durationMs, effectiveReason);
                 let robloxId = null;
                 try {
                     if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(interaction.guild.id, user.id);
@@ -182,24 +385,41 @@ module.exports = {
                     robloxId,
                     moderatorId: interaction.user.id,
                     moderatorTag: interaction.user.tag,
-                    reason,
+                    reason: effectiveReason,
                     duration,
+                    infractionRule: ruleKey || null,
+                    infractionRuleLabel: ruleConfig?.label || null,
+                    infractionCount,
                     timestamp: new Date().toISOString()
                 });
-                return { user, success: true };
+                return {
+                    user,
+                    success: true,
+                    duration,
+                    infractionCount,
+                    ruleLabel: ruleConfig?.label || null
+                };
             } catch (error) {
                 console.error(error);
                 return { user, success: false, reason: error.message };
             }
         }));
 
-        const successCount = results.filter(r => r.success).length;
+        const successResults = results.filter(r => r.success);
+        const successCount = successResults.length;
         const failCount = results.length - successCount;
         const mentions = results.map(r => `<@${r.user.id}>`).join(', ');
         const reply = [];
 
         if (successCount) {
-            reply.push(`Timed out ${successCount} user(s): ${mentions} for ${duration}.`);
+            if (ruleConfig) {
+                const outcome = successResults
+                    .map(result => `<@${result.user.id}> -> ${result.duration} (Infraction ${result.infractionCount})`)
+                    .join('\n');
+                reply.push(`Timed out ${successCount} user(s) using ${ruleConfig.label} escalation:\n${outcome}`);
+            } else {
+                reply.push(`Timed out ${successCount} user(s): ${mentions} for ${manualDuration}.`);
+            }
         }
         if (failCount) {
             reply.push(`${failCount} user(s) could not be timed out.`);
@@ -213,8 +433,9 @@ module.exports = {
             .addFields(
                 { name: 'User(s)', value: mentions || 'None', inline: true },
                 { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
-                { name: 'Duration', value: duration, inline: true },
-                { name: 'Reason', value: reason || 'No reason provided', inline: false },
+                { name: 'Duration', value: ruleConfig ? 'Auto (by infraction rule)' : (manualDuration || 'N/A'), inline: true },
+                { name: 'Rule', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
+                { name: 'Reason', value: baseReason || 'No reason provided', inline: false },
                 { name: 'Target IDs', value: users.map(u => u.id).join(', ') || 'None', inline: false }
             )
             .setTimestamp();

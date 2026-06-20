@@ -965,6 +965,7 @@ client.scheduleGiveawaysOnStartup = () => {
 
 client.loadCommands = () => {
     client.commands.clear();
+    client.slashCommands.clear();
     if (!fs.existsSync(commandsPath)) return;
 
     const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'));
@@ -1631,6 +1632,8 @@ client.syncSlashCommands = async () => {
     const results = [];
     for (const guild of client.guilds.cache.values()) {
         try {
+            // Force Discord to drop cached shapes before applying updated command options.
+            await guild.commands.set([]);
             await guild.commands.set(slashData);
             results.push({ guildId: guild.id, guildName: guild.name, success: true, count: slashData.length });
         } catch (err) {
