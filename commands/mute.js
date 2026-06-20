@@ -792,6 +792,27 @@ module.exports = {
             files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
         });
 
+        if (client.logManualModerationAction) {
+            const manualEmbed = new EmbedBuilder()
+                .setColor(0x000000)
+                .setTitle('Manual Mute Log')
+                .addFields(
+                    { name: 'User(s)', value: mentions || 'None', inline: true },
+                    { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
+                    { name: 'Rule', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
+                    { name: 'Reason', value: baseReason || 'No reason provided', inline: false },
+                    { name: 'Outcome', value: `${successCount} muted, ${decisionCount} needs decision, ${failCount} failed`, inline: false }
+                )
+                .setTimestamp();
+
+            await client.logManualModerationAction(interaction.guild, {
+                category: 'mute',
+                embeds: [manualEmbed],
+                files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+            });
+        }
+
         const replyEmbeds = [embed];
         const replyComponents = [buildUnmuteRow()];
         if (decisionEmbed && decisionRow) {
@@ -877,6 +898,30 @@ module.exports = {
 
         const successCount = applied.results.filter(result => result.success).length;
         const failCount = applied.results.length - successCount;
+
+        if (client.logManualModerationAction && (action === 'mute' || action === 'ban' || action === 'temp_ban')) {
+            const manualEmbed = new EmbedBuilder()
+                .setColor(0x000000)
+                .setTitle(action === 'mute' ? 'Manual Mute Log' : 'Manual Ban Log')
+                .addFields(
+                    { name: 'User(s)', value: (decision.users || []).map(user => `<@${user.id}>`).join(', ') || 'None', inline: true },
+                    { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: 'Action', value: action === 'temp_ban' ? `temp ban (${applied.durationRaw || 'unspecified'})` : action, inline: true },
+                    { name: 'Rule', value: decision.ruleLabel || 'Unknown Rule', inline: true },
+                    { name: 'Reason', value: decision.baseReason || 'No reason provided', inline: false },
+                    { name: 'Outcome', value: `${successCount} succeeded, ${failCount} failed`, inline: false }
+                )
+                .setTimestamp();
+
+            await client.logManualModerationAction(interaction.guild, {
+                category: action === 'mute' ? 'mute' : 'ban',
+                embeds: [manualEmbed],
+                files: Array.isArray(decision.evidenceFiles)
+                    ? decision.evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+                    : []
+            });
+        }
+
         await interaction.update({
             content: `Moderator decision applied: ${action}. ${successCount} succeeded, ${failCount} failed.`,
             embeds: interaction.message.embeds,
@@ -935,6 +980,30 @@ module.exports = {
 
         const successCount = applied.results.filter(result => result.success).length;
         const failCount = applied.results.length - successCount;
+
+        if (client.logManualModerationAction && (action === 'mute' || action === 'ban' || action === 'temp_ban')) {
+            const manualEmbed = new EmbedBuilder()
+                .setColor(0x000000)
+                .setTitle(action === 'mute' ? 'Manual Mute Log' : 'Manual Ban Log')
+                .addFields(
+                    { name: 'User(s)', value: (decision.users || []).map(user => `<@${user.id}>`).join(', ') || 'None', inline: true },
+                    { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: 'Action', value: action === 'temp_ban' ? `temp ban (${durationRaw})` : action, inline: true },
+                    { name: 'Rule', value: decision.ruleLabel || 'Unknown Rule', inline: true },
+                    { name: 'Reason', value: decision.baseReason || 'No reason provided', inline: false },
+                    { name: 'Outcome', value: `${successCount} succeeded, ${failCount} failed`, inline: false }
+                )
+                .setTimestamp();
+
+            await client.logManualModerationAction(interaction.guild, {
+                category: action === 'mute' ? 'mute' : 'ban',
+                embeds: [manualEmbed],
+                files: Array.isArray(decision.evidenceFiles)
+                    ? decision.evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+                    : []
+            });
+        }
+
         await interaction.reply({
             content: `Moderator decision applied: ${action} ${durationRaw}. ${successCount} succeeded, ${failCount} failed.`,
             ephemeral: true

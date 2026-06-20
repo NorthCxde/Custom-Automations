@@ -227,6 +227,27 @@ module.exports = {
             embeds: [embed],
             files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
         });
+
+        if (client.logManualModerationAction) {
+            const manualEmbed = new EmbedBuilder()
+                .setColor(0x000000)
+                .setTitle('Manual Ban Log')
+                .addFields(
+                    { name: 'User(s)', value: mentions || 'None', inline: true },
+                    { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
+                    { name: 'Reason', value: reason || 'No reason provided', inline: false },
+                    { name: 'Outcome', value: `${successCount} succeeded, ${failCount} failed`, inline: false }
+                )
+                .setTimestamp();
+
+            await client.logManualModerationAction(interaction.guild, {
+                category: 'ban',
+                embeds: [manualEmbed],
+                files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+            });
+        }
+
         return interaction.reply({ content: response, embeds: [embed], components: [row], ephemeral: true });
     }
 };

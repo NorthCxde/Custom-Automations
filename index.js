@@ -64,6 +64,7 @@ const autorespondersFile = path.join(dataPath, "autoresponders.json");
 const giveawaysFile = path.join(dataPath, "giveaways.json");
 const entryRolesFile = path.join(dataPath, "entryroles.json");
 const infractionsFile = path.join(dataPath, "infractions.json");
+const manualLogsChannelsFile = path.join(dataPath, "manualLogsChannels.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -83,6 +84,7 @@ client.giveawayTimers = new Map();
 client.giveawayDrafts = new Map();
 client.entryRoles = new Map();
 client.infractionRules = new Map();
+client.manualLogsChannels = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.hardcodedAdmins = new Set(HARD_CODED_ADMINS);
@@ -1536,6 +1538,100 @@ client.saveBoostChannels = () => {
     fs.writeFileSync(boostChannelFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
+client.loadManualLogsChannels = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(manualLogsChannelsFile)) fs.writeFileSync(manualLogsChannelsFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(manualLogsChannelsFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read manual logs channels file:', err);
+    }
+
+    client.manualLogsChannels.clear();
+    for (const [guildId, value] of Object.entries(parsed)) {
+        if (!value || typeof value !== 'object') continue;
+        client.manualLogsChannels.set(guildId, {
+            muteChannelId: typeof value.muteChannelId === 'string' ? value.muteChannelId : null,
+            banChannelId: typeof value.banChannelId === 'string' ? value.banChannelId : null
+        });
+    }
+};
+
+client.saveManualLogsChannels = () => {
+    const out = {};
+    for (const [guildId, value] of client.manualLogsChannels.entries()) {
+        out[guildId] = {
+            muteChannelId: value?.muteChannelId || null,
+            banChannelId: value?.banChannelId || null
+        };
+    }
+    fs.writeFileSync(manualLogsChannelsFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getManualLogsChannels = (guildId) => {
+    const existing = client.manualLogsChannels.get(guildId);
+    if (existing) return existing;
+    return { muteChannelId: null, banChannelId: null };
+};
+
+client.setManualLogsChannels = (guildId, updates = {}) => {
+    const existing = client.getManualLogsChannels(guildId);
+    const next = {
+        muteChannelId: Object.prototype.hasOwnProperty.call(updates, 'muteChannelId') ? (updates.muteChannelId || null) : existing.muteChannelId,
+        banChannelId: Object.prototype.hasOwnProperty.call(updates, 'banChannelId') ? (updates.banChannelId || null) : existing.banChannelId
+    };
+    client.manualLogsChannels.set(guildId, next);
+    client.saveManualLogsChannels();
+    return next;
+};
+
+client.logManualModerationAction = async (guild, payload) => {
+    if (!guild || !payload || typeof payload !== 'object') return;
+    const category = String(payload.category || '').toLowerCase();
+    if (category !== 'mute' && category !== 'ban') return;
+
+    const files = Array.isArray(payload.files) ? payload.files : [];
+    const hasImageAttachment = files.some(file => {
+        const name = String(file?.name || file?.attachment || '').toLowerCase();
+        return /\.(png|jpe?g|gif|webp)$/i.test(name);
+    });
+
+    // Manual channels should only be used when image evidence exists.
+    if (!hasImageAttachment) return;
+
+    const config = client.getManualLogsChannels(guild.id);
+    const channelId = category === 'ban' ? config.banChannelId : config.muteChannelId;
+    if (!channelId) return;
+
+    let channel = guild.channels.cache.get(channelId);
+    if (!channel) {
+        try {
+            channel = await guild.channels.fetch(channelId);
+        } catch (err) {
+            console.error(`Failed to fetch manual logs channel for guild ${guild.id}:`, err);
+            return;
+        }
+    }
+
+    if (!channel || !channel.isTextBased()) return;
+    try {
+        await channel.send({
+            embeds: Array.isArray(payload.embeds) ? payload.embeds : [],
+            files,
+            allowedMentions: {
+                parse: [],
+                users: [],
+                roles: [],
+                repliedUser: false
+            }
+        });
+    } catch (err) {
+        console.error(`Failed to send manual moderation log to channel ${channelId} in guild ${guild.id}:`, err);
+    }
+};
+
 client.loadInfractionRules = () => {
     if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
     if (!fs.existsSync(infractionsFile)) fs.writeFileSync(infractionsFile, '{}', 'utf8');
@@ -1612,6 +1708,7 @@ client.loadAutoresponders();
 client.loadGiveaways();
 client.loadEntryRoles();
 client.loadInfractionRules();
+client.loadManualLogsChannels();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -1755,7 +1852,7 @@ client.on('guildMemberAdd', async (member) => {
 client.on('interactionCreate', async (interaction) => {
     try {
     if (interaction.isChatInputCommand()) {
-        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage') {
+        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
             }
