@@ -1,105 +1,180 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+﻿const {
+    SlashCommandBuilder,
+    ContextMenuCommandBuilder,
+    ApplicationCommandType,
+    EmbedBuilder,
+    MessageFlags,
+    ButtonBuilder,
+    ActionRowBuilder,
+    ButtonStyle
+} = require('discord.js');
 
-async function fetchRobloxUserById(id) {
-    try {
-        const response = await fetch(`https://users.roblox.com/v1/users/${id}`);
-        if (!response.ok) return null;
-        return await response.json();
-    } catch (err) {
-        console.error('Roblox profile lookup failed:', err);
-        return null;
+const BADGE_CONFIG = {
+    OWNER: {
+        roleIds: ['944796064207220801'],
+        emoji: '<:Owner:1518755754948034721>'
+    },
+    HEAD: {
+        roleIds: ['1178953035230236742', '944796064207220801'],
+        emoji: '<:Head:1518757566031859883>'
+    },
+    MODERATOR: {
+        roleIds: ['1006267938543771648', '944796064207220801', '1178953035230236742', '1217365422501003284'],
+        emoji: '<:Staff:1518753622618407062>'
+    },
+    HONORARY: {
+        roleIds: ['1191552089105645619'],
+        emoji: '<:Honorary:1518765957257105492>'
+    },
+    VAOSPY_PLUS: {
+        roleIds: ['1203916959079600169'],
+        emoji: '<:VaoSPY:1518760819330912268>'
+    },
+    RESPECTED_MEMBER: {
+        roleIds: ['981706392010371072'],
+        emoji: '<:RespectedMember:1518764326599524493>'
+    },
+    BOOSTER: {
+        roleIds: ['978455981111537736'],
+        emoji: '<:Booster:1518760430749876334>'
+    },
+    MEMBER: {
+        roleIds: ['1052808144662827061'],
+        emoji: '<:Member:1518763772922298398>'
     }
+};
+
+function getBadges(member) {
+    if (!member) return '';
+    const badges = [];
+    
+    if (BADGE_CONFIG.OWNER.roleIds.some(roleId => member.roles.cache.has(roleId))) {
+        badges.push(BADGE_CONFIG.OWNER.emoji);
+    }
+    
+    if (BADGE_CONFIG.HEAD.roleIds.some(roleId => member.roles.cache.has(roleId))) {
+        badges.push(BADGE_CONFIG.HEAD.emoji);
+    }
+    
+    if (BADGE_CONFIG.MODERATOR.roleIds.some(roleId => member.roles.cache.has(roleId))) {
+        badges.push(BADGE_CONFIG.MODERATOR.emoji);
+    }
+
+    if (BADGE_CONFIG.HONORARY.roleIds.some(roleId => member.roles.cache.has(roleId))) {
+        badges.push(BADGE_CONFIG.HONORARY.emoji);
+    }
+
+    if (BADGE_CONFIG.VAOSPY_PLUS.roleIds.some(roleId => member.roles.cache.has(roleId))) {
+        badges.push(BADGE_CONFIG.VAOSPY_PLUS.emoji);
+    }
+
+    if (BADGE_CONFIG.RESPECTED_MEMBER.roleIds.some(roleId => member.roles.cache.has(roleId))) {
+        badges.push(BADGE_CONFIG.RESPECTED_MEMBER.emoji);
+    }
+    
+    if (BADGE_CONFIG.BOOSTER.roleIds.some(roleId => member.roles.cache.has(roleId))) {
+        badges.push(BADGE_CONFIG.BOOSTER.emoji);
+    }
+
+    if (BADGE_CONFIG.MEMBER.roleIds.some(roleId => member.roles.cache.has(roleId))) {
+        badges.push(BADGE_CONFIG.MEMBER.emoji);
+    }
+    
+    return badges.slice(0, 8).join(' ');
 }
 
-async function fetchRobloxAvatarUrl(userId) {
-    try {
-        const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=420x420&format=Png&isCircular=false`);
-        if (!response.ok) return null;
-        const body = await response.json();
-        return body.data?.[0]?.imageUrl || null;
-    } catch (err) {
-        console.error('Roblox avatar lookup failed:', err);
-        return null;
-    }
+function formatRoles(member) {
+    if (!member?.roles?.cache) return 'None';
+    const roles = member.roles.cache
+        .filter(role => role.name !== '@everyone')
+        .sort((a, b) => b.position - a.position)
+        .map(role => role.toString());
+
+    if (!roles.length) return 'None';
+    if (roles.length <= 8) return roles.join(' ');
+    return `${roles.slice(0, 8).join(' ')} (+${roles.length - 8} more)`;
 }
 
 module.exports = {
     name: 'profile',
-    description: 'Show Discord profile details and linked Roblox account details for a user.',
+    description: 'Show an advanced Discord profile card for a user.',
     data: new SlashCommandBuilder()
         .setName('profile')
-        .setDescription('Show Discord profile details and linked Roblox account details for a user.')
+        .setDescription('Show an advanced Discord profile card for a user.')
         .addUserOption(option =>
             option
                 .setName('user')
                 .setDescription('User to view (defaults to yourself)')
                 .setRequired(false)
         ),
+    contextData: new ContextMenuCommandBuilder()
+        .setName('profile')
+        .setType(ApplicationCommandType.Message),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
-            return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+            return interaction.reply({ content: 'This command must be used in a server channel.', flags: MessageFlags.Ephemeral });
         }
 
-        const user = interaction.options.getUser('user') || interaction.user;
+        let user = interaction.user;
+        if (interaction.isChatInputCommand()) {
+            user = interaction.options.getUser('user') || interaction.user;
+        } else if (interaction.isMessageContextMenuCommand()) {
+            user = interaction.targetMessage?.author || interaction.user;
+        }
+
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
 
-        let robloxId = null;
-        try {
-            if (client.getLinkedRobloxId) {
-                robloxId = await client.getLinkedRobloxId(interaction.guild.id, user.id);
-            }
-        } catch (err) {
-            console.error('Failed to get linked Roblox ID for profile command:', err);
-        }
+        const bannerUrl = user.bannerURL({ extension: 'png', size: 1024 });
+        const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 512 });
+        const profileColor = 0x1f2937;
 
-        let robloxUser = null;
-        let robloxAvatarUrl = null;
-        if (robloxId) {
-            robloxUser = await fetchRobloxUserById(robloxId);
-            robloxAvatarUrl = await fetchRobloxAvatarUrl(robloxId);
-        }
+        const accountSummary = [
+            `**${user.tag}** • ${user.id}`,
+            `Created <t:${Math.floor(user.createdTimestamp / 1000)}:R>`
+        ].join('\n');
 
-        const discordLines = [
-            `Mention: <@${user.id}>`,
-            `Tag: ${user.tag}`,
-            `ID: ${user.id}`,
-            `Account Created: <t:${Math.floor(user.createdTimestamp / 1000)}:F>`
-        ];
-
-        if (member?.joinedTimestamp) {
-            discordLines.push(`Joined Server: <t:${Math.floor(member.joinedTimestamp / 1000)}:F>`);
-        }
-
-        const robloxLines = robloxId
+        const serverSummary = member
             ? [
-                `Linked: Yes`,
-                `Username: ${robloxUser?.name || 'Unknown'}`,
-                `Display Name: ${robloxUser?.displayName || 'Unknown'}`,
-                `Roblox ID: ${robloxId}`,
-                `Profile: https://www.roblox.com/users/${robloxId}/profile`
-            ]
-            : [
-                'Linked: No',
-                'No Roblox account found for this user in Bloxlink.'
-            ];
+                `Joined <t:${Math.floor(member.joinedTimestamp / 1000)}:R>`,
+                `Role: ${member.roles.highest?.toString() || 'None'}`,
+                member.premiumSinceTimestamp ? `Boosting since <t:${Math.floor(member.premiumSinceTimestamp / 1000)}:R>` : null
+            ].filter(Boolean).join('\n')
+            : 'Not a server member';
+
+        const badges = getBadges(member);
+        const titleWithBadges = badges 
+            ? `${member?.displayName || user.username} ${badges}`
+            : member?.displayName || user.username;
 
         const embed = new EmbedBuilder()
-            .setColor(0x000000)
-            .setTitle('User Profile')
+            .setColor(profileColor)
+            .setTitle(titleWithBadges)
             .setAuthor({
-                name: `${user.tag}`,
-                iconURL: user.displayAvatarURL({ extension: 'png', size: 256 })
+                name: user.username,
+                iconURL: avatarUrl
             })
+            .setThumbnail(avatarUrl)
             .addFields(
-                { name: 'Discord', value: discordLines.join('\n'), inline: false },
-                { name: 'Roblox', value: robloxLines.join('\n'), inline: false }
+                { name: 'Account', value: accountSummary, inline: true },
+                { name: 'Server', value: serverSummary, inline: true },
+                { name: 'Roles', value: formatRoles(member) || 'None', inline: false }
             )
+            .setFooter({ text: `${interaction.user.tag}` })
             .setTimestamp();
 
-        if (robloxAvatarUrl) {
-            embed.setThumbnail(robloxAvatarUrl);
+        if (bannerUrl) {
+            embed.setImage(bannerUrl);
         }
 
-        return interaction.reply({ embeds: [embed], ephemeral: false });
+        const components = [];
+        if (client.isMemberAllowed && client.isMemberAllowed(interaction.member)) {
+            const banButton = new ButtonBuilder()
+                .setCustomId(`profile-ban-user-${user.id}`)
+                .setLabel('Ban User')
+                .setStyle(ButtonStyle.Danger);
+            components.push(new ActionRowBuilder().addComponents(banButton));
+        }
+
+        return interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
     }
 };

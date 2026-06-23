@@ -1,5 +1,9 @@
 const config = require("./config.json");
-const token = process.env.DISCORD_TOKEN || config.token;
+const normalizeToken = (value) => String(value || '').trim().replace(/^['\"]|['\"]$/g, '');
+const configToken = normalizeToken(config.token);
+const envToken = normalizeToken(process.env.DISCORD_TOKEN);
+const token = configToken || envToken;
+const tokenSource = configToken ? 'config.json' : (envToken ? 'DISCORD_TOKEN env' : 'none');
 const {
     Client,
     GatewayIntentBits,
@@ -18,14 +22,20 @@ const {
     ChannelSelectMenuBuilder,
     RoleSelectMenuBuilder,
     UserSelectMenuBuilder,
-    ChannelType
+    ChannelType,
+    Routes
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
+const https = require("https");
 const { DEFAULT_INFRACTION_RULES, sanitizeInfractionRules, cloneInfractionRules, cloneInfractionRule } = require('./infractions');
 
 if (!token) {
     throw new Error("Missing Discord token. Set DISCORD_TOKEN or add token to config.json.");
+}
+
+if (envToken && configToken && envToken !== configToken) {
+    console.warn('DISCORD_TOKEN differs from config token; using config.json token for startup stability.');
 }
 
 const prefix = "?";
@@ -36,10 +46,115 @@ const HARD_CODED_ADMINS = [
     '1335476704407191563',
     '582686715702018078'
 ];
+const STATIC_HARD_CODED_ADMINS = [...HARD_CODED_ADMINS];
+
+const trelloApiKey = String(config.trelloApiKey || process.env.TRELLO_API_KEY || '').trim();
+const trelloToken = String(config.trelloToken || process.env.TRELLO_TOKEN || '').trim();
+const trelloBoardId = String(config.trelloBoardId || process.env.TRELLO_BOARD_ID || '').trim();
+const trelloAdminListName = String(config.trelloAdminListName || process.env.TRELLO_ADMIN_LIST_NAME || 'Hard Coded Admins').trim();
+const trelloModeratorPermListName = String(config.trelloModeratorPermListName || process.env.TRELLO_MODERATOR_PERM_LIST_NAME || 'Moderator Level Perms').trim();
+const configuredTrelloSyncMs = Number(config.trelloSyncIntervalMs || process.env.TRELLO_SYNC_INTERVAL_MS || 300000);
+const trelloSyncIntervalMs = Number.isFinite(configuredTrelloSyncMs)
+    ? Math.max(30000, configuredTrelloSyncMs)
+    : 300000;
+const STATIC_MODERATOR_LEVEL_PERM_ROLE_NAMES = [];
 
 const HQ_GUILD_ID_DEFAULT = '1512252919423176875';
 const HQ_PERMS_LOG_CHANNEL_ID_DEFAULT = '1517292575239704907';
 const HQ_GLOBAL_LOG_CHANNEL_ID_DEFAULT = '1517325234712219718';
+const BOOT_MARKER = 'trello-perms-sync-v3';
+
+function trelloRequestJson(url) {
+    return new Promise((resolve, reject) => {
+        https.get(url, (res) => {
+            let data = '';
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+            res.on('end', () => {
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    return reject(new Error(`Trello request failed (${res.statusCode}): ${data.slice(0, 300)}`));
+                }
+                try {
+                    resolve(JSON.parse(data));
+                } catch (err) {
+                    reject(new Error(`Failed to parse Trello response: ${err.message}`));
+                }
+            });
+        }).on('error', reject);
+    });
+}
+
+function trelloPostJson(url) {
+    return new Promise((resolve, reject) => {
+        const parsed = new URL(url);
+        const req = https.request({
+            protocol: parsed.protocol,
+            hostname: parsed.hostname,
+            port: parsed.port,
+            path: `${parsed.pathname}${parsed.search}`,
+            method: 'POST'
+        }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+            res.on('end', () => {
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    return reject(new Error(`Trello POST failed (${res.statusCode}): ${data.slice(0, 300)}`));
+                }
+                try {
+                    resolve(JSON.parse(data));
+                } catch (err) {
+                    reject(new Error(`Failed to parse Trello POST response: ${err.message}`));
+                }
+            });
+        });
+        req.on('error', reject);
+        req.end();
+    });
+}
+
+function extractDiscordIdsFromText(text) {
+    const ids = String(text || '').match(/\b\d{17,20}\b/g);
+    return ids ? ids.map(String) : [];
+}
+
+function extractTrelloRoleNamesFromText(text) {
+    return String(text || '')
+        .split(/[\n,;]+/g)
+        .map(part => part.trim())
+        .map(part => part.replace(/^[*\-•\d.):-]+\s*/g, '').trim())
+        .filter(Boolean);
+}
+
+function collectConfiguredPermRoleNames() {
+    const names = new Set();
+
+    for (const [guildId, roleSet] of client.allowedRoles.entries()) {
+        if (!roleSet || roleSet.size === 0) continue;
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) continue;
+
+        for (const roleId of roleSet) {
+            const role = guild.roles.cache.get(roleId);
+            if (!role?.name) continue;
+            names.add(String(role.name).trim().toLowerCase());
+        }
+    }
+
+    return names;
+}
+
+function setsAreEqual(left, right) {
+    if (left === right) return true;
+    if (!left || !right) return false;
+    if (left.size !== right.size) return false;
+    for (const value of left) {
+        if (!right.has(value)) return false;
+    }
+    return true;
+}
 
 const client = new Client({
     intents: [
@@ -76,6 +191,9 @@ client.pendingPermsUndoActions = new Map();
 client.pendingGlobalModUndoActions = new Map();
 client.bloxlink = new Map();
 client.bloxlinkHistory = new Map();
+client.bloxlinkRateLimitUntilByGuild = new Map();
+client.bloxlinkRateLimitNoticeUntilByGuild = new Map();
+client.bloxlinkLogCooldownByKey = new Map();
 client.slashCommands = new Map();
 client.autoresponders = new Map();
 client.autoresponderDrafts = new Map();
@@ -89,19 +207,365 @@ client.manualLogsChannels = new Map();
 client.publicAllowedRoles = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
-client.hardcodedAdmins = new Set(HARD_CODED_ADMINS);
+client.banStickerId = '1480253710969082108';
+client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
+client.trelloModeratorLevelPermRoleNames = new Set(STATIC_MODERATOR_LEVEL_PERM_ROLE_NAMES.map(name => String(name).toLowerCase()));
 client.publicCommandNames = new Set(['profile']);
+
+client.applyHardcodedAdmins = (ids = []) => {
+    const merged = [...new Set([...STATIC_HARD_CODED_ADMINS.map(String), ...ids.map(String)])];
+    client.hardcodedAdmins = new Set(merged);
+    HARD_CODED_ADMINS.splice(0, HARD_CODED_ADMINS.length, ...merged);
+    return merged;
+};
+
+client.applyModeratorLevelPermRoleNames = (names = []) => {
+    const merged = [...new Set([
+        ...STATIC_MODERATOR_LEVEL_PERM_ROLE_NAMES.map(name => String(name).toLowerCase()),
+        ...names.map(name => String(name).toLowerCase())
+    ])];
+    client.trelloModeratorLevelPermRoleNames = new Set(merged);
+    return merged;
+};
+
+client.ensureModeratorPermCardsByRoleNames = async (roleNames = []) => {
+    if (!trelloApiKey || !trelloToken || !trelloBoardId) {
+        return { enabled: false, trelloRoleNames: new Set(), createdCards: 0, source: 'static-only' };
+    }
+
+    const normalizedRoleNames = [...new Set(roleNames.map(name => String(name || '').trim().toLowerCase()).filter(Boolean))];
+    const listsUrl = `https://api.trello.com/1/boards/${encodeURIComponent(trelloBoardId)}/lists?fields=id,name&key=${encodeURIComponent(trelloApiKey)}&token=${encodeURIComponent(trelloToken)}`;
+    const lists = await trelloRequestJson(listsUrl);
+    const targetList = Array.isArray(lists)
+        ? lists.find(list => String(list?.name || '').trim().toLowerCase() === trelloModeratorPermListName.toLowerCase())
+        : null;
+
+    if (!targetList?.id) {
+        return { enabled: true, trelloRoleNames: new Set(), createdCards: 0, source: 'trello-missing-list', listName: trelloModeratorPermListName };
+    }
+
+    const cardsUrl = `https://api.trello.com/1/lists/${encodeURIComponent(targetList.id)}/cards?fields=name,desc&key=${encodeURIComponent(trelloApiKey)}&token=${encodeURIComponent(trelloToken)}`;
+    const cards = await trelloRequestJson(cardsUrl);
+    const trelloRoleNames = new Set();
+
+    if (Array.isArray(cards)) {
+        for (const card of cards) {
+            for (const roleName of extractTrelloRoleNamesFromText(card?.name)) trelloRoleNames.add(roleName.toLowerCase());
+            for (const roleName of extractTrelloRoleNamesFromText(card?.desc)) trelloRoleNames.add(roleName.toLowerCase());
+        }
+    }
+
+    let createdCards = 0;
+    for (const roleName of normalizedRoleNames) {
+        if (trelloRoleNames.has(roleName)) continue;
+
+        const createCardUrl = `https://api.trello.com/1/cards?idList=${encodeURIComponent(targetList.id)}&name=${encodeURIComponent(roleName)}&desc=${encodeURIComponent('Auto-created from bot moderator level perms')}&key=${encodeURIComponent(trelloApiKey)}&token=${encodeURIComponent(trelloToken)}`;
+        try {
+            await trelloPostJson(createCardUrl);
+            trelloRoleNames.add(roleName);
+            createdCards += 1;
+        } catch (err) {
+            console.error(`Failed to create Trello moderator perm card for ${roleName}:`, err.message || err);
+        }
+    }
+
+    return {
+        enabled: true,
+        trelloRoleNames,
+        createdCards,
+        listName: trelloModeratorPermListName,
+        listId: targetList.id
+    };
+};
+
+client.syncAllowedRolesFromModeratorPermNames = (roleNames = []) => {
+    const normalizedRoleNames = new Set(roleNames.map(name => String(name || '').trim().toLowerCase()).filter(Boolean));
+    let changedGuildCount = 0;
+
+    for (const [guildId, currentRoleSet] of client.allowedRoles.entries()) {
+        if (currentRoleSet === null) continue;
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) continue;
+
+        const nextRoleSet = new Set(
+            Array.from(guild.roles.cache.values())
+                .filter(role => normalizedRoleNames.has(String(role.name || '').trim().toLowerCase()))
+                .map(role => role.id)
+        );
+
+        if (setsAreEqual(currentRoleSet, nextRoleSet)) continue;
+
+        client.allowedRoles.set(guildId, nextRoleSet);
+        changedGuildCount += 1;
+    }
+
+    if (changedGuildCount > 0) {
+        client.savePermissions();
+    }
+
+    return changedGuildCount;
+};
+
+client.refreshHardcodedAdminsFromTrello = async () => {
+    if (!trelloApiKey || !trelloToken || !trelloBoardId) {
+        client.applyHardcodedAdmins([]);
+        return { enabled: false, total: client.hardcodedAdmins.size, source: 'static-only' };
+    }
+
+    const listsUrl = `https://api.trello.com/1/boards/${encodeURIComponent(trelloBoardId)}/lists?fields=id,name&key=${encodeURIComponent(trelloApiKey)}&token=${encodeURIComponent(trelloToken)}`;
+    const lists = await trelloRequestJson(listsUrl);
+    const targetList = Array.isArray(lists)
+        ? lists.find(list => String(list?.name || '').trim().toLowerCase() === trelloAdminListName.toLowerCase())
+        : null;
+
+    if (!targetList?.id) {
+        client.applyHardcodedAdmins([]);
+        return { enabled: true, total: client.hardcodedAdmins.size, source: 'trello-missing-list', listName: trelloAdminListName };
+    }
+
+    const cardsUrl = `https://api.trello.com/1/lists/${encodeURIComponent(targetList.id)}/cards?fields=name,desc&key=${encodeURIComponent(trelloApiKey)}&token=${encodeURIComponent(trelloToken)}`;
+    const cards = await trelloRequestJson(cardsUrl);
+    const trelloIds = new Set();
+
+    if (Array.isArray(cards)) {
+        for (const card of cards) {
+            for (const id of extractDiscordIdsFromText(card?.name)) trelloIds.add(id);
+            for (const id of extractDiscordIdsFromText(card?.desc)) trelloIds.add(id);
+        }
+    }
+
+    const missingStaticIds = STATIC_HARD_CODED_ADMINS
+        .map(String)
+        .filter(id => !trelloIds.has(id));
+
+    let createdCards = 0;
+    for (const adminId of missingStaticIds) {
+        const createCardUrl = `https://api.trello.com/1/cards?idList=${encodeURIComponent(targetList.id)}&name=${encodeURIComponent(adminId)}&desc=${encodeURIComponent('Auto-created from bot static hard coded admins')}&key=${encodeURIComponent(trelloApiKey)}&token=${encodeURIComponent(trelloToken)}`;
+        try {
+            await trelloPostJson(createCardUrl);
+            trelloIds.add(adminId);
+            createdCards += 1;
+        } catch (err) {
+            console.error(`Failed to create Trello admin card for ${adminId}:`, err.message || err);
+        }
+    }
+
+    const merged = client.applyHardcodedAdmins([...trelloIds]);
+    client.trelloAdminListId = String(targetList.id);
+    client.trelloHardcodedAdminsLastSyncAt = new Date().toISOString();
+
+    return {
+        enabled: true,
+        total: merged.length,
+        staticCount: STATIC_HARD_CODED_ADMINS.length,
+        trelloCount: trelloIds.size,
+        createdCards,
+        listName: trelloAdminListName,
+        listId: targetList.id
+    };
+};
+
+client.refreshModeratorLevelPermsFromTrello = async () => {
+    if (!trelloApiKey || !trelloToken || !trelloBoardId) {
+        client.applyModeratorLevelPermRoleNames([]);
+        return { enabled: false, total: client.trelloModeratorLevelPermRoleNames.size, source: 'static-only' };
+    }
+
+    const listsUrl = `https://api.trello.com/1/boards/${encodeURIComponent(trelloBoardId)}/lists?fields=id,name&key=${encodeURIComponent(trelloApiKey)}&token=${encodeURIComponent(trelloToken)}`;
+    const lists = await trelloRequestJson(listsUrl);
+    const targetList = Array.isArray(lists)
+        ? lists.find(list => String(list?.name || '').trim().toLowerCase() === trelloModeratorPermListName.toLowerCase())
+        : null;
+
+    if (!targetList?.id) {
+        client.applyModeratorLevelPermRoleNames([]);
+        return { enabled: true, total: client.trelloModeratorLevelPermRoleNames.size, source: 'trello-missing-list', listName: trelloModeratorPermListName };
+    }
+
+    const cardsUrl = `https://api.trello.com/1/lists/${encodeURIComponent(targetList.id)}/cards?fields=name,desc&key=${encodeURIComponent(trelloApiKey)}&token=${encodeURIComponent(trelloToken)}`;
+    const cards = await trelloRequestJson(cardsUrl);
+    let trelloRoleNames = new Set();
+
+    if (Array.isArray(cards)) {
+        for (const card of cards) {
+            for (const roleName of extractTrelloRoleNamesFromText(card?.name)) trelloRoleNames.add(roleName.toLowerCase());
+            for (const roleName of extractTrelloRoleNamesFromText(card?.desc)) trelloRoleNames.add(roleName.toLowerCase());
+        }
+    }
+
+    const configuredPermRoleNames = collectConfiguredPermRoleNames();
+
+    let createdCards = 0;
+    if (trelloRoleNames.size === 0 && configuredPermRoleNames.size > 0) {
+        const seedResult = await client.ensureModeratorPermCardsByRoleNames([...configuredPermRoleNames]);
+        if (seedResult.enabled && seedResult.trelloRoleNames instanceof Set) {
+            trelloRoleNames = seedResult.trelloRoleNames;
+            createdCards = seedResult.createdCards || 0;
+        }
+    }
+
+    const syncedGuildCount = client.syncAllowedRolesFromModeratorPermNames([...trelloRoleNames]);
+    const merged = client.applyModeratorLevelPermRoleNames([...trelloRoleNames]);
+    const syncedConfiguredPermRoleNames = collectConfiguredPermRoleNames();
+    client.trelloModeratorPermListId = String(targetList.id);
+    client.trelloModeratorPermsLastSyncAt = new Date().toISOString();
+
+    return {
+        enabled: true,
+        total: merged.length,
+        staticCount: STATIC_MODERATOR_LEVEL_PERM_ROLE_NAMES.length,
+        configuredPermCount: syncedConfiguredPermRoleNames.size,
+        trelloCount: trelloRoleNames.size,
+        createdCards,
+        syncedGuildCount,
+        listName: trelloModeratorPermListName,
+        listId: targetList.id
+    };
+};
+
+client.scheduleHardcodedAdminsSync = () => {
+    const sync = async () => {
+        try {
+            console.log('Starting hardcoded admin Trello sync...');
+            const result = await client.refreshHardcodedAdminsFromTrello();
+            if (result.enabled) {
+                console.log(`Hardcoded admin sync complete: total=${result.total}, static=${result.staticCount || 0}, trello=${result.trelloCount || 0}, created=${result.createdCards || 0}, list=${result.listName || 'unknown'}`);
+            }
+        } catch (err) {
+            console.error('Failed to sync hardcoded admins from Trello:', err.message || err);
+            client.applyHardcodedAdmins([]);
+        }
+
+        try {
+            console.log('Starting moderator level perms Trello sync...');
+            const permsResult = await client.refreshModeratorLevelPermsFromTrello();
+            if (permsResult.enabled) {
+                console.log(`Moderator level perms sync complete: total=${permsResult.total}, static=${permsResult.staticCount || 0}, configured=${permsResult.configuredPermCount || 0}, trello=${permsResult.trelloCount || 0}, created=${permsResult.createdCards || 0}, list=${permsResult.listName || 'unknown'}`);
+            }
+        } catch (err) {
+            console.error('Failed to sync moderator level perms from Trello:', err.message || err);
+            client.applyModeratorLevelPermRoleNames([]);
+        }
+    };
+
+    sync().catch(() => null);
+    setInterval(() => sync().catch(() => null), trelloSyncIntervalMs);
+};
 
 client.sendPrefixCommandResponse = async (channel, content, options = {}) => {
     try {
-        const msg = await channel.send({ content, ...options });
-        if (client.prefixCommandReactionEmojiId) {
-            await msg.react(client.prefixCommandReactionEmojiId).catch(err => console.error('Failed to react to prefix command response:', err));
+        if (!channel || typeof channel.send !== 'function') return null;
+
+        const safeContent = typeof content === 'string' ? content.trim() : '';
+        const payload = { ...options };
+
+        if (safeContent.length > 0) {
+            payload.content = safeContent;
         }
-        return msg;
+
+        if (!payload.allowedMentions) {
+            payload.allowedMentions = {
+                parse: [],
+                users: [],
+                roles: [],
+                repliedUser: false
+            };
+        }
+
+        const hasEmbeds = Array.isArray(payload.embeds) && payload.embeds.length > 0;
+        const hasFiles = Array.isArray(payload.files) && payload.files.length > 0;
+        const hasComponents = Array.isArray(payload.components) && payload.components.length > 0;
+        if (!payload.content && !hasEmbeds && !hasFiles && !hasComponents) {
+            return null;
+        }
+
+        return await channel.send(payload);
     } catch (error) {
         console.error('Failed to send prefix command response:', error);
         return null;
+    }
+};
+
+client.sendActionStatusCard = async (channelOrId, text) => {
+    try {
+        let channel = channelOrId || null;
+        if (typeof channel === 'string') {
+            channel = await client.channels.fetch(channel).catch(() => null);
+        } else if (channel && typeof channel.send !== 'function' && channel.id) {
+            channel = await client.channels.fetch(channel.id).catch(() => null);
+        }
+
+        if (!channel || typeof channel.send !== 'function') return false;
+
+        const embed = new EmbedBuilder()
+            .setColor(0x57F287)
+            .setDescription(`✅ ${text}`);
+
+        await channel.send({
+            embeds: [embed],
+            allowedMentions: {
+                parse: [],
+                users: [],
+                roles: [],
+                repliedUser: false
+            }
+        });
+        return true;
+    } catch (error) {
+        console.error('Failed to send action status card:', error);
+        return false;
+    }
+};
+
+client.sendBanSticker = async (channelOrId) => {
+    try {
+        const stickerId = String(client.banStickerId || '').trim();
+        if (!stickerId) return false;
+
+        let channel = channelOrId || null;
+        if (typeof channel === 'string') {
+            channel = await client.channels.fetch(channel).catch(() => null);
+        } else if (channel && typeof channel.send !== 'function' && channel.id) {
+            channel = await client.channels.fetch(channel.id).catch(() => null);
+        }
+
+        const channelId = channel?.id || (typeof channelOrId === 'string' ? channelOrId : channelOrId?.id);
+
+        if (channel && typeof channel.send === 'function') {
+            await channel.send({
+                stickers: [stickerId],
+                allowedMentions: {
+                    parse: [],
+                    users: [],
+                    roles: [],
+                    repliedUser: false
+                }
+            });
+            console.log('sendBanSticker success via channel.send:', { channelId: channel.id, stickerId });
+            return true;
+        }
+
+        if (channelId) {
+            await client.rest.post(Routes.channelMessages(channelId), {
+                body: {
+                    stickers: [stickerId],
+                    allowed_mentions: {
+                        parse: [],
+                        users: [],
+                        roles: [],
+                        replied_user: false
+                    }
+                }
+            });
+            console.log('sendBanSticker success via REST fallback:', { channelId, stickerId });
+            return true;
+        }
+
+        console.warn('sendBanSticker skipped: no resolvable channel or channelId.');
+        return false;
+    } catch (error) {
+        console.error('Failed to send ban sticker:', error);
+        return false;
     }
 };
 
@@ -986,8 +1450,14 @@ client.loadCommands = () => {
             if (cmd && cmd.name && typeof cmd.execute === 'function') {
                 client.commands.set(cmd.name, cmd);
             }
-            if (cmd && cmd.data) {
-                client.slashCommands.set(cmd.name, cmd);
+
+            const registrationDefs = [cmd?.data, cmd?.contextData].filter(Boolean);
+            if (registrationDefs.length) {
+                for (const def of registrationDefs) {
+                    const json = typeof def.toJSON === 'function' ? def.toJSON() : null;
+                    if (!json?.name) continue;
+                    client.slashCommands.set(json.name, cmd);
+                }
             }
         } catch (err) {
             console.error(`Failed to load command ${file}:`, err);
@@ -1188,40 +1658,167 @@ client.getBloxlinkApiKey = (guildId) => {
     return process.env.BLOXLINK_API_KEY || config.bloxlinkApiKey || null;
 };
 
-client.getLinkedRobloxId = async (guildId, discordId) => {
-    if (!guildId || !discordId) return null;
+const extractRobloxIdFromBloxlinkPayload = (body) => {
+    const candidates = [
+        body?.robloxID,
+        body?.robloxId,
+        body?.roblox_id,
+        body?.user?.robloxID,
+        body?.user?.robloxId,
+        body?.user?.roblox_id,
+        body?.user?.id,
+        body?.robloxAccount?.id,
+        body?.robloxAccount?.robloxID,
+        body?.robloxAccount?.robloxId,
+        body?.primaryAccount?.id,
+        body?.primaryAccount?.robloxID,
+        body?.primaryAccount?.robloxId,
+        body?.account?.id,
+        body?.account?.robloxID,
+        body?.account?.robloxId
+    ];
+
+    for (const candidate of candidates) {
+        if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+            return String(candidate).trim();
+        }
+    }
+
+    return null;
+};
+
+client.logBloxlinkThrottled = (key, message, level = 'warn', cooldownMs = 5 * 60 * 1000) => {
+    const now = Date.now();
+    const nextAllowed = Number(client.bloxlinkLogCooldownByKey.get(key) || 0);
+    if (nextAllowed > now) return;
+    client.bloxlinkLogCooldownByKey.set(key, now + Math.max(1000, Number(cooldownMs) || 0));
+
+    if (level === 'error') {
+        console.error(message);
+    } else {
+        console.warn(message);
+    }
+};
+
+client.lookupLinkedRobloxAccount = async (guildId, discordId) => {
+    if (!guildId || !discordId) {
+        return { ok: false, status: 400, reason: 'missing-params', robloxId: null };
+    }
 
     const cacheKey = `${guildId}:${discordId}`;
     const cached = client.bloxlink.get(cacheKey) || client.bloxlink.get(discordId);
     const now = Date.now();
+
+    const rateLimitedUntil = Number(client.bloxlinkRateLimitUntilByGuild.get(guildId) || 0);
+    if (rateLimitedUntil > now) {
+        if (cached && cached.robloxId) {
+            return { ok: true, status: 200, reason: 'stale-cache', robloxId: cached.robloxId };
+        }
+        return { ok: false, status: 429, reason: 'rate-limited', robloxId: null };
+    }
+
     if (cached && cached.robloxId && (!cached.expires || cached.expires > now)) {
         if (client.bloxlink.has(discordId) && !client.bloxlink.has(cacheKey)) {
             client.bloxlink.set(cacheKey, cached);
             client.bloxlink.delete(discordId);
             client.saveBloxlink();
         }
-        return cached.robloxId;
+        return { ok: true, status: 200, reason: 'cache', robloxId: cached.robloxId };
     }
 
     const apiKey = client.getBloxlinkApiKey(guildId);
-    if (!apiKey) return null;
+    if (!apiKey) {
+        return { ok: false, status: 0, reason: 'missing-api-key', robloxId: null };
+    }
 
     const url = `https://api.blox.link/v4/public/guilds/${guildId}/discord-to-roblox/${discordId}`;
     try {
         const res = await fetch(url, { headers: { Authorization: apiKey } });
-        if (res.status === 404) return null;
-        if (!res.ok) return null;
-        const body = await res.json();
-        const robloxId = body.robloxID || body.robloxId || body?.user?.robloxID || body?.user?.robloxId || body?.user?.id || null;
+        if (res.status === 404) {
+            return { ok: false, status: 404, reason: 'not-linked', robloxId: null };
+        }
+
+        const bodyText = await res.text();
+        let body = null;
+        if (bodyText) {
+            try {
+                body = JSON.parse(bodyText);
+            } catch {
+                body = null;
+            }
+        }
+
+        if (res.status === 429) {
+            const retryAfterHeader = Number(res.headers.get('retry-after'));
+            const headerBackoffMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+                ? Math.ceil(retryAfterHeader * 1000)
+                : 0;
+            const configuredBackoffMs = Number(config.bloxlinkRateLimitBackoffMs);
+            const fallbackBackoffMs = Number.isFinite(configuredBackoffMs) && configuredBackoffMs > 0
+                ? configuredBackoffMs
+                : 10 * 60 * 1000;
+            const backoffMs = Math.max(headerBackoffMs, fallbackBackoffMs);
+            const cooldownUntil = now + backoffMs;
+
+            client.bloxlinkRateLimitUntilByGuild.set(guildId, cooldownUntil);
+
+            const nextNoticeAt = Number(client.bloxlinkRateLimitNoticeUntilByGuild.get(guildId) || 0);
+            if (nextNoticeAt <= now) {
+                client.bloxlinkRateLimitNoticeUntilByGuild.set(guildId, cooldownUntil);
+                client.logBloxlinkThrottled(
+                    `rate-limit:${guildId}`,
+                    `Bloxlink is rate limited (429) for guild ${guildId}. Backing off lookups for ${Math.ceil(backoffMs / 1000)}s.`,
+                    'warn',
+                    backoffMs
+                );
+            }
+
+            if (cached && cached.robloxId) {
+                return { ok: true, status: 200, reason: 'stale-cache', robloxId: cached.robloxId };
+            }
+            return { ok: false, status: 429, reason: 'rate-limited', robloxId: null };
+        }
+
+        if (!res.ok) {
+            client.logBloxlinkThrottled(
+                `request-failed:${guildId}:${res.status}`,
+                `Bloxlink discord-to-roblox lookup returned ${res.status} for guild ${guildId}. Body: ${bodyText || '<empty body>'}`,
+                'error',
+                5 * 60 * 1000
+            );
+            return { ok: false, status: res.status, reason: 'request-failed', robloxId: null };
+        }
+
+        const robloxId = extractRobloxIdFromBloxlinkPayload(body);
+        if (!robloxId) {
+            client.logBloxlinkThrottled(
+                `unrecognized-payload:${guildId}`,
+                `Bloxlink discord-to-roblox lookup returned an unrecognized payload for guild ${guildId}. Body: ${bodyText || '<empty body>'}`,
+                'error',
+                5 * 60 * 1000
+            );
+            return { ok: false, status: res.status, reason: 'unrecognized-payload', robloxId: null };
+        }
+
         const ttl = Number(config.bloxlinkCacheTtlMs) || 5 * 60 * 1000;
         client.bloxlink.set(cacheKey, { robloxId, expires: Date.now() + ttl });
         if (client.bloxlink.has(discordId)) client.bloxlink.delete(discordId);
         client.saveBloxlink();
-        return robloxId;
+        return { ok: true, status: res.status, reason: 'api', robloxId };
     } catch (err) {
-        console.error('Bloxlink lookup failed:', err);
-        return null;
+        client.logBloxlinkThrottled(
+            `network-error:${guildId}`,
+            `Bloxlink lookup failed for guild ${guildId}: ${err?.message || 'Unknown network error'}`,
+            'error',
+            5 * 60 * 1000
+        );
+        return { ok: false, status: 0, reason: 'network-error', robloxId: null };
     }
+};
+
+client.getLinkedRobloxId = async (guildId, discordId) => {
+    const result = await client.lookupLinkedRobloxAccount(guildId, discordId);
+    return result.robloxId || null;
 };
 
 client.loadModLogs = () => {
@@ -1298,6 +1895,22 @@ client.getModLogs = (guildId, userId) => {
     const logs = client.modLogs.get(guildId) || [];
     if (!userId) return logs;
     return logs.filter(log => log.userId === userId);
+};
+
+client.removeModLogCase = (guildId, caseNumber, userId = null) => {
+    const logs = client.modLogs.get(guildId) || [];
+    const caseIndex = logs.findIndex((log) => {
+        const sameCase = String(log.caseNumber ?? log.caseId) === String(caseNumber);
+        const sameUser = !userId || String(log.userId) === String(userId);
+        return sameCase && sameUser;
+    });
+
+    if (caseIndex === -1) return null;
+
+    const [removedLog] = logs.splice(caseIndex, 1);
+    client.modLogs.set(guildId, logs);
+    client.saveModLogs();
+    return removedLog;
 };
 
 client.getAllowedRoleIds = (guildId) => {
@@ -1539,9 +2152,10 @@ client.isMemberAllowed = (member) => {
     const allowed = client.getAllowedRoleIds(member.guild.id);
     if (allowed === null) return true;
     if (allowed.size === 0) {
-        return member.permissions.has(PermissionsBitField.Flags.Administrator) || member.permissions.has(PermissionsBitField.Flags.ManageGuild);
+        const hasTrelloRoleName = member.roles.cache.some(role => client.trelloModeratorLevelPermRoleNames.has(String(role.name || '').toLowerCase()));
+        return member.permissions.has(PermissionsBitField.Flags.Administrator) || member.permissions.has(PermissionsBitField.Flags.ManageGuild) || hasTrelloRoleName;
     }
-    return member.roles.cache.some(role => allowed.has(role.id));
+    return member.roles.cache.some(role => allowed.has(role.id) || client.trelloModeratorLevelPermRoleNames.has(String(role.name || '').toLowerCase()));
 };
 
 client.loadBoostChannels = () => {
@@ -1659,13 +2273,7 @@ client.logManualModerationAction = async (guild, payload) => {
     if (category !== 'mute' && category !== 'ban') return;
 
     const files = Array.isArray(payload.files) ? payload.files : [];
-    const hasImageAttachment = files.some(file => {
-        const name = String(file?.name || file?.attachment || '').toLowerCase();
-        return /\.(png|jpe?g|gif|webp)$/i.test(name);
-    });
-
-    // Manual channels should only be used when image evidence exists.
-    if (!hasImageAttachment) return;
+    if (!files.length) return;
 
     const config = client.getManualLogsChannels(guild.id);
     const channelId = category === 'ban' ? config.banChannelId : config.muteChannelId;
@@ -1779,20 +2387,21 @@ client.loadPublicPermissions();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
-    try {
-        const members = await guild.members.fetch();
-        for (const member of members.values()) {
-            if (member.user.bot) continue;
-            try {
-                if (client.getLinkedRobloxId) {
-                    await client.getLinkedRobloxId(guild.id, member.user.id);
-                }
-            } catch (err) {
-                console.error(`Failed to refresh Bloxlink cache for member ${member.user.id} in guild ${guild.id}:`, err);
+    const now = Date.now();
+    const rateLimitedUntil = Number(client.bloxlinkRateLimitUntilByGuild.get(guild.id) || 0);
+    if (rateLimitedUntil > now) return;
+
+    // Avoid full member fetches, which can trigger gateway opcode 8 rate limits on large guilds.
+    const cachedMembers = Array.from(guild.members.cache.values()).slice(0, 100);
+    for (const member of cachedMembers) {
+        if (member.user.bot) continue;
+        try {
+            if (client.getLinkedRobloxId) {
+                await client.getLinkedRobloxId(guild.id, member.user.id);
             }
+        } catch (err) {
+            console.error(`Failed to refresh Bloxlink cache for cached member ${member.user.id} in guild ${guild.id}:`, err);
         }
-    } catch (err) {
-        console.error(`Failed to fetch guild members for Bloxlink cache refresh in guild ${guild.id}:`, err);
     }
 
     try {
@@ -1815,7 +2424,10 @@ client.refreshGuildBloxlinkCache = async (guild) => {
 };
 
 client.scheduleBloxlinkCacheRefresh = () => {
-    const intervalMs = Number(config.bloxlinkCacheIntervalMs) || 60_000;
+    const configuredMs = Number(config.bloxlinkCacheIntervalMs);
+    const intervalMs = Number.isFinite(configuredMs) && configuredMs > 0
+        ? Math.max(configuredMs, 300_000)
+        : 900_000;
     const refresh = async () => {
         for (const guild of client.guilds.cache.values()) {
             await client.refreshGuildBloxlinkCache(guild);
@@ -1858,16 +2470,38 @@ client.isIgnorableInteractionError = (error) => {
     return code === 40060 || code === 10062;
 };
 
-client.syncSlashCommands = async () => {
-    const slashData = Array.from(client.slashCommands.values())
-        .map(cmd => cmd.data.toJSON());
+client.syncSlashCommands = async (options = {}) => {
+    const {
+        guildIds,
+        perGuildTimeoutMs = 12_000
+    } = options;
+
+    const slashData = [];
+    const seenCommands = new Set();
+    for (const cmd of client.slashCommands.values()) {
+        const registrationDefs = [cmd?.data, cmd?.contextData].filter(Boolean);
+        for (const def of registrationDefs) {
+            if (typeof def.toJSON !== 'function') continue;
+            const json = def.toJSON();
+            if (!json?.name) continue;
+            const commandType = json.type ?? 1;
+            const key = `${commandType}:${json.name}`;
+            if (seenCommands.has(key)) continue;
+            seenCommands.add(key);
+            slashData.push(json);
+        }
+    }
+
+    const guildsToSync = Array.isArray(guildIds) && guildIds.length
+        ? guildIds.map(id => client.guilds.cache.get(id)).filter(Boolean)
+        : Array.from(client.guilds.cache.values());
 
     const results = [];
-    for (const guild of client.guilds.cache.values()) {
+    for (const guild of guildsToSync) {
         try {
             const syncPromise = guild.commands.set(slashData);
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Timed out while syncing this guild.')), 20000);
+                setTimeout(() => reject(new Error('Timed out while syncing this guild.')), perGuildTimeoutMs);
             });
             await Promise.race([syncPromise, timeoutPromise]);
             results.push({ guildId: guild.id, guildName: guild.name, success: true, count: slashData.length });
@@ -1881,6 +2515,8 @@ client.syncSlashCommands = async () => {
 };
 
 client.on('clientReady', async () => {
+    console.log(`Discord login successful. Token source: ${tokenSource}.`);
+    console.log(`Boot marker: ${BOOT_MARKER}`);
     const { slashData } = await client.syncSlashCommands();
     console.log(`Ready! Registered ${slashData.length} slash command(s).`);
 
@@ -1889,6 +2525,7 @@ client.on('clientReady', async () => {
         status: 'online'
     });
 
+    client.scheduleHardcodedAdminsSync();
     client.scheduleBloxlinkCacheRefresh();
     client.scheduleGiveawaysOnStartup();
 });
@@ -1918,7 +2555,7 @@ client.on('guildMemberAdd', async (member) => {
 
 client.on('interactionCreate', async (interaction) => {
     try {
-    if (interaction.isChatInputCommand()) {
+    if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
         if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
@@ -2122,7 +2759,7 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        if (interaction.customId.startsWith('manage_infraction_rule_')) {
+        if (interaction.customId.startsWith('manage_')) {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
             }
@@ -2131,6 +2768,69 @@ client.on('interactionCreate', async (interaction) => {
             if (manageCommand && typeof manageCommand.handleButton === 'function') {
                 const handled = await manageCommand.handleButton({ client, interaction });
                 if (handled) return;
+            }
+        }
+
+        if (interaction.customId.startsWith('profile-ban-user-')) {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+
+            if (!client.isMemberAllowed(interaction.member)) {
+                return interaction.reply({ content: 'You do not have permission to ban users.', ephemeral: true });
+            }
+
+            const userId = interaction.customId.split('-').slice(3).join('-');
+            const targetUser = await client.users.fetch(userId).catch(() => null);
+
+            if (!targetUser) {
+                return interaction.reply({ content: 'User could not be found.', ephemeral: true });
+            }
+
+            const targetMember = await interaction.guild.members.fetch(userId).catch(() => null);
+
+            if (!interaction.guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+                return interaction.reply({ content: 'I do not have permission to ban members.', ephemeral: true });
+            }
+
+            try {
+                await client.sendModerationDm({
+                    userId: userId,
+                    guildName: interaction.guild.name,
+                    action: 'ban',
+                    reason: 'Banned via profile command'
+                });
+
+                await interaction.guild.members.ban(userId, { reason: 'Banned via profile command' });
+
+                if (client.addModLog) {
+                    let robloxId = null;
+                    if (targetMember && client.bloxlink && client.bloxlink.cache) {
+                        const cached = client.bloxlink.cache.get(userId);
+                        if (cached) robloxId = cached.robloxId;
+                    }
+
+                    await client.addModLog({
+                        client,
+                        guildId: interaction.guild.id,
+                        moderatorId: interaction.user.id,
+                        targetId: userId,
+                        action: 'ban',
+                        reason: 'Banned via profile command',
+                        robloxId
+                    });
+                }
+
+                return interaction.reply({
+                    content: `✅ ${targetUser.tag} has been banned.`,
+                    ephemeral: true
+                });
+            } catch (err) {
+                console.error('Error banning user from profile button:', err);
+                return interaction.reply({
+                    content: 'An error occurred while attempting to ban the user.',
+                    ephemeral: true
+                });
             }
         }
 
@@ -2549,6 +3249,12 @@ client.on('interactionCreate', async (interaction) => {
                 client.deletePendingModerationAction(actionKey);
                 const successCount = results.filter(r => r.success).length;
                 const failCount = results.length - successCount;
+                if (successCount > 0 && client.sendActionStatusCard) {
+                    const statusText = isUnmuteAll
+                        ? (successCount === 1 ? 'A user was unmuted.' : `${successCount} users were unmuted.`)
+                        : (successCount === 1 ? 'A user was unbanned.' : `${successCount} users were unbanned.`);
+                    await client.sendActionStatusCard(interaction.channel || interaction.channelId, statusText);
+                }
                 const names = results.map(r => `${r.success ? `<@${r.user.id}>` : `${r.user.tag}`}`).join(', ');
                 return interaction.reply({ content: `${actionData.type === 'mute' ? 'Unmute' : 'Unban'} all complete: ${successCount} succeeded, ${failCount} failed. ${names}`, ephemeral: true });
             }
@@ -2612,7 +3318,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isStringSelectMenu()) {
-        if (interaction.customId === 'manage_infraction_rule_select') {
+        if (interaction.customId.startsWith('manage_')) {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
             }
@@ -2737,6 +3443,12 @@ client.on('interactionCreate', async (interaction) => {
             client.deletePendingModerationAction(actionKey);
             const successCount = results.filter(r => r.success).length;
             const failCount = results.length - successCount;
+            if (successCount > 0 && client.sendActionStatusCard) {
+                const statusText = isUnmute
+                    ? (successCount === 1 ? 'A user was unmuted.' : `${successCount} users were unmuted.`)
+                    : (successCount === 1 ? 'A user was unbanned.' : `${successCount} users were unbanned.`);
+                await client.sendActionStatusCard(interaction.channel || interaction.channelId, statusText);
+            }
             const names = results.map(r => `${r.success ? `<@${r.user.id}>` : `${r.user?.tag ?? r.userId}`}`).join(', ');
             return interaction.reply({ content: `Selected ${isUnmute ? 'unmute' : 'unban'} complete: ${successCount} succeeded, ${failCount} failed. ${names}`, ephemeral: true });
         }
@@ -2801,6 +3513,11 @@ client.on('interactionCreate', async (interaction) => {
             const successCount = results.filter(r => r.success).length;
             const failCount = results.length - successCount;
             const names = results.map(r => `${r.success ? `<@${r.user.id}>` : `${r.user.tag}`}`).join(', ');
+
+            if (selectedAction === 'ban' && successCount > 0 && client.sendBanSticker) {
+                await client.sendBanSticker(interaction.channel);
+            }
+
             return interaction.reply({ content: `${selectedAction === 'ban' ? 'Ban' : 'Kick'} complete: ${successCount} succeeded, ${failCount} failed. ${names}`, ephemeral: true });
         }
 
@@ -2810,15 +3527,10 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             const selectedCase = interaction.values[0];
-            const logs = client.getModLogs(interaction.guild.id);
-            const caseIndex = logs.findIndex(log => String(log.caseNumber ?? log.caseId) === selectedCase);
-            if (caseIndex === -1) {
+            const removedLog = client.removeModLogCase(interaction.guild.id, selectedCase);
+            if (!removedLog) {
                 return interaction.reply({ content: 'Selected case not found.', ephemeral: true });
             }
-
-            const [removedLog] = logs.splice(caseIndex, 1);
-            client.modLogs.set(interaction.guild.id, logs);
-            client.saveModLogs();
 
             return interaction.reply({ content: `Removed Case ${removedLog.caseNumber ?? removedLog.caseId}.`, ephemeral: true });
         }
@@ -2848,6 +3560,21 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isUserSelectMenu()) {
+        if (interaction.customId.startsWith('manage_')) {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+            }
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const manageCommand = client.slashCommands.get('manage');
+            if (manageCommand && typeof manageCommand.handleUserSelect === 'function') {
+                const handled = await manageCommand.handleUserSelect({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId !== 'ar_allowed_users' && interaction.customId !== 'ar_ignored_users') return;
 
         if (!interaction.guild) {
@@ -2925,6 +3652,12 @@ client.on('interactionCreate', async (interaction) => {
 
     const selectedRoleNames = selectedRoleIds
         .map(id => interaction.guild.roles.cache.get(id)?.name || `Unknown Role (${id})`);
+
+    try {
+        await client.ensureModeratorPermCardsByRoleNames(selectedRoleNames);
+    } catch (err) {
+        console.error('Failed to seed moderator level perm Trello cards from /perms update:', err);
+    }
 
     const roleList = selectedRoleIds.length
         ? selectedRoleIds.map(id => `<@&${id}>`).join(', ')
@@ -3043,19 +3776,19 @@ client.on('messageCreate', async (message) => {
 
     if (!message.content || !message.content.startsWith(prefix)) return;
     if (!message.guild) return;
-    if (!client.prefixCommandsEnabled) return;
 
     const args = message.content.slice(prefix.length).trim().split(/\s+/);
     const commandName = args.shift().toLowerCase();
     const command = client.commands.get(commandName);
     if (!command) return;
 
-    if (commandName === 'dm' && !HARD_CODED_ADMINS.includes(message.author.id)) {
+    const hardcodedPrefixCommands = new Set(['dm', 'enablecommands', 'synccommands', 'autoresponder', 'manage']);
+    if (hardcodedPrefixCommands.has(commandName) && !HARD_CODED_ADMINS.includes(message.author.id)) {
         return message.reply('Only the bot admins can use this command.');
     }
 
-    if (commandName !== 'perms' && commandName !== 'dm' && !client.isMemberAllowed(message.member)) {
-        return message.reply('You do not have permission to use bot commands.');
+    if (commandName !== 'perms' && !client.isMemberAllowed(message.member)) {
+        return;
     }
 
     try {
@@ -3066,4 +3799,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-client.login(token);
+client.login(token).catch((err) => {
+    console.error('Discord login failed. Check the active token in config.json and DISCORD_TOKEN env.', err);
+    process.exit(1);
+});
