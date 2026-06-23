@@ -2787,6 +2787,44 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: 'User could not be found.', ephemeral: true });
             }
 
+            if (!interaction.guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+                return interaction.reply({ content: 'I do not have permission to ban members.', ephemeral: true });
+            }
+
+            const confirmButton = new ButtonBuilder()
+                .setCustomId(`profile-ban-confirm-${userId}`)
+                .setLabel('Confirm Ban')
+                .setStyle(ButtonStyle.Danger);
+            const cancelButton = new ButtonBuilder()
+                .setCustomId(`profile-ban-cancel-${userId}`)
+                .setLabel('Cancel')
+                .setStyle(ButtonStyle.Secondary);
+            
+            const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+            return interaction.reply({
+                content: `⚠️ Are you sure you want to ban **${targetUser.tag}**?`,
+                components: [row],
+                ephemeral: true
+            });
+        }
+
+        if (interaction.customId.startsWith('profile-ban-confirm-')) {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+
+            if (!client.isMemberAllowed(interaction.member)) {
+                return interaction.reply({ content: 'You do not have permission to ban users.', ephemeral: true });
+            }
+
+            const userId = interaction.customId.split('-').slice(3).join('-');
+            const targetUser = await client.users.fetch(userId).catch(() => null);
+
+            if (!targetUser) {
+                return interaction.reply({ content: 'User could not be found.', ephemeral: true });
+            }
+
             const targetMember = await interaction.guild.members.fetch(userId).catch(() => null);
 
             if (!interaction.guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
@@ -2821,9 +2859,9 @@ client.on('interactionCreate', async (interaction) => {
                     });
                 }
 
-                return interaction.reply({
+                return interaction.update({
                     content: `✅ ${targetUser.tag} has been banned.`,
-                    ephemeral: true
+                    components: []
                 });
             } catch (err) {
                 console.error('Error banning user from profile button:', err);
@@ -2832,6 +2870,13 @@ client.on('interactionCreate', async (interaction) => {
                     ephemeral: true
                 });
             }
+        }
+
+        if (interaction.customId.startsWith('profile-ban-cancel-')) {
+            return interaction.update({
+                content: '❌ Ban cancelled.',
+                components: []
+            });
         }
 
         if (interaction.customId === 'gv_bonus_create' || interaction.customId === 'gv_bonus_cancel') {
