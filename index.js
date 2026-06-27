@@ -702,6 +702,16 @@ client.upsertAutoresponder = (guildId, entry) => {
     client.saveAutoresponders();
 };
 
+client.deleteAutoresponder = (guildId, entryId) => {
+    const existing = client.getAutoresponders(guildId);
+    const next = existing.filter(item => item.id !== entryId);
+    const deleted = next.length !== existing.length;
+    if (!deleted) return false;
+    client.autoresponders.set(guildId, next);
+    client.saveAutoresponders();
+    return true;
+};
+
 client.applyAutoresponderVariables = (template, message) => {
     let output = String(template || '');
     const guild = message.guild;
@@ -847,8 +857,17 @@ client.buildAutoresponderConfigPayload = (draft) => {
         new ButtonBuilder()
             .setCustomId('ar_cancel')
             .setLabel('Cancel')
-            .setStyle(ButtonStyle.Danger)
+            .setStyle(ButtonStyle.Secondary)
     );
+
+    if (draft.editingId) {
+        controlsRow.addComponents(
+            new ButtonBuilder()
+                .setCustomId('ar_delete')
+                .setLabel('Delete')
+                .setStyle(ButtonStyle.Danger)
+        );
+    }
 
     return {
         embeds: [embed],
@@ -3015,7 +3034,7 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: 'You have left this giveaway.', ephemeral: true });
         }
 
-        if (interaction.customId === 'ar_create_start' || interaction.customId === 'ar_toggle_exact' || interaction.customId === 'ar_save' || interaction.customId === 'ar_cancel' || interaction.customId === 'ar_config_users') {
+        if (interaction.customId === 'ar_create_start' || interaction.customId === 'ar_toggle_exact' || interaction.customId === 'ar_save' || interaction.customId === 'ar_cancel' || interaction.customId === 'ar_config_users' || interaction.customId === 'ar_delete') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
             }
@@ -3078,6 +3097,24 @@ client.on('interactionCreate', async (interaction) => {
             if (interaction.customId === 'ar_cancel') {
                 client.autoresponderDrafts.delete(draftKey);
                 return interaction.update({ content: 'Autoresponder setup canceled.', embeds: [], components: [] });
+            }
+
+            if (interaction.customId === 'ar_delete') {
+                if (!draft.editingId) {
+                    return interaction.reply({ content: 'You can only delete an existing autoresponder while editing it.', ephemeral: true });
+                }
+
+                const removed = client.deleteAutoresponder(interaction.guildId, draft.editingId);
+                client.autoresponderDrafts.delete(draftKey);
+                if (!removed) {
+                    return interaction.update({ content: 'That autoresponder was already removed.', embeds: [], components: [] });
+                }
+
+                return interaction.update({
+                    content: `Deleted autoresponder for trigger \`${draft.trigger}\`.`,
+                    embeds: [],
+                    components: []
+                });
             }
 
             if (interaction.customId === 'ar_save') {

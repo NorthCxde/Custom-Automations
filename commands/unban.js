@@ -1,4 +1,54 @@
-const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder } = require('discord.js');
+
+async function sendUnbanStatusCard(client, channel, text) {
+    if (!channel || !text) return;
+
+    const safeText = String(text).trim();
+    if (!safeText) return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setDescription(`✅ ${safeText}`);
+
+    try {
+        const msg = await channel.send({ embeds: [embed] });
+        if (client.prefixCommandReactionEmojiId && msg) {
+            await msg.react(client.prefixCommandReactionEmojiId).catch(() => null);
+        }
+    } catch (err) {
+        console.error('Failed to send unban status card:', err);
+    }
+}
+
+async function sendUnbanUsageCard(channel) {
+    if (!channel || typeof channel.send !== 'function') return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x3498db)
+        .setDescription([
+            '**Command:** ?unban',
+            '',
+            '**Description:** Unban a user by mention or ID',
+            '**Cooldown:** 3 seconds',
+            '**Usage:**',
+            '?unban [user]',
+            '?unban [userId]',
+            '',
+            '**Example:**',
+            '?unban @albeanie',
+            '?unban 123456789012345678'
+        ].join('\n'));
+
+    await channel.send({
+        embeds: [embed],
+        allowedMentions: {
+            parse: [],
+            users: [],
+            roles: [],
+            repliedUser: false
+        }
+    });
+}
 
 module.exports = {
     name: 'unban',
@@ -12,12 +62,16 @@ module.exports = {
                 .setRequired(true)),
     async execute({ client, message, args }) {
         if (!message.guild) return message.reply('This command must be used in a server channel.');
-        if (!args[0]) return message.reply('Usage: ?unban @user or ?unban userId');
+        if (!args[0]) {
+            await sendUnbanUsageCard(message.channel);
+            return null;
+        }
 
         const targetId = args[0].replace(/[<@!>]/g, '');
 
         if (!/^[0-9]{17,19}$/.test(targetId)) {
-            return message.reply('Please provide a valid user mention or user ID.');
+            await sendUnbanUsageCard(message.channel);
+            return null;
         }
 
         try {
@@ -26,6 +80,8 @@ module.exports = {
             }
 
             await message.guild.members.unban(targetId);
+            const fetchedUser = await client.users.fetch(targetId).catch(() => null);
+            await sendUnbanStatusCard(client, message.channel, `${fetchedUser?.username || 'User'} was unbanned.`);
             if (client.addModLog) {
                 let robloxId = null;
                 try {
@@ -44,7 +100,7 @@ module.exports = {
                 });
                 if (client.logToChannel) await client.logToChannel(message.guild, `Unban: <@${targetId}> by ${message.author.tag}`);
             }
-            return client.sendPrefixCommandResponse(message.channel, `Unbanned <@${targetId}>.`);
+            return null;
         } catch (error) {
             console.error(error);
             return message.reply('Unable to unban that user. They may not be banned or the ID may be invalid.');
@@ -65,6 +121,10 @@ module.exports = {
 
         try {
             await interaction.guild.members.unban(user.id);
+            const statusChannel = interaction.channel || (interaction.channelId
+                ? await client.channels.fetch(interaction.channelId).catch(() => null)
+                : null);
+            await sendUnbanStatusCard(client, statusChannel, `${user.username} was unbanned.`);
             await interaction.reply({ content: `Unbanned ${user.tag}.`, ephemeral: true });
             if (client.addModLog) {
                 let robloxId = null;

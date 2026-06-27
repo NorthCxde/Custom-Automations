@@ -5,7 +5,16 @@ module.exports = {
     description: 'Re-sync slash commands to every guild this bot is in (hardcoded admins only).',
     data: new SlashCommandBuilder()
         .setName('synccommands')
-        .setDescription('Re-sync slash commands to every guild this bot is in (hardcoded admins only).'),
+        .setDescription('Re-sync slash commands (hardcoded admins only).')
+        .addStringOption(option =>
+            option
+                .setName('scope')
+                .setDescription('Choose whether to sync only this guild or all guilds')
+                .addChoices(
+                    { name: 'current', value: 'current' },
+                    { name: 'all', value: 'all' }
+                )
+        ),
     async executeInteraction({ client, interaction }) {
         if (typeof client.syncSlashCommands !== 'function') {
             return interaction.reply({
@@ -18,9 +27,13 @@ module.exports = {
             client.loadCommands();
         }
 
+        const scope = interaction.options.getString('scope') || 'current';
+        const shouldSyncAll = scope === 'all';
+        const guildIds = shouldSyncAll ? undefined : [interaction.guildId];
+
         await interaction.deferReply({ ephemeral: true });
 
-        const { slashData, results } = await client.syncSlashCommands();
+        const { slashData, results } = await client.syncSlashCommands({ guildIds });
         const successLines = results
             .filter(result => result.success)
             .map(result => `- ${result.guildName}: synced ${result.count} command(s)`);
@@ -30,6 +43,7 @@ module.exports = {
 
         const parts = [
             `Re-synced ${slashData.length} slash command(s).`,
+            `Scope: ${shouldSyncAll ? 'all guilds' : 'current guild'}`,
             `Commands: ${slashData.map(cmd => `/${cmd.name}`).join(', ')}`
         ];
 

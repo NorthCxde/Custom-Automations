@@ -148,6 +148,57 @@ const RULE_CHOICES = [
     { name: 'Troll Tickets', value: 'troll_tickets' }
 ];
 
+async function sendMuteStatusCard(client, channel, text, isSuccess = true) {
+    if (!channel || !text) return;
+
+    const safeText = String(text).trim();
+    if (!safeText) return;
+    const emoji = isSuccess ? '✅' : '❌';
+
+    const embed = new EmbedBuilder()
+        .setColor(isSuccess ? 0x57F287 : 0xED4245)
+        .setDescription(`${emoji} ${safeText}`);
+
+    try {
+        const msg = await channel.send({ embeds: [embed] });
+        if (isSuccess && client.prefixCommandReactionEmojiId && msg) {
+            await msg.react(client.prefixCommandReactionEmojiId).catch(() => null);
+        }
+    } catch (err) {
+        console.error('Failed to send mute status card:', err);
+    }
+}
+
+async function sendMuteUsageCard(channel) {
+    if (!channel || typeof channel.send !== 'function') return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x3498db)
+        .setDescription([
+            '**Command:** ?mute',
+            '',
+            '**Description:** Timeout one or more users for a duration',
+            '**Cooldown:** 3 seconds',
+            '**Usage:**',
+            '?mute [user] [duration] [reason]',
+            '?mute [user1] [user2] [duration] [reason]',
+            '',
+            '**Example:**',
+            '?mute @albeanie 1d nsfw messages',
+            '?mute @albeanie @albeanie 2h spam'
+        ].join('\n'));
+
+    await channel.send({
+        embeds: [embed],
+        allowedMentions: {
+            parse: [],
+            users: [],
+            roles: [],
+            repliedUser: false
+        }
+    });
+}
+
 function formatEscalationAction(step) {
     if (!step) return 'moderator decision';
     if (step.type === 'timeout' && step.duration) return `timeout (${step.duration})`;
@@ -279,9 +330,10 @@ function getRequiredPermission(action) {
     return PermissionsBitField.Flags.BanMembers;
 }
 
-async function applyDecisionAction({ client, guild, decision, action, durationRaw, moderator }) {
+async function applyDecisionAction({ client, guild, decision, action, durationRaw, moderator, sourceChannel = null }) {
     const results = [];
     let durationMs = null;
+    let stickerSentForBatch = false;
 
     if (action === 'mute' || action === 'temp_ban') {
         durationMs = parseDuration(durationRaw || '');
@@ -364,6 +416,11 @@ async function applyDecisionAction({ client, guild, decision, action, durationRa
                     reason: action === 'temp_ban' ? `${reason} (Duration: ${durationRaw})` : reason
                 });
                 await guild.members.ban(userId, { reason });
+
+                if (!stickerSentForBatch && client.sendBanSticker) {
+                    await client.sendBanSticker(sourceChannel);
+                    stickerSentForBatch = true;
+                }
 
                 if (action === 'temp_ban') {
                     scheduleTempUnban(client, guild.id, userId, userTag, Date.now() + durationMs);
@@ -465,31 +522,42 @@ module.exports = {
                 .setRequired(false)),
     async execute({ client, message, args }) {
         if (!message.guild) return message.reply('This command must be used in a server channel.');
-        if (!args[0] || !args[1]) return message.reply('Usage: ?mute @user [@user2 ...] 1h [reason]');
+        if (!args[0] || !args[1]) {
+            await sendMuteUsageCard(message.channel);
+            return null;
+        }
 
         const durationIndex = args.findIndex(arg => parseDuration(arg) !== null);
         if (durationIndex <= 0) {
-            return message.reply('Please provide one or more users first, then a valid duration like 1m, 1h, or 1d.');
+            await sendMuteUsageCard(message.channel);
+            return null;
         }
 
         const rawTargets = args.slice(0, durationIndex);
         const uniqueTargetIds = [...new Set(rawTargets.map(target => target.replace(/[<@!>]/g, '')))].filter(Boolean);
         const invalidTarget = uniqueTargetIds.find(id => !/^[0-9]{17,19}$/.test(id));
         if (invalidTarget) {
-            return message.reply(`Invalid user ID or mention: ${invalidTarget}`);
+            await sendMuteUsageCard(message.channel);
+            return null;
         }
 
         const duration = args[durationIndex];
         const durationMs = parseDuration(duration);
         if (durationMs === null) {
-            return message.reply('Please provide a valid duration, e.g. 1m, 1h, or 1d.');
+            await sendMuteUsageCard(message.channel);
+            return null;
         }
 
         const reason = args.slice(durationIndex + 1).join(' ') || 'No reason provided';
+        const evidenceFiles = (message.attachments
+            ? Array.from(message.attachments.values())
+            : [])
+            .slice(0, 4);
 
         try {
             if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-                return message.reply('I do not have permission to timeout members.');
+                await sendMuteStatusCard(client, message.channel, 'I do not have permission to timeout members.', false);
+                return null;
             }
 
             const results = await Promise.all(uniqueTargetIds.map(async (targetId) => {
@@ -498,14 +566,36 @@ module.exports = {
                     if (!member) {
                         return { targetId, success: false, reason: 'Member not found' };
                     }
-                    await client.sendModerationDm({
-                        user: member.user,
-                        guildName: message.guild.name,
-                        action: 'mute',
-                        duration,
-                        reason
-                    });
+
+                    if (!member.moderatable) {
+                        return {
+                            targetId,
+                            success: false,
+                            reason: `I cannot timeout ${member.user.username} due to role hierarchy or missing permissions.`
+                        };
+                    }
+
+                    const isAlreadyMuted = Number(member.communicationDisabledUntilTimestamp || 0) > Date.now();
+                    if (isAlreadyMuted) {
+                        return { targetId, success: false, reason: `${member.user.username} is already muted.` };
+                    }
+
                     await member.timeout(durationMs, reason);
+
+                    if (client.sendModerationDm) {
+                        try {
+                            await client.sendModerationDm({
+                                user: member.user,
+                                guildName: message.guild.name,
+                                action: 'mute',
+                                duration,
+                                reason
+                            });
+                        } catch (err) {
+                            console.error('Failed to send mute DM:', err);
+                        }
+                    }
+
                     if (client.addModLog) {
                         let robloxId = null;
                         try {
@@ -513,40 +603,149 @@ module.exports = {
                         } catch (err) {
                             console.error('Failed to lookup robloxId for mute modlog:', err);
                         }
-                        await client.addModLog(message.guild.id, {
-                            action: 'Mute',
-                            userId: targetId,
-                            userTag: member.user.tag,
-                            robloxId,
-                            moderatorId: message.author.id,
-                            moderatorTag: message.author.tag,
-                            reason,
-                            duration,
-                            timestamp: new Date().toISOString()
-                        });
+                        try {
+                            await client.addModLog(message.guild.id, {
+                                action: 'Mute',
+                                userId: targetId,
+                                userTag: member.user.tag,
+                                robloxId,
+                                moderatorId: message.author.id,
+                                moderatorTag: message.author.tag,
+                                reason,
+                                duration,
+                                timestamp: new Date().toISOString()
+                            });
+                        } catch (err) {
+                            console.error('Failed to write mute modlog:', err);
+                        }
                     }
-                    return { targetId, success: true };
+                    return { targetId, success: true, username: member.user.username };
                 } catch (error) {
                     console.error(error);
-                    return { targetId, success: false, reason: error.message };
+                    let reason = error?.message || 'Unknown error';
+                    if (error?.code === 50013) {
+                        reason = 'Missing permissions to timeout that user.';
+                    }
+                    return { targetId, success: false, reason };
                 }
             }));
 
             const success = results.filter(result => result.success).map(result => `<@${result.targetId}>`);
+            const successIds = results.filter(result => result.success).map(result => result.targetId);
             const failures = results.filter(result => !result.success);
 
-            const replyParts = [];
-            if (success.length) {
-                replyParts.push(`Timed out ${success.length} user(s): ${success.join(', ')} for ${duration}. Reason: ${reason}`);
-            }
-            if (failures.length) {
-                replyParts.push(`${failures.length} user(s) could not be timed out.`);
+            if (success.length > 0) {
+                const firstSuccess = results.find(result => result.success);
+                const cardText = success.length === 1
+                    ? `${firstSuccess?.username || 'User'} was muted.`
+                    : `${success.length} users were muted.`;
+                await sendMuteStatusCard(client, message.channel, cardText, true);
+
+                if (client.logToChannel && successIds.length) {
+                    const logEmbed = new EmbedBuilder()
+                        .setColor(0x000000)
+                        .setTitle('Mute Action')
+                        .setDescription(`Case by ${message.author.tag}`)
+                        .addFields(
+                            { name: 'User(s)', value: successIds.map(id => `<@${id}>`).join(', '), inline: true },
+                            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
+                            { name: 'Duration', value: duration, inline: true },
+                            { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
+                            { name: 'Reason', value: reason, inline: false },
+                            { name: 'Target IDs', value: successIds.join(', '), inline: false }
+                        )
+                        .setTimestamp();
+
+                    try {
+                        await client.logToChannel(message.guild, {
+                            embeds: [logEmbed],
+                            files: evidenceFiles.map(file => ({
+                                attachment: file.url,
+                                name: file.name,
+                                contentType: file.contentType || null
+                            }))
+                        });
+                    } catch (err) {
+                        console.error('Failed to send mute log channel embed:', err);
+                    }
+                }
+
+                if (successIds.length) {
+                    const manualEmbed = new EmbedBuilder()
+                        .setColor(0x000000)
+                        .setTitle('Manual Mute Log')
+                        .addFields(
+                            { name: 'User(s)', value: successIds.map(id => `<@${id}>`).join(', '), inline: true },
+                            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
+                            { name: 'Duration', value: duration, inline: true },
+                            { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
+                            { name: 'Reason', value: reason, inline: false },
+                            { name: 'Outcome', value: `${success.length} muted, ${failures.length} failed`, inline: false }
+                        )
+                        .setTimestamp();
+
+                    if (client.logManualModerationAction) {
+                        try {
+                            await client.logManualModerationAction(message.guild, {
+                                category: 'mute',
+                                embeds: [manualEmbed],
+                                files: evidenceFiles.map(file => ({
+                                    attachment: file.url,
+                                    name: file.name,
+                                    contentType: file.contentType || null
+                                }))
+                            });
+                        } catch (err) {
+                            console.error('Failed to send prefix manual mute log:', err);
+                        }
+                    }
+
+                    // Direct send to configured manual mute channel to keep prefix flow deterministic.
+                    if (client.getManualLogsChannels) {
+                        try {
+                            const manualConfig = client.getManualLogsChannels(message.guild.id);
+                            const manualMuteChannelId = manualConfig?.muteChannelId || null;
+                            if (manualMuteChannelId) {
+                                const manualChannel = message.guild.channels.cache.get(manualMuteChannelId)
+                                    || await message.guild.channels.fetch(manualMuteChannelId).catch(() => null);
+                                if (manualChannel && manualChannel.isTextBased()) {
+                                    await manualChannel.send({
+                                        embeds: [manualEmbed],
+                                        files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name })),
+                                        allowedMentions: {
+                                            parse: [],
+                                            users: [],
+                                            roles: [],
+                                            repliedUser: false
+                                        }
+                                    });
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Failed to send direct prefix manual mute log fallback:', err);
+                        }
+                    }
+                }
             }
 
-            return client.sendPrefixCommandResponse(message.channel, replyParts.join(' '));
+            if (success.length === 0 && failures.length > 0) {
+                const firstReason = failures[0]?.reason || 'Could not timeout that user.';
+                const cardText = failures.length === 1
+                    ? firstReason
+                    : `${failures.length} users could not be timed out.`;
+                await sendMuteStatusCard(client, message.channel, cardText, false);
+                return null;
+            }
+
+            if (success.length > 0 && failures.length > 0) {
+                const firstReason = failures[0]?.reason || 'Some users could not be timed out.';
+                await sendMuteStatusCard(client, message.channel, `${success.length} muted, ${failures.length} failed. ${firstReason}`, false);
+            }
+            return null;
         } catch (error) {
             console.error(error);
-            return message.reply('Unable to timeout the provided users. Check IDs and permissions.');
+            await sendMuteStatusCard(client, message.channel, 'Unable to timeout the provided users. Check IDs and permissions.', false);
+            return null;
         }
     },
     async executeInteraction({ client, interaction }) {
@@ -695,6 +894,18 @@ module.exports = {
         const failCount = results.length - successCount - decisionCount;
         const mentions = results.map(r => `<@${r.user.id}>`).join(', ');
         const reply = [];
+
+        if (successCount > 0) {
+            const firstSuccess = successResults[0];
+            const cardText = successCount === 1 && firstSuccess
+                ? `${firstSuccess.user.username} was muted.`
+                : `${successCount} users were muted.`;
+
+            const statusChannel = interaction.channel || (interaction.channelId
+                ? await client.channels.fetch(interaction.channelId).catch(() => null)
+                : null);
+            await sendMuteStatusCard(client, statusChannel, cardText, true);
+        }
 
         if (successCount) {
             if (ruleConfig) {
@@ -886,7 +1097,8 @@ module.exports = {
             guild: interaction.guild,
             decision,
             action,
-            moderator: interaction.user
+            moderator: interaction.user,
+            sourceChannel: (interaction.channel || interaction.channelId)
         });
 
         if (applied.error) {
@@ -898,6 +1110,14 @@ module.exports = {
 
         const successCount = applied.results.filter(result => result.success).length;
         const failCount = applied.results.length - successCount;
+
+        if (action === 'mute' && successCount > 0) {
+            const cardText = successCount === 1 ? 'A user was muted.' : `${successCount} users were muted.`;
+            const statusChannel = interaction.channel || (interaction.channelId
+                ? await client.channels.fetch(interaction.channelId).catch(() => null)
+                : null);
+            await sendMuteStatusCard(client, statusChannel, cardText, true);
+        }
 
         if (client.logManualModerationAction && (action === 'mute' || action === 'ban' || action === 'temp_ban')) {
             const manualEmbed = new EmbedBuilder()
@@ -968,7 +1188,8 @@ module.exports = {
             decision,
             action,
             durationRaw,
-            moderator: interaction.user
+            moderator: interaction.user,
+            sourceChannel: (interaction.channel || interaction.channelId)
         });
 
         if (applied.error) {
@@ -980,6 +1201,14 @@ module.exports = {
 
         const successCount = applied.results.filter(result => result.success).length;
         const failCount = applied.results.length - successCount;
+
+        if (action === 'mute' && successCount > 0) {
+            const cardText = successCount === 1 ? 'A user was muted.' : `${successCount} users were muted.`;
+            const statusChannel = interaction.channel || (interaction.channelId
+                ? await client.channels.fetch(interaction.channelId).catch(() => null)
+                : null);
+            await sendMuteStatusCard(client, statusChannel, cardText, true);
+        }
 
         if (client.logManualModerationAction && (action === 'mute' || action === 'ban' || action === 'temp_ban')) {
             const manualEmbed = new EmbedBuilder()

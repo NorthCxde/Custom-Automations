@@ -1,5 +1,57 @@
 ﻿const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
+async function sendBanStatusCard(client, channel, text) {
+    if (!channel || !text) return;
+
+    const safeText = String(text).trim();
+    if (!safeText) return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setDescription(`✅ ${safeText}`);
+
+    try {
+        const msg = await channel.send({ embeds: [embed] });
+        if (client.prefixCommandReactionEmojiId && msg) {
+            await msg.react(client.prefixCommandReactionEmojiId).catch(() => null);
+        }
+    } catch (err) {
+        console.error('Failed to send ban status card:', err);
+    }
+}
+
+async function sendBanUsageCard(channel) {
+    if (!channel || typeof channel.send !== 'function') return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x3498db)
+        .setDescription([
+            '**Command:** ?ban',
+            '',
+            '**Description:** Ban a member, optional time limit',
+            '**Cooldown:** 3 seconds',
+            '**Usage:**',
+            '?ban [user] [limit] [reason]',
+            '?ban save [user] [limit] [reason]',
+            '?ban noappeal [user] [limit] [reason]',
+            '',
+            '**Example:**',
+            '?ban albeanie making bugs',
+            '?ban save albeanie 2d needs to calm down',
+            '?ban noappeal albeanie dont come back'
+        ].join('\n'));
+
+    await channel.send({
+        embeds: [embed],
+        allowedMentions: {
+            parse: [],
+            users: [],
+            roles: [],
+            repliedUser: false
+        }
+    });
+}
+
 module.exports = {
     name: 'ban',
     description: 'Ban one or more users from the guild',
@@ -44,7 +96,10 @@ module.exports = {
                 .setRequired(false)),
     async execute({ client, message, args }) {
         if (!message.guild) return message.reply('This command must be used in a server channel.');
-        if (!args[0]) return message.reply('Usage: ?ban @user [@user2 ...] [reason]');
+        if (!args[0]) {
+            await sendBanUsageCard(message.channel);
+            return null;
+        }
 
         const parsedIds = [];
         let reasonStartIndex = args.length;
@@ -60,7 +115,8 @@ module.exports = {
 
         const uniqueTargetIds = [...new Set(parsedIds)];
         if (!uniqueTargetIds.length) {
-            return message.reply('Please provide at least one valid user mention or user ID.');
+            await sendBanUsageCard(message.channel);
+            return null;
         }
 
         const reason = args.slice(reasonStartIndex).join(' ') || 'No reason provided';
@@ -78,6 +134,7 @@ module.exports = {
                         action: 'ban',
                         reason
                     });
+                    const fetchedUser = await client.users.fetch(targetId).catch(() => null);
                     await message.guild.members.ban(targetId, { reason });
                     if (client.addModLog) {
                         let robloxId = null;
@@ -97,7 +154,7 @@ module.exports = {
                             timestamp: new Date().toISOString()
                         });
                     }
-                    return { targetId, success: true };
+                    return { targetId, success: true, username: fetchedUser?.username || null };
                 } catch (error) {
                     console.error(error);
                     return { targetId, success: false, reason: error.message };
@@ -107,15 +164,24 @@ module.exports = {
             const success = results.filter(result => result.success).map(result => `<@${result.targetId}>`);
             const failures = results.filter(result => !result.success);
 
-            const replyParts = [];
-            if (success.length) {
-                replyParts.push(`Banned ${success.length} user(s): ${success.join(', ')}. Reason: ${reason}`);
+            if (success.length > 0 && client.sendBanSticker) {
+                await client.sendBanSticker(message.channel);
+                const firstSuccess = results.find(result => result.success);
+                const cardText = success.length === 1
+                    ? `${firstSuccess?.username || 'User'} was banned.`
+                    : `${success.length} users were banned.`;
+                await sendBanStatusCard(client, message.channel, cardText);
             }
+
+            const replyParts = [];
             if (failures.length) {
                 replyParts.push(`${failures.length} user(s) could not be banned. Check permissions or existing bans.`);
             }
 
-            return client.sendPrefixCommandResponse(message.channel, replyParts.join(' '));
+            if (replyParts.length) {
+                return client.sendPrefixCommandResponse(message.channel, replyParts.join(' '));
+            }
+            return null;
         } catch (error) {
             console.error(error);
             return message.reply('Unable to ban the provided users. Check IDs and permissions.');
@@ -183,6 +249,20 @@ module.exports = {
         const failCount = results.length - successCount;
         const mentions = results.map(r => `<@${r.user.id}>`).join(', ');
         const reply = [];
+
+        if (successCount > 0 && client.sendBanSticker) {
+            await client.sendBanSticker(interaction.channel || interaction.channelId);
+
+            const firstSuccess = results.find(result => result.success);
+            const cardText = successCount === 1 && firstSuccess
+                ? `${firstSuccess.user.username} was banned.`
+                : `${successCount} users were banned.`;
+
+            const statusChannel = interaction.channel || (interaction.channelId
+                ? await client.channels.fetch(interaction.channelId).catch(() => null)
+                : null);
+            await sendBanStatusCard(client, statusChannel, cardText);
+        }
 
         if (successCount) {
             reply.push(`Banned ${successCount} user(s): ${mentions}`);

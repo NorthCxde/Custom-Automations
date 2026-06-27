@@ -91,8 +91,12 @@ module.exports = {
             embed.addFields({ name: 'Discord Information', value: discordInfo, inline: false });
 
             let robloxId = null;
+            let lookupResult = null;
             try {
-                if (client.getLinkedRobloxId) {
+                if (client.lookupLinkedRobloxAccount) {
+                    lookupResult = await client.lookupLinkedRobloxAccount(interaction.guild.id, discordUser.id);
+                    robloxId = lookupResult?.robloxId || null;
+                } else if (client.getLinkedRobloxId) {
                     robloxId = await client.getLinkedRobloxId(interaction.guild.id, discordUser.id);
                 }
             } catch (err) {
@@ -100,7 +104,17 @@ module.exports = {
             }
 
             if (!robloxId) {
-                embed.addFields({ name: 'Bloxlink Status', value: 'No linked Roblox account found via Bloxlink.', inline: false });
+                let statusText = 'No linked Roblox account found via Bloxlink.';
+                if (lookupResult?.reason === 'missing-api-key') {
+                    statusText = 'Bloxlink API key is missing for this server.';
+                } else if (lookupResult?.reason === 'request-failed') {
+                    statusText = `Bloxlink lookup failed for this server with status ${lookupResult.status}. Check the guild-specific API key for this guild.`;
+                } else if (lookupResult?.reason === 'unrecognized-payload') {
+                    statusText = 'Bloxlink returned an unexpected response shape for this server. Check bot logs for the raw payload.';
+                } else if (lookupResult?.reason === 'network-error') {
+                    statusText = 'Bloxlink lookup failed due to a network error. Check bot logs and try again.';
+                }
+                embed.addFields({ name: 'Bloxlink Status', value: statusText, inline: false });
             } else {
                 const robloxUserData = await fetchRobloxUserById(robloxId);
                 const robloxInfo = [

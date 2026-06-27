@@ -1,5 +1,56 @@
 const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder } = require('discord.js');
 
+async function sendUnmuteStatusCard(client, channel, text, isSuccess = true) {
+    if (!channel || !text) return;
+
+    const safeText = String(text).trim();
+    if (!safeText) return;
+    const emoji = isSuccess ? '✅' : '❌';
+
+    const embed = new EmbedBuilder()
+        .setColor(isSuccess ? 0x57F287 : 0xED4245)
+        .setDescription(`${emoji} ${safeText}`);
+
+    try {
+        const msg = await channel.send({ embeds: [embed] });
+        if (isSuccess && client.prefixCommandReactionEmojiId && msg) {
+            await msg.react(client.prefixCommandReactionEmojiId).catch(() => null);
+        }
+    } catch (err) {
+        console.error('Failed to send unmute status card:', err);
+    }
+}
+
+async function sendUnmuteUsageCard(channel) {
+    if (!channel || typeof channel.send !== 'function') return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x3498db)
+        .setDescription([
+            '**Command:** ?unmute',
+            '',
+            '**Description:** Remove timeout from one or more users',
+            '**Cooldown:** 3 seconds',
+            '**Usage:**',
+            '?unmute [user]',
+            '?unmute [user1] [user2] [user3]',
+            '',
+            '**Example:**',
+            '?unmute @albeanie',
+            '?unmute @albeanie @albeanie'
+        ].join('\n'));
+
+    await channel.send({
+        embeds: [embed],
+        allowedMentions: {
+            parse: [],
+            users: [],
+            roles: [],
+            repliedUser: false
+        }
+    });
+}
+
 module.exports = {
     name: 'unmute',
     description: 'Remove timeout from a member by mention or ID.',
@@ -12,7 +63,10 @@ module.exports = {
                 .setRequired(true)),
     async execute({ client, message, args }) {
         if (!message.guild) return message.reply('This command must be used in a server channel.');
-        if (!args[0]) return message.reply('Usage: ?unmute @user [@user2 ...]');
+        if (!args[0]) {
+            await sendUnmuteUsageCard(message.channel);
+            return null;
+        }
 
         const parsedIds = [];
         for (const arg of args) {
@@ -23,12 +77,14 @@ module.exports = {
 
         const targetIds = [...new Set(parsedIds)];
         if (!targetIds.length) {
-            return message.reply('Please provide at least one valid user mention or user ID.');
+            await sendUnmuteUsageCard(message.channel);
+            return null;
         }
 
         try {
             if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-                return message.reply('I do not have permission to untimeout members.');
+                await sendUnmuteStatusCard(client, message.channel, 'I do not have permission to untimeout members.', false);
+                return null;
             }
 
             const results = await Promise.all(targetIds.map(async (targetId) => {
@@ -36,6 +92,11 @@ module.exports = {
                     const member = await message.guild.members.fetch(targetId);
                     if (!member) {
                         return { targetId, success: false, reason: 'Member not found' };
+                    }
+
+                    const isMuted = Number(member.communicationDisabledUntilTimestamp || 0) > Date.now();
+                    if (!isMuted) {
+                        return { targetId, success: false, reason: `${member.user.username} is not muted.` };
                     }
 
                     await member.timeout(null, 'Removing timeout');
@@ -58,7 +119,7 @@ module.exports = {
                         });
                     }
 
-                    return { targetId, success: true };
+                    return { targetId, success: true, username: member.user.username };
                 } catch (error) {
                     console.error(error);
                     return { targetId, success: false, reason: error.message };
@@ -66,7 +127,24 @@ module.exports = {
             }));
 
             const successIds = results.filter(result => result.success).map(result => result.targetId);
+            const successResults = results.filter(result => result.success);
+            const failureResults = results.filter(result => !result.success);
             const failedCount = results.length - successIds.length;
+
+            if (successIds.length > 0) {
+                const cardText = successIds.length === 1
+                    ? `${successResults[0]?.username || 'User'} was unmuted.`
+                    : `${successIds.length} users were unmuted.`;
+                await sendUnmuteStatusCard(client, message.channel, cardText);
+            }
+
+            if (!successIds.length && failureResults.length) {
+                const firstReason = failureResults[0]?.reason || 'Could not unmute that user.';
+                const cardText = failureResults.length === 1
+                    ? `I can't unmute that user, ${firstReason.toLowerCase()}`
+                    : `I couldn't unmute ${failureResults.length} users.`;
+                await sendUnmuteStatusCard(client, message.channel, cardText, false);
+            }
 
             if (successIds.length && client.logToChannel) {
                 const mentions = successIds.map(id => `<@${id}>`).join(', ');
@@ -86,17 +164,18 @@ module.exports = {
             }
 
             const replyParts = [];
-            if (successIds.length) {
-                replyParts.push(`Removed timeout from ${successIds.map(id => `<@${id}>`).join(', ')}.`);
-            }
             if (failedCount) {
                 replyParts.push(`${failedCount} user(s) could not be unmuted.`);
             }
 
-            return client.sendPrefixCommandResponse(message.channel, replyParts.join(' '));
+            if (replyParts.length) {
+                return client.sendPrefixCommandResponse(message.channel, replyParts.join(' '));
+            }
+            return null;
         } catch (error) {
             console.error(error);
-            return message.reply('Unable to remove timeout for the provided users.');
+            await sendUnmuteStatusCard(client, message.channel, 'Unable to remove timeout for the provided users.', false);
+            return null;
         }
     },
     async executeInteraction({ client, interaction }) {
@@ -118,7 +197,20 @@ module.exports = {
                 return interaction.reply({ content: 'Could not find that member in this guild.', ephemeral: true });
             }
 
+            const isMuted = Number(member.communicationDisabledUntilTimestamp || 0) > Date.now();
+            if (!isMuted) {
+                const statusChannel = interaction.channel || (interaction.channelId
+                    ? await client.channels.fetch(interaction.channelId).catch(() => null)
+                    : null);
+                await sendUnmuteStatusCard(client, statusChannel, `I can't unmute ${user.username}, they aren't muted.`, false);
+                return interaction.reply({ content: `${user.tag} is not muted.`, ephemeral: true });
+            }
+
             await member.timeout(null, 'Removing timeout');
+            const statusChannel = interaction.channel || (interaction.channelId
+                ? await client.channels.fetch(interaction.channelId).catch(() => null)
+                : null);
+            await sendUnmuteStatusCard(client, statusChannel, `${user.username} was unmuted.`);
             await interaction.reply({ content: `Removed timeout from ${user.tag}.`, ephemeral: true });
             if (client.addModLog) {
                 let robloxId = null;

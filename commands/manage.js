@@ -3,6 +3,7 @@ const {
     EmbedBuilder,
     ActionRowBuilder,
     StringSelectMenuBuilder,
+    UserSelectMenuBuilder,
     ButtonBuilder,
     ButtonStyle,
     ModalBuilder,
@@ -12,10 +13,66 @@ const {
 const { RULE_CHOICES, parseDurationMs, normalizeInfractionStep } = require('../infractions');
 
 const MANAGE_RULE_SELECT_ID = 'manage_infraction_rule_select';
+const MANAGE_PANEL_SELECT_ID = 'manage_panel_select';
+const MANAGE_USER_SELECT_ID = 'manage_user_infraction_user_select';
+const MANAGE_USER_CASE_SELECT_ID = 'manage_user_infraction_case_select';
 const MANAGE_EDIT_PREFIX = 'manage_infraction_rule_edit:';
 const MANAGE_RESET_PREFIX = 'manage_infraction_rule_reset:';
+const MANAGE_REMOVE_PREFIX = 'manage_user_infraction_remove:';
 const MANAGE_MODAL_PREFIX = 'manage_infraction_modal:';
 const MODAL_STEPS_INPUT_ID = 'steps';
+
+const MANAGE_PANEL_RULES = 'rules';
+const MANAGE_PANEL_USER_INFRACTIONS = 'user_infractions';
+
+function truncate(text, max = 100) {
+    const value = String(text || '').trim();
+    if (!value) return 'No reason provided';
+    return value.length > max ? `${value.slice(0, max - 3)}...` : value;
+}
+
+function isInfractionEntry(entry) {
+    const action = String(entry?.action || '').trim().toLowerCase();
+    return Boolean(
+        entry?.infractionRule
+        || entry?.infractionCount
+        || ['mute', 'kick', 'ban', 'temp ban', 'ticket blacklist'].includes(action)
+    );
+}
+
+function getUserInfractionEntries(client, guildId, userId) {
+    if (!guildId || !userId || typeof client.getModLogs !== 'function') return [];
+    return (client.getModLogs(guildId, userId) || []).filter(isInfractionEntry);
+}
+
+function formatInfractionEntry(entry) {
+    const parts = [`Case ${entry.caseNumber ?? entry.caseId ?? 'N/A'}`, entry.action || 'Unknown'];
+    if (entry.infractionRuleLabel) parts.push(entry.infractionRuleLabel);
+    if (entry.duration) parts.push(entry.duration);
+    return parts.join(' - ');
+}
+
+function buildPanelSelectRow(selectedPanel) {
+    return new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId(MANAGE_PANEL_SELECT_ID)
+            .setPlaceholder('Select a manage panel')
+            .addOptions([
+                {
+                    label: 'Infraction Rules',
+                    value: MANAGE_PANEL_RULES,
+                    description: 'Edit escalation ladders for each rule',
+                    default: selectedPanel === MANAGE_PANEL_RULES
+                },
+                {
+                    label: 'User Infractions',
+                    value: MANAGE_PANEL_USER_INFRACTIONS,
+                    description: 'Review or remove a user\'s infraction cases',
+                    default: selectedPanel === MANAGE_PANEL_USER_INFRACTIONS
+                }
+            ])
+    );
+}
 
 function formatStep(step, index) {
     const number = `${index + 1}.`;
@@ -106,7 +163,7 @@ function parseModalSteps(text) {
     return { steps, errors };
 }
 
-function buildManagePayload(client, guildId, selectedRuleKey) {
+function buildRuleManagePayload(client, guildId, selectedRuleKey) {
     const rules = client.getInfractionRules(guildId);
     const fallbackKey = RULE_CHOICES[0]?.value;
     const safeRuleKey = rules[selectedRuleKey] ? selectedRuleKey : fallbackKey;
@@ -144,7 +201,127 @@ function buildManagePayload(client, guildId, selectedRuleKey) {
             .setStyle(ButtonStyle.Danger)
     );
 
-    return { embeds: [embed], components: [selectRow, buttonRow] };
+    return { embeds: [embed], components: [buildPanelSelectRow(MANAGE_PANEL_RULES), selectRow, buttonRow] };
+}
+
+function buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCaseNumber, notice) {
+    const entries = selectedUserId ? getUserInfractionEntries(client, guildId, selectedUserId) : [];
+    const selectedEntry = selectedCaseNumber
+        ? entries.find(entry => String(entry.caseNumber ?? entry.caseId) === String(selectedCaseNumber))
+        : null;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Manage Panel - User Infractions')
+        .setDescription('Pick a user to review their recorded infraction cases. Removing a false case will also reduce future escalation counts that rely on modlogs.')
+        .setTimestamp();
+
+    if (!selectedUserId) {
+        embed.addFields({
+            name: 'Select a User',
+            value: 'Use the user picker below to load infraction cases for a member.',
+            inline: false
+        });
+    } else {
+        const userLabel = entries[0]?.userTag ? `${entries[0].userTag} (<@${selectedUserId}>)` : `<@${selectedUserId}>`;
+        embed.addFields({ name: 'Selected User', value: `${userLabel}\nID: ${selectedUserId}`, inline: false });
+
+        if (!entries.length) {
+            embed.addFields({
+                name: 'Recorded Infractions',
+                value: 'No removable infraction cases were found for this user.',
+                inline: false
+            });
+        } else {
+            embed.addFields({
+                name: 'Recorded Infractions',
+                value: entries.slice(0, 10).map((entry) => {
+                    const details = [
+                        `Case ${entry.caseNumber ?? entry.caseId ?? 'N/A'}: ${entry.action || 'Unknown'}`,
+                        entry.infractionRuleLabel ? `Rule: ${entry.infractionRuleLabel}` : null,
+                        entry.duration ? `Duration: ${entry.duration}` : null,
+                        entry.reason ? `Reason: ${truncate(entry.reason, 90)}` : null
+                    ].filter(Boolean);
+                    return details.join(' | ');
+                }).join('\n') || 'No removable infraction cases were found for this user.',
+                inline: false
+            });
+        }
+
+        if (selectedEntry) {
+            embed.addFields({
+                name: 'Selected Case',
+                value: [
+                    `Case ${selectedEntry.caseNumber ?? selectedEntry.caseId ?? 'N/A'} - ${selectedEntry.action || 'Unknown'}`,
+                    selectedEntry.infractionRuleLabel ? `Rule: ${selectedEntry.infractionRuleLabel}` : null,
+                    selectedEntry.duration ? `Duration: ${selectedEntry.duration}` : null,
+                    selectedEntry.reason ? `Reason: ${truncate(selectedEntry.reason, 250)}` : 'Reason: No reason provided',
+                    selectedEntry.timestamp ? `Timestamp: ${selectedEntry.timestamp}` : null
+                ].filter(Boolean).join('\n'),
+                inline: false
+            });
+        }
+    }
+
+    const components = [
+        buildPanelSelectRow(MANAGE_PANEL_USER_INFRACTIONS),
+        new ActionRowBuilder().addComponents(
+            new UserSelectMenuBuilder()
+                .setCustomId(MANAGE_USER_SELECT_ID)
+                .setPlaceholder('Select a user to review infractions')
+                .setMinValues(1)
+                .setMaxValues(1)
+        )
+    ];
+
+    if (selectedUserId && entries.length) {
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId(`${MANAGE_USER_CASE_SELECT_ID}:${selectedUserId}`)
+                    .setPlaceholder('Select an infraction case')
+                    .addOptions(entries.slice(0, 25).map(entry => ({
+                        label: formatInfractionEntry(entry).slice(0, 100),
+                        value: String(entry.caseNumber ?? entry.caseId),
+                        description: truncate(entry.reason || entry.timestamp || 'No reason provided', 100),
+                        default: String(entry.caseNumber ?? entry.caseId) === String(selectedCaseNumber || '')
+                    })))
+            )
+        );
+    }
+
+    if (selectedEntry) {
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`${MANAGE_REMOVE_PREFIX}${selectedUserId}:${selectedEntry.caseNumber ?? selectedEntry.caseId}`)
+                    .setLabel(`Remove Case ${selectedEntry.caseNumber ?? selectedEntry.caseId}`)
+                    .setStyle(ButtonStyle.Danger)
+            )
+        );
+    }
+
+    return {
+        content: notice || null,
+        embeds: [embed],
+        components
+    };
+}
+
+function buildManagePayload(client, guildId, options = {}) {
+    const {
+        panel = MANAGE_PANEL_RULES,
+        selectedRuleKey,
+        selectedUserId,
+        selectedCaseNumber,
+        notice
+    } = options;
+
+    if (panel === MANAGE_PANEL_USER_INFRACTIONS) {
+        return buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCaseNumber, notice);
+    }
+
+    return buildRuleManagePayload(client, guildId, selectedRuleKey);
 }
 
 module.exports = {
@@ -160,23 +337,58 @@ module.exports = {
 
         const firstRule = RULE_CHOICES[0]?.value;
         return interaction.reply({
-            ...buildManagePayload(client, interaction.guild.id, firstRule),
+            ...buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_RULES, selectedRuleKey: firstRule }),
             ephemeral: true
         });
     },
     async handleStringSelect({ client, interaction }) {
-        if (interaction.customId !== MANAGE_RULE_SELECT_ID) return false;
+        if (interaction.customId !== MANAGE_RULE_SELECT_ID
+            && interaction.customId !== MANAGE_PANEL_SELECT_ID
+            && !interaction.customId.startsWith(`${MANAGE_USER_CASE_SELECT_ID}:`)) {
+            return false;
+        }
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
             return true;
         }
 
+        if (interaction.customId === MANAGE_PANEL_SELECT_ID) {
+            const panel = interaction.values?.[0] || MANAGE_PANEL_RULES;
+            if (panel === MANAGE_PANEL_USER_INFRACTIONS) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel }));
+                return true;
+            }
+
+            const firstRule = RULE_CHOICES[0]?.value;
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_RULES,
+                selectedRuleKey: firstRule
+            }));
+            return true;
+        }
+
+        if (interaction.customId.startsWith(`${MANAGE_USER_CASE_SELECT_ID}:`)) {
+            const selectedUserId = interaction.customId.slice(`${MANAGE_USER_CASE_SELECT_ID}:`.length);
+            const selectedCaseNumber = interaction.values?.[0] || null;
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_USER_INFRACTIONS,
+                selectedUserId,
+                selectedCaseNumber
+            }));
+            return true;
+        }
+
         const selectedRuleKey = interaction.values?.[0] || RULE_CHOICES[0]?.value;
-        await interaction.update(buildManagePayload(client, interaction.guild.id, selectedRuleKey));
+        await interaction.update(buildManagePayload(client, interaction.guild.id, {
+            panel: MANAGE_PANEL_RULES,
+            selectedRuleKey
+        }));
         return true;
     },
     async handleButton({ client, interaction }) {
-        if (!interaction.customId.startsWith(MANAGE_EDIT_PREFIX) && !interaction.customId.startsWith(MANAGE_RESET_PREFIX)) {
+        if (!interaction.customId.startsWith(MANAGE_EDIT_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_RESET_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_REMOVE_PREFIX)) {
             return false;
         }
 
@@ -210,6 +422,34 @@ module.exports = {
             return true;
         }
 
+        if (interaction.customId.startsWith(MANAGE_REMOVE_PREFIX)) {
+            const payload = interaction.customId.slice(MANAGE_REMOVE_PREFIX.length);
+            const separatorIndex = payload.lastIndexOf(':');
+            const userId = separatorIndex === -1 ? null : payload.slice(0, separatorIndex);
+            const caseNumber = separatorIndex === -1 ? null : payload.slice(separatorIndex + 1);
+
+            if (!userId || !caseNumber) {
+                await interaction.reply({ content: 'That infraction removal request is invalid.', ephemeral: true });
+                return true;
+            }
+
+            const removedLog = typeof client.removeModLogCase === 'function'
+                ? client.removeModLogCase(interaction.guild.id, caseNumber, userId)
+                : null;
+
+            if (!removedLog) {
+                await interaction.reply({ content: 'That case could not be found or no longer belongs to this user.', ephemeral: true });
+                return true;
+            }
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_USER_INFRACTIONS,
+                selectedUserId: userId,
+                notice: `Removed Case ${removedLog.caseNumber ?? removedLog.caseId} for <@${userId}>.`
+            }));
+            return true;
+        }
+
         const ruleKey = interaction.customId.slice(MANAGE_RESET_PREFIX.length);
         const reset = client.resetInfractionRule(interaction.guild.id, ruleKey);
         if (!reset) {
@@ -217,7 +457,24 @@ module.exports = {
             return true;
         }
 
-        await interaction.update(buildManagePayload(client, interaction.guild.id, ruleKey));
+        await interaction.update(buildManagePayload(client, interaction.guild.id, {
+            panel: MANAGE_PANEL_RULES,
+            selectedRuleKey: ruleKey
+        }));
+        return true;
+    },
+    async handleUserSelect({ client, interaction }) {
+        if (interaction.customId !== MANAGE_USER_SELECT_ID) return false;
+        if (!interaction.guild) {
+            await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        const selectedUserId = interaction.values?.[0];
+        await interaction.update(buildManagePayload(client, interaction.guild.id, {
+            panel: MANAGE_PANEL_USER_INFRACTIONS,
+            selectedUserId
+        }));
         return true;
     },
     async handleModalSubmit({ client, interaction }) {
@@ -252,7 +509,10 @@ module.exports = {
 
         await interaction.reply({
             content: `Updated ${existingRule.label} with ${steps.length} step(s).`,
-            ...buildManagePayload(client, interaction.guild.id, ruleKey),
+            ...buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_RULES,
+                selectedRuleKey: ruleKey
+            }),
             ephemeral: true
         });
         return true;
