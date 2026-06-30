@@ -331,11 +331,11 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
         ? (client.modStatsOverrides?.get(guildId)?.get(selectedUserId) || { mutes: 0, bans: 0, kicks: 0, warns: 0 })
         : null;
 
-    // Calculate actual modstats from logs for display
+    // Calculate actual modstats from logs for display (count actions PERFORMED by this user)
     let actualStats = null;
     if (selectedUserId) {
         const logs = client.modLogs?.get(guildId) || [];
-        const userLogs = logs.filter(log => String(log.userId) === String(selectedUserId));
+        const userLogs = logs.filter(log => String(log.moderatorId) === String(selectedUserId));
         
         const mutesCount = userLogs.filter(log => log.action === 'Mute').length;
         const bansCount = userLogs.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length;
