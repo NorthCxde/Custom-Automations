@@ -331,6 +331,20 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
         ? (client.modStatsOverrides?.get(guildId)?.get(selectedUserId) || { mutes: 0, bans: 0, kicks: 0, warns: 0 })
         : null;
 
+    // Calculate actual modstats from logs for display
+    let actualStats = null;
+    if (selectedUserId) {
+        const logs = client.modLogs?.get(guildId) || [];
+        const userLogs = logs.filter(log => String(log.userId) === String(selectedUserId));
+        
+        const mutesCount = userLogs.filter(log => log.action === 'Mute').length;
+        const bansCount = userLogs.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length;
+        const kicksCount = userLogs.filter(log => log.action === 'Kick').length;
+        const warnsCount = userLogs.filter(log => log.action === 'Warn').length;
+        
+        actualStats = { mutes: mutesCount, bans: bansCount, kicks: kicksCount, warns: warnsCount };
+    }
+
     const embed = new EmbedBuilder()
         .setColor(0x000000)
         .setTitle('Manage Panel - Modstats')
@@ -367,7 +381,8 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
     } else {
         embed.addFields(
             { name: 'Selected User', value: `<@${selectedUserId}>\nID: ${selectedUserId}`, inline: false },
-            { name: 'Current Modstats', value: `Mutes: ${userStats.mutes}\nBans: ${userStats.bans}\nKicks: ${userStats.kicks}\nWarns: ${userStats.warns}`, inline: false }
+            { name: 'Current Modstats (from logs)', value: `Mutes: ${actualStats.mutes}\nBans: ${actualStats.bans}\nKicks: ${actualStats.kicks}\nWarns: ${actualStats.warns}`, inline: false },
+            { name: 'Overrides', value: `Mutes: ${userStats.mutes}\nBans: ${userStats.bans}\nKicks: ${userStats.kicks}\nWarns: ${userStats.warns}`, inline: false }
         );
 
         components.push(
