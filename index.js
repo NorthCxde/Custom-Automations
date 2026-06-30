@@ -203,6 +203,7 @@ client.giveawayTimers = new Map();
 client.giveawayDrafts = new Map();
 client.entryRoles = new Map();
 client.infractionRules = new Map();
+client.modStatsOverrides = new Map();
 client.manualLogsChannels = new Map();
 client.publicAllowedRoles = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted

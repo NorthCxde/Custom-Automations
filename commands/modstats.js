@@ -25,21 +25,48 @@ function buildModStatsEmbed(client, guildId, user, displayName, avatarUrl) {
     const logs = client.modLogs.get(guildId) || [];
     const uid  = user.id;
 
-    const mutes7   = countActions(logs, uid, MUTE_ACTIONS,  MS_7D);
-    const mutes30  = countActions(logs, uid, MUTE_ACTIONS,  MS_30D);
-    const mutesAll = countActions(logs, uid, MUTE_ACTIONS,  null);
+    // Check if there's an override for this user
+    const hasOverrides = client.modStatsOverrides?.has(guildId) && client.modStatsOverrides.get(guildId).has(uid);
+    
+    let mutes7, mutes30, mutesAll;
+    let bans7, bans30, bansAll;
+    let kicks7, kicks30, kicksAll;
+    let warns7, warns30, warnsAll;
 
-    const bans7    = countActions(logs, uid, BAN_ACTIONS,   MS_7D);
-    const bans30   = countActions(logs, uid, BAN_ACTIONS,   MS_30D);
-    const bansAll  = countActions(logs, uid, BAN_ACTIONS,   null);
+    if (hasOverrides) {
+        const overrides = client.modStatsOverrides.get(guildId).get(uid);
+        mutes7   = 0;
+        mutes30  = 0;
+        mutesAll = overrides.mutes || 0;
+        
+        bans7    = 0;
+        bans30   = 0;
+        bansAll  = overrides.bans || 0;
+        
+        kicks7   = 0;
+        kicks30  = 0;
+        kicksAll = overrides.kicks || 0;
+        
+        warns7   = 0;
+        warns30  = 0;
+        warnsAll = overrides.warns || 0;
+    } else {
+        mutes7   = countActions(logs, uid, MUTE_ACTIONS,  MS_7D);
+        mutes30  = countActions(logs, uid, MUTE_ACTIONS,  MS_30D);
+        mutesAll = countActions(logs, uid, MUTE_ACTIONS,  null);
 
-    const kicks7   = countActions(logs, uid, KICK_ACTIONS,  MS_7D);
-    const kicks30  = countActions(logs, uid, KICK_ACTIONS,  MS_30D);
-    const kicksAll = countActions(logs, uid, KICK_ACTIONS,  null);
+        bans7    = countActions(logs, uid, BAN_ACTIONS,   MS_7D);
+        bans30   = countActions(logs, uid, BAN_ACTIONS,   MS_30D);
+        bansAll  = countActions(logs, uid, BAN_ACTIONS,   null);
 
-    const warns7   = countActions(logs, uid, WARN_ACTIONS,  MS_7D);
-    const warns30  = countActions(logs, uid, WARN_ACTIONS,  MS_30D);
-    const warnsAll = countActions(logs, uid, WARN_ACTIONS,  null);
+        kicks7   = countActions(logs, uid, KICK_ACTIONS,  MS_7D);
+        kicks30  = countActions(logs, uid, KICK_ACTIONS,  MS_30D);
+        kicksAll = countActions(logs, uid, KICK_ACTIONS,  null);
+
+        warns7   = countActions(logs, uid, WARN_ACTIONS,  MS_7D);
+        warns30  = countActions(logs, uid, WARN_ACTIONS,  MS_30D);
+        warnsAll = countActions(logs, uid, WARN_ACTIONS,  null);
+    }
 
     const total7   = mutes7   + bans7   + kicks7   + warns7;
     const total30  = mutes30  + bans30  + kicks30  + warns30;

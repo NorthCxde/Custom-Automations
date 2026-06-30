@@ -22,8 +22,20 @@ const MANAGE_REMOVE_PREFIX = 'manage_user_infraction_remove:';
 const MANAGE_MODAL_PREFIX = 'manage_infraction_modal:';
 const MODAL_STEPS_INPUT_ID = 'steps';
 
+const MANAGE_MODSTATS_USER_SELECT_ID = 'manage_modstats_user_select';
+const MANAGE_MODSTATS_ACTION_SELECT_ID = 'manage_modstats_action_select';
+const MANAGE_MODSTATS_EDIT_PREFIX = 'manage_modstats_edit:';
+const MANAGE_MODSTATS_RESET_USER_PREFIX = 'manage_modstats_reset_user:';
+const MANAGE_MODSTATS_RESET_ALL_ID = 'manage_modstats_reset_all';
+const MANAGE_MODSTATS_MODAL_PREFIX = 'manage_modstats_modal:';
+const MODAL_MODSTATS_MUTES_INPUT_ID = 'mutes';
+const MODAL_MODSTATS_BANS_INPUT_ID = 'bans';
+const MODAL_MODSTATS_KICKS_INPUT_ID = 'kicks';
+const MODAL_MODSTATS_WARNS_INPUT_ID = 'warns';
+
 const MANAGE_PANEL_RULES = 'rules';
 const MANAGE_PANEL_USER_INFRACTIONS = 'user_infractions';
+const MANAGE_PANEL_MODSTATS = 'modstats';
 
 function truncate(text, max = 100) {
     const value = String(text || '').trim();
@@ -69,6 +81,12 @@ function buildPanelSelectRow(selectedPanel) {
                     value: MANAGE_PANEL_USER_INFRACTIONS,
                     description: 'Review or remove a user\'s infraction cases',
                     default: selectedPanel === MANAGE_PANEL_USER_INFRACTIONS
+                },
+                {
+                    label: 'Modstats',
+                    value: MANAGE_PANEL_MODSTATS,
+                    description: 'Edit or reset moderation statistics',
+                    default: selectedPanel === MANAGE_PANEL_MODSTATS
                 }
             ])
     );
@@ -308,17 +326,106 @@ function buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCa
     };
 }
 
+function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
+    const userStats = selectedUserId
+        ? (client.modStatsOverrides?.get(guildId)?.get(selectedUserId) || { mutes: 0, bans: 0, kicks: 0, warns: 0 })
+        : null;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Manage Panel - Modstats')
+        .setDescription('Edit moderation statistics for a user, reset a user\'s stats, or reset all stats in the server.')
+        .setTimestamp();
+
+    const components = [buildPanelSelectRow(MANAGE_PANEL_MODSTATS)];
+
+    if (!selectedUserId) {
+        embed.addFields({
+            name: 'Select a User',
+            value: 'Pick a user below to edit their moderation statistics.',
+            inline: false
+        });
+
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new UserSelectMenuBuilder()
+                    .setCustomId(MANAGE_MODSTATS_USER_SELECT_ID)
+                    .setPlaceholder('Select a user to manage modstats')
+                    .setMinValues(1)
+                    .setMaxValues(1)
+            )
+        );
+
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_MODSTATS_RESET_ALL_ID)
+                    .setLabel('Reset All Modstats in Server')
+                    .setStyle(ButtonStyle.Danger)
+            )
+        );
+    } else {
+        embed.addFields(
+            { name: 'Selected User', value: `<@${selectedUserId}>\nID: ${selectedUserId}`, inline: false },
+            { name: 'Current Modstats', value: `Mutes: ${userStats.mutes}\nBans: ${userStats.bans}\nKicks: ${userStats.kicks}\nWarns: ${userStats.warns}`, inline: false }
+        );
+
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new UserSelectMenuBuilder()
+                    .setCustomId(MANAGE_MODSTATS_USER_SELECT_ID)
+                    .setPlaceholder('Select a different user')
+                    .setMinValues(1)
+                    .setMaxValues(1)
+            )
+        );
+
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`${MANAGE_MODSTATS_EDIT_PREFIX}${selectedUserId}`)
+                    .setLabel('Edit Stats')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId(`${MANAGE_MODSTATS_RESET_USER_PREFIX}${selectedUserId}`)
+                    .setLabel('Reset This User')
+                    .setStyle(ButtonStyle.Danger)
+            )
+        );
+
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_MODSTATS_RESET_ALL_ID)
+                    .setLabel('Reset All Modstats in Server')
+                    .setStyle(ButtonStyle.Danger)
+            )
+        );
+    }
+
+    return {
+        content: notice || null,
+        embeds: [embed],
+        components
+    };
+}
+
 function buildManagePayload(client, guildId, options = {}) {
     const {
         panel = MANAGE_PANEL_RULES,
         selectedRuleKey,
         selectedUserId,
         selectedCaseNumber,
+        selectedModstatsUserId,
         notice
     } = options;
 
     if (panel === MANAGE_PANEL_USER_INFRACTIONS) {
         return buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCaseNumber, notice);
+    }
+
+    if (panel === MANAGE_PANEL_MODSTATS) {
+        return buildModstatsManagePayload(client, guildId, selectedModstatsUserId, notice);
     }
 
     return buildRuleManagePayload(client, guildId, selectedRuleKey);
@@ -359,6 +466,11 @@ module.exports = {
                 return true;
             }
 
+            if (panel === MANAGE_PANEL_MODSTATS) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_MODSTATS }));
+                return true;
+            }
+
             const firstRule = RULE_CHOICES[0]?.value;
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_RULES,
@@ -388,12 +500,107 @@ module.exports = {
     async handleButton({ client, interaction }) {
         if (!interaction.customId.startsWith(MANAGE_EDIT_PREFIX)
             && !interaction.customId.startsWith(MANAGE_RESET_PREFIX)
-            && !interaction.customId.startsWith(MANAGE_REMOVE_PREFIX)) {
+            && !interaction.customId.startsWith(MANAGE_REMOVE_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_MODSTATS_EDIT_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_MODSTATS_RESET_USER_PREFIX)
+            && interaction.customId !== MANAGE_MODSTATS_RESET_ALL_ID) {
             return false;
         }
 
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        // Modstats: Edit user stats
+        if (interaction.customId.startsWith(MANAGE_MODSTATS_EDIT_PREFIX)) {
+            const userId = interaction.customId.slice(MANAGE_MODSTATS_EDIT_PREFIX.length);
+            
+            if (!client.modStatsOverrides) {
+                client.modStatsOverrides = new Map();
+            }
+            if (!client.modStatsOverrides.has(interaction.guild.id)) {
+                client.modStatsOverrides.set(interaction.guild.id, new Map());
+            }
+            
+            const userStats = client.modStatsOverrides.get(interaction.guild.id).get(userId) || { mutes: 0, bans: 0, kicks: 0, warns: 0 };
+
+            const modal = new ModalBuilder()
+                .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}`)
+                .setTitle('Edit Modstats');
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId(MODAL_MODSTATS_MUTES_INPUT_ID)
+                        .setLabel('Mutes')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setValue(String(userStats.mutes || 0))
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId(MODAL_MODSTATS_BANS_INPUT_ID)
+                        .setLabel('Bans')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setValue(String(userStats.bans || 0))
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId(MODAL_MODSTATS_KICKS_INPUT_ID)
+                        .setLabel('Kicks')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setValue(String(userStats.kicks || 0))
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId(MODAL_MODSTATS_WARNS_INPUT_ID)
+                        .setLabel('Warns')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setValue(String(userStats.warns || 0))
+                )
+            );
+
+            await interaction.showModal(modal);
+            return true;
+        }
+
+        // Modstats: Reset single user
+        if (interaction.customId.startsWith(MANAGE_MODSTATS_RESET_USER_PREFIX)) {
+            const userId = interaction.customId.slice(MANAGE_MODSTATS_RESET_USER_PREFIX.length);
+            
+            if (!client.modStatsOverrides) {
+                client.modStatsOverrides = new Map();
+            }
+            if (!client.modStatsOverrides.has(interaction.guild.id)) {
+                client.modStatsOverrides.set(interaction.guild.id, new Map());
+            }
+            
+            client.modStatsOverrides.get(interaction.guild.id).delete(userId);
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_MODSTATS,
+                selectedModstatsUserId: userId,
+                notice: `Reset modstats for <@${userId}>.`
+            }));
+            return true;
+        }
+
+        // Modstats: Reset all
+        if (interaction.customId === MANAGE_MODSTATS_RESET_ALL_ID) {
+            if (!client.modStatsOverrides) {
+                client.modStatsOverrides = new Map();
+            }
+            
+            client.modStatsOverrides.delete(interaction.guild.id);
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_MODSTATS,
+                notice: 'Reset all modstats for the entire server.'
+            }));
             return true;
         }
 
@@ -464,23 +671,65 @@ module.exports = {
         return true;
     },
     async handleUserSelect({ client, interaction }) {
-        if (interaction.customId !== MANAGE_USER_SELECT_ID) return false;
+        if (interaction.customId !== MANAGE_USER_SELECT_ID && interaction.customId !== MANAGE_MODSTATS_USER_SELECT_ID) return false;
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
             return true;
         }
 
         const selectedUserId = interaction.values?.[0];
-        await interaction.update(buildManagePayload(client, interaction.guild.id, {
-            panel: MANAGE_PANEL_USER_INFRACTIONS,
-            selectedUserId
-        }));
+        
+        if (interaction.customId === MANAGE_MODSTATS_USER_SELECT_ID) {
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_MODSTATS,
+                selectedModstatsUserId: selectedUserId
+            }));
+        } else {
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_USER_INFRACTIONS,
+                selectedUserId
+            }));
+        }
         return true;
     },
     async handleModalSubmit({ client, interaction }) {
-        if (!interaction.customId.startsWith(MANAGE_MODAL_PREFIX)) return false;
+        if (!interaction.customId.startsWith(MANAGE_MODAL_PREFIX) && !interaction.customId.startsWith(MANAGE_MODSTATS_MODAL_PREFIX)) return false;
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        // Modstats: Save edited stats
+        if (interaction.customId.startsWith(MANAGE_MODSTATS_MODAL_PREFIX)) {
+            const userId = interaction.customId.slice(MANAGE_MODSTATS_MODAL_PREFIX.length);
+
+            const mutesStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_MUTES_INPUT_ID).trim();
+            const bansStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_BANS_INPUT_ID).trim();
+            const kicksStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_KICKS_INPUT_ID).trim();
+            const warnsStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_WARNS_INPUT_ID).trim();
+
+            const mutes = Math.max(0, parseInt(mutesStr, 10) || 0);
+            const bans = Math.max(0, parseInt(bansStr, 10) || 0);
+            const kicks = Math.max(0, parseInt(kicksStr, 10) || 0);
+            const warns = Math.max(0, parseInt(warnsStr, 10) || 0);
+
+            if (!client.modStatsOverrides) {
+                client.modStatsOverrides = new Map();
+            }
+            if (!client.modStatsOverrides.has(interaction.guild.id)) {
+                client.modStatsOverrides.set(interaction.guild.id, new Map());
+            }
+
+            client.modStatsOverrides.get(interaction.guild.id).set(userId, { mutes, bans, kicks, warns });
+
+            await interaction.reply({
+                content: `Updated modstats for <@${userId}>: Mutes: ${mutes}, Bans: ${bans}, Kicks: ${kicks}, Warns: ${warns}`,
+                ...buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_MODSTATS,
+                    selectedModstatsUserId: userId
+                }),
+                ephemeral: true
+            });
             return true;
         }
 
