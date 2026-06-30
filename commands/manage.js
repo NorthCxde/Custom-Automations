@@ -542,7 +542,7 @@ module.exports = {
 
             const modal = new ModalBuilder()
                 .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}`)
-                .setTitle('Edit Modstats');
+                .setTitle('Edit Modstats (All Time)');
 
             modal.addComponents(
                 new ActionRowBuilder().addComponents(
