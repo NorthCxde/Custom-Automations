@@ -520,7 +520,9 @@ module.exports = {
             
             // Calculate stats from logs using the EXACT same method as the panel
             const logs = client.modLogs?.get(interaction.guild.id) || [];
+            console.log(`[MODAL DEBUG] userId: ${userId}, guildId: ${interaction.guild.id}, totalLogs: ${logs.length}, timePeriod: ${timePeriod}`);
             const userLogs = logs.filter(log => String(log.moderatorId) === String(userId));
+            console.log(`[MODAL DEBUG] userLogs filtered: ${userLogs.length}`);
             
             const MS_7D  = 7  * 24 * 60 * 60 * 1000;
             const MS_30D = 30 * 24 * 60 * 60 * 1000;
@@ -557,6 +559,8 @@ module.exports = {
                     warns: userLogs.filter(log => log.action === 'Warn').length
                 };
             }
+            
+            console.log(`[MODAL DEBUG] Final periodStats for ${timePeriod}:`, periodStats);
 
             const modal = new ModalBuilder()
                 .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}`)
