@@ -27,44 +27,49 @@ function buildModStatsEmbed(client, guildId, user, displayName, avatarUrl) {
 
     // Check if there's an override for this user
     const hasOverrides = client.modStatsOverrides?.has(guildId) && client.modStatsOverrides.get(guildId).has(uid);
+    const userOverrides = hasOverrides ? client.modStatsOverrides.get(guildId).get(uid) : {};
     
     let mutes7, mutes30, mutesAll;
     let bans7, bans30, bansAll;
     let kicks7, kicks30, kicksAll;
     let warns7, warns30, warnsAll;
 
-    if (hasOverrides) {
-        const overrides = client.modStatsOverrides.get(guildId).get(uid);
-        mutes7   = 0;
-        mutes30  = 0;
-        mutesAll = overrides.mutes || 0;
-        
-        bans7    = 0;
-        bans30   = 0;
-        bansAll  = overrides.bans || 0;
-        
-        kicks7   = 0;
-        kicks30  = 0;
-        kicksAll = overrides.kicks || 0;
-        
-        warns7   = 0;
-        warns30  = 0;
-        warnsAll = overrides.warns || 0;
+    // For 7 days
+    if (userOverrides['7d']) {
+        mutes7 = userOverrides['7d'].mutes || 0;
+        bans7 = userOverrides['7d'].bans || 0;
+        kicks7 = userOverrides['7d'].kicks || 0;
+        warns7 = userOverrides['7d'].warns || 0;
     } else {
         mutes7   = countActions(logs, uid, MUTE_ACTIONS,  MS_7D);
-        mutes30  = countActions(logs, uid, MUTE_ACTIONS,  MS_30D);
-        mutesAll = countActions(logs, uid, MUTE_ACTIONS,  null);
-
         bans7    = countActions(logs, uid, BAN_ACTIONS,   MS_7D);
-        bans30   = countActions(logs, uid, BAN_ACTIONS,   MS_30D);
-        bansAll  = countActions(logs, uid, BAN_ACTIONS,   null);
-
         kicks7   = countActions(logs, uid, KICK_ACTIONS,  MS_7D);
-        kicks30  = countActions(logs, uid, KICK_ACTIONS,  MS_30D);
-        kicksAll = countActions(logs, uid, KICK_ACTIONS,  null);
-
         warns7   = countActions(logs, uid, WARN_ACTIONS,  MS_7D);
+    }
+
+    // For 30 days
+    if (userOverrides['30d']) {
+        mutes30 = userOverrides['30d'].mutes || 0;
+        bans30 = userOverrides['30d'].bans || 0;
+        kicks30 = userOverrides['30d'].kicks || 0;
+        warns30 = userOverrides['30d'].warns || 0;
+    } else {
+        mutes30  = countActions(logs, uid, MUTE_ACTIONS,  MS_30D);
+        bans30   = countActions(logs, uid, BAN_ACTIONS,   MS_30D);
+        kicks30  = countActions(logs, uid, KICK_ACTIONS,  MS_30D);
         warns30  = countActions(logs, uid, WARN_ACTIONS,  MS_30D);
+    }
+
+    // For all time
+    if (userOverrides['all']) {
+        mutesAll = userOverrides['all'].mutes || 0;
+        bansAll = userOverrides['all'].bans || 0;
+        kicksAll = userOverrides['all'].kicks || 0;
+        warnsAll = userOverrides['all'].warns || 0;
+    } else {
+        mutesAll = countActions(logs, uid, MUTE_ACTIONS,  null);
+        bansAll  = countActions(logs, uid, BAN_ACTIONS,   null);
+        kicksAll = countActions(logs, uid, KICK_ACTIONS,  null);
         warnsAll = countActions(logs, uid, WARN_ACTIONS,  null);
     }
 

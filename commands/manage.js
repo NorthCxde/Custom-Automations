@@ -25,6 +25,7 @@ const MODAL_STEPS_INPUT_ID = 'steps';
 const MANAGE_MODSTATS_USER_SELECT_ID = 'manage_modstats_user_select';
 const MANAGE_MODSTATS_ACTION_SELECT_ID = 'manage_modstats_action_select';
 const MANAGE_MODSTATS_EDIT_PREFIX = 'manage_modstats_edit:';
+const MANAGE_MODSTATS_EDIT_PERIOD_PREFIX = 'manage_modstats_edit_period:';
 const MANAGE_MODSTATS_RESET_USER_PREFIX = 'manage_modstats_reset_user:';
 const MANAGE_MODSTATS_RESET_ALL_ID = 'manage_modstats_reset_all';
 const MANAGE_MODSTATS_MODAL_PREFIX = 'manage_modstats_modal:';
@@ -327,22 +328,51 @@ function buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCa
 }
 
 function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
-    const userStats = selectedUserId
-        ? (client.modStatsOverrides?.get(guildId)?.get(selectedUserId) || { mutes: 0, bans: 0, kicks: 0, warns: 0 })
+    const userOverrides = selectedUserId
+        ? (client.modStatsOverrides?.get(guildId)?.get(selectedUserId) || {})
         : null;
 
-    // Calculate actual modstats from logs for display (count actions PERFORMED by this user)
-    let actualStats = null;
+    // Calculate actual modstats from logs for each time period (count actions PERFORMED by this user)
+    let stats7d = null, stats30d = null, statsAll = null;
     if (selectedUserId) {
         const logs = client.modLogs?.get(guildId) || [];
         const userLogs = logs.filter(log => String(log.moderatorId) === String(selectedUserId));
         
-        const mutesCount = userLogs.filter(log => log.action === 'Mute').length;
-        const bansCount = userLogs.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length;
-        const kicksCount = userLogs.filter(log => log.action === 'Kick').length;
-        const warnsCount = userLogs.filter(log => log.action === 'Warn').length;
-        
-        actualStats = { mutes: mutesCount, bans: bansCount, kicks: kicksCount, warns: warnsCount };
+        const MS_7D  = 7  * 24 * 60 * 60 * 1000;
+        const MS_30D = 30 * 24 * 60 * 60 * 1000;
+        const now = Date.now();
+
+        // 7 days
+        const logs7d = userLogs.filter(log => {
+            const ts = new Date(log.timestamp).getTime();
+            return !isNaN(ts) && now - ts <= MS_7D;
+        });
+        stats7d = {
+            mutes: logs7d.filter(log => log.action === 'Mute').length,
+            bans: logs7d.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
+            kicks: logs7d.filter(log => log.action === 'Kick').length,
+            warns: logs7d.filter(log => log.action === 'Warn').length
+        };
+
+        // 30 days
+        const logs30d = userLogs.filter(log => {
+            const ts = new Date(log.timestamp).getTime();
+            return !isNaN(ts) && now - ts <= MS_30D;
+        });
+        stats30d = {
+            mutes: logs30d.filter(log => log.action === 'Mute').length,
+            bans: logs30d.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
+            kicks: logs30d.filter(log => log.action === 'Kick').length,
+            warns: logs30d.filter(log => log.action === 'Warn').length
+        };
+
+        // All time
+        statsAll = {
+            mutes: userLogs.filter(log => log.action === 'Mute').length,
+            bans: userLogs.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
+            kicks: userLogs.filter(log => log.action === 'Kick').length,
+            warns: userLogs.filter(log => log.action === 'Warn').length
+        };
     }
 
     const embed = new EmbedBuilder()
@@ -381,8 +411,9 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
     } else {
         embed.addFields(
             { name: 'Selected User', value: `<@${selectedUserId}>\nID: ${selectedUserId}`, inline: false },
-            { name: 'Current Modstats (from logs)', value: `Mutes: ${actualStats.mutes}\nBans: ${actualStats.bans}\nKicks: ${actualStats.kicks}\nWarns: ${actualStats.warns}`, inline: false },
-            { name: 'Overrides', value: `Mutes: ${userStats.mutes}\nBans: ${userStats.bans}\nKicks: ${userStats.kicks}\nWarns: ${userStats.warns}`, inline: false }
+            { name: 'Last 7 Days', value: `Mutes: ${stats7d.mutes} | Bans: ${stats7d.bans} | Kicks: ${stats7d.kicks} | Warns: ${stats7d.warns}`, inline: false },
+            { name: 'Last 30 Days', value: `Mutes: ${stats30d.mutes} | Bans: ${stats30d.bans} | Kicks: ${stats30d.kicks} | Warns: ${stats30d.warns}`, inline: false },
+            { name: 'All Time', value: `Mutes: ${statsAll.mutes} | Bans: ${statsAll.bans} | Kicks: ${statsAll.kicks} | Warns: ${statsAll.warns}`, inline: false }
         );
 
         components.push(
@@ -466,11 +497,70 @@ module.exports = {
     async handleStringSelect({ client, interaction }) {
         if (interaction.customId !== MANAGE_RULE_SELECT_ID
             && interaction.customId !== MANAGE_PANEL_SELECT_ID
-            && !interaction.customId.startsWith(`${MANAGE_USER_CASE_SELECT_ID}:`)) {
+            && !interaction.customId.startsWith(`${MANAGE_USER_CASE_SELECT_ID}:`)
+            && !interaction.customId.startsWith(MANAGE_MODSTATS_EDIT_PERIOD_PREFIX)) {
             return false;
         }
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        // Modstats: Handle time period selection for edit
+        if (interaction.customId.startsWith(MANAGE_MODSTATS_EDIT_PERIOD_PREFIX)) {
+            const userId = interaction.customId.slice(MANAGE_MODSTATS_EDIT_PERIOD_PREFIX.length);
+            const timePeriod = interaction.values?.[0] || 'all';
+            
+            if (!client.modStatsOverrides) {
+                client.modStatsOverrides = new Map();
+            }
+            if (!client.modStatsOverrides.has(interaction.guild.id)) {
+                client.modStatsOverrides.set(interaction.guild.id, new Map());
+            }
+            
+            const userOverrides = client.modStatsOverrides.get(interaction.guild.id).get(userId) || {};
+            const periodStats = userOverrides[timePeriod] || { mutes: 0, bans: 0, kicks: 0, warns: 0 };
+
+            const modal = new ModalBuilder()
+                .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}`)
+                .setTitle(`Edit Modstats (${timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time'})`);
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId(MODAL_MODSTATS_MUTES_INPUT_ID)
+                        .setLabel('Mutes')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setValue(String(periodStats.mutes || 0))
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId(MODAL_MODSTATS_BANS_INPUT_ID)
+                        .setLabel('Bans')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setValue(String(periodStats.bans || 0))
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId(MODAL_MODSTATS_KICKS_INPUT_ID)
+                        .setLabel('Kicks')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setValue(String(periodStats.kicks || 0))
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId(MODAL_MODSTATS_WARNS_INPUT_ID)
+                        .setLabel('Warns')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setValue(String(periodStats.warns || 0))
+                )
+            );
+
+            await interaction.showModal(modal);
             return true;
         }
 
@@ -531,56 +621,30 @@ module.exports = {
         if (interaction.customId.startsWith(MANAGE_MODSTATS_EDIT_PREFIX)) {
             const userId = interaction.customId.slice(MANAGE_MODSTATS_EDIT_PREFIX.length);
             
-            if (!client.modStatsOverrides) {
-                client.modStatsOverrides = new Map();
-            }
-            if (!client.modStatsOverrides.has(interaction.guild.id)) {
-                client.modStatsOverrides.set(interaction.guild.id, new Map());
-            }
-            
-            const userStats = client.modStatsOverrides.get(interaction.guild.id).get(userId) || { mutes: 0, bans: 0, kicks: 0, warns: 0 };
-
-            const modal = new ModalBuilder()
-                .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}`)
-                .setTitle('Edit Modstats (All Time)');
-
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId(MODAL_MODSTATS_MUTES_INPUT_ID)
-                        .setLabel('Mutes')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                        .setValue(String(userStats.mutes || 0))
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId(MODAL_MODSTATS_BANS_INPUT_ID)
-                        .setLabel('Bans')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                        .setValue(String(userStats.bans || 0))
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId(MODAL_MODSTATS_KICKS_INPUT_ID)
-                        .setLabel('Kicks')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                        .setValue(String(userStats.kicks || 0))
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId(MODAL_MODSTATS_WARNS_INPUT_ID)
-                        .setLabel('Warns')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                        .setValue(String(userStats.warns || 0))
-                )
+            const selectRow = new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId(`${MANAGE_MODSTATS_EDIT_PERIOD_PREFIX}${userId}`)
+                    .setPlaceholder('Select time period to edit')
+                    .addOptions([
+                        { label: 'Last 7 Days', value: '7d', description: 'Edit 7-day stats' },
+                        { label: 'Last 30 Days', value: '30d', description: 'Edit 30-day stats' },
+                        { label: 'All Time', value: 'all', description: 'Edit all-time stats' }
+                    ])
             );
 
-            await interaction.showModal(modal);
+            await interaction.reply({
+                content: `Select which time period to edit for <@${userId}>:`,
+                components: [selectRow],
+                ephemeral: true
+            });
             return true;
+        }
+
+        // Modstats: Handle time period selection
+        if (interaction.customId.startsWith(MANAGE_MODSTATS_EDIT_PERIOD_PREFIX)) {
+            const userId = interaction.customId.slice(MANAGE_MODSTATS_EDIT_PERIOD_PREFIX.length);
+            // This will be handled in handleStringSelect
+            return false;
         }
 
         // Modstats: Reset single user
@@ -716,7 +780,10 @@ module.exports = {
 
         // Modstats: Save edited stats
         if (interaction.customId.startsWith(MANAGE_MODSTATS_MODAL_PREFIX)) {
-            const userId = interaction.customId.slice(MANAGE_MODSTATS_MODAL_PREFIX.length);
+            const payload = interaction.customId.slice(MANAGE_MODSTATS_MODAL_PREFIX.length);
+            const colonIndex = payload.lastIndexOf(':');
+            const userId = colonIndex === -1 ? payload : payload.slice(0, colonIndex);
+            const timePeriod = colonIndex === -1 ? 'all' : payload.slice(colonIndex + 1);
 
             const mutesStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_MUTES_INPUT_ID).trim();
             const bansStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_BANS_INPUT_ID).trim();
@@ -735,10 +802,13 @@ module.exports = {
                 client.modStatsOverrides.set(interaction.guild.id, new Map());
             }
 
-            client.modStatsOverrides.get(interaction.guild.id).set(userId, { mutes, bans, kicks, warns });
+            const userOverrides = client.modStatsOverrides.get(interaction.guild.id).get(userId) || {};
+            userOverrides[timePeriod] = { mutes, bans, kicks, warns };
+            client.modStatsOverrides.get(interaction.guild.id).set(userId, userOverrides);
 
+            const periodLabel = timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time';
             await interaction.reply({
-                content: `Updated modstats for <@${userId}>: Mutes: ${mutes}, Bans: ${bans}, Kicks: ${kicks}, Warns: ${warns}`,
+                content: `Updated ${periodLabel} modstats for <@${userId}>: Mutes: ${mutes}, Bans: ${bans}, Kicks: ${kicks}, Warns: ${warns}`,
                 ...buildManagePayload(client, interaction.guild.id, {
                     panel: MANAGE_PANEL_MODSTATS,
                     selectedModstatsUserId: userId
