@@ -520,9 +520,7 @@ module.exports = {
             
             // Calculate stats from logs using the EXACT same method as the panel
             const logs = client.modLogs?.get(interaction.guild.id) || [];
-            console.log(`[MODAL DEBUG] userId: ${userId}, guildId: ${interaction.guild.id}, totalLogs: ${logs.length}, timePeriod: ${timePeriod}`);
             const userLogs = logs.filter(log => String(log.moderatorId) === String(userId));
-            console.log(`[MODAL DEBUG] userLogs filtered: ${userLogs.length}`);
             
             const MS_7D  = 7  * 24 * 60 * 60 * 1000;
             const MS_30D = 30 * 24 * 60 * 60 * 1000;
@@ -560,18 +558,14 @@ module.exports = {
                 };
             }
             
-            console.log(`[MODAL DEBUG] Final periodStats for ${timePeriod}:`, periodStats);
-            
             // Ensure all values are valid numbers
             const mutesVal = Math.max(0, Number(periodStats.mutes) || 0);
             const bansVal = Math.max(0, Number(periodStats.bans) || 0);
             const kicksVal = Math.max(0, Number(periodStats.kicks) || 0);
             const warnsVal = Math.max(0, Number(periodStats.warns) || 0);
-            
-            console.log(`[MODAL DEBUG] About to set values - mutes: ${mutesVal}, bans: ${bansVal}, kicks: ${kicksVal}, warns: ${warnsVal}`);
 
             const modal = new ModalBuilder()
-                .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}:${Date.now()}`)
+                .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}`)
                 .setTitle(`Edit Modstats (${timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time'})`);
 
             const mutesInput = new TextInputBuilder()
@@ -580,7 +574,6 @@ module.exports = {
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
                 .setValue(String(mutesVal));
-            console.log(`[MODAL DEBUG] Mutes input value: ${mutesInput.data.value}`);
             
             const bansInput = new TextInputBuilder()
                 .setCustomId(MODAL_MODSTATS_BANS_INPUT_ID)
@@ -588,7 +581,6 @@ module.exports = {
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
                 .setValue(String(bansVal));
-            console.log(`[MODAL DEBUG] Bans input value: ${bansInput.data.value}`);
             
             const kicksInput = new TextInputBuilder()
                 .setCustomId(MODAL_MODSTATS_KICKS_INPUT_ID)
@@ -596,7 +588,6 @@ module.exports = {
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
                 .setValue(String(kicksVal));
-            console.log(`[MODAL DEBUG] Kicks input value: ${kicksInput.data.value}`);
             
             const warnsInput = new TextInputBuilder()
                 .setCustomId(MODAL_MODSTATS_WARNS_INPUT_ID)
@@ -604,7 +595,6 @@ module.exports = {
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
                 .setValue(String(warnsVal));
-            console.log(`[MODAL DEBUG] Warns input value: ${warnsInput.data.value}`);
 
             modal.addComponents(
                 new ActionRowBuilder().addComponents(mutesInput),
@@ -612,8 +602,6 @@ module.exports = {
                 new ActionRowBuilder().addComponents(kicksInput),
                 new ActionRowBuilder().addComponents(warnsInput)
             );
-            
-            console.log(`[MODAL DEBUG] Modal components added`);
 
             await interaction.showModal(modal);
             return true;
@@ -836,9 +824,9 @@ module.exports = {
         // Modstats: Save edited stats
         if (interaction.customId.startsWith(MANAGE_MODSTATS_MODAL_PREFIX)) {
             const payload = interaction.customId.slice(MANAGE_MODSTATS_MODAL_PREFIX.length);
-            const parts = payload.split(':');
-            const userId = parts[0];
-            const timePeriod = parts[1] || 'all';
+            const colonIndex = payload.lastIndexOf(':');
+            const userId = colonIndex === -1 ? payload : payload.slice(0, colonIndex);
+            const timePeriod = colonIndex === -1 ? 'all' : payload.slice(colonIndex + 1);
 
             const mutesStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_MUTES_INPUT_ID).trim();
             const bansStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_BANS_INPUT_ID).trim();
