@@ -565,7 +565,7 @@ module.exports = {
             const warnsVal = Math.max(0, Number(periodStats.warns) || 0);
 
             const modal = new ModalBuilder()
-                .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}`)
+                .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}:${Math.floor(Math.random() * 999999)}`)
                 .setTitle(`Edit Modstats (${timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time'})`);
 
             const mutesInput = new TextInputBuilder()
@@ -824,9 +824,10 @@ module.exports = {
         // Modstats: Save edited stats
         if (interaction.customId.startsWith(MANAGE_MODSTATS_MODAL_PREFIX)) {
             const payload = interaction.customId.slice(MANAGE_MODSTATS_MODAL_PREFIX.length);
-            const colonIndex = payload.lastIndexOf(':');
-            const userId = colonIndex === -1 ? payload : payload.slice(0, colonIndex);
-            const timePeriod = colonIndex === -1 ? 'all' : payload.slice(colonIndex + 1);
+            const parts = payload.split(':');
+            const userId = parts[0];
+            const timePeriod = parts[1] || 'all';
+            // parts[2] is the random number suffix, ignore it
 
             const mutesStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_MUTES_INPUT_ID).trim();
             const bansStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_BANS_INPUT_ID).trim();
