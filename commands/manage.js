@@ -566,40 +566,44 @@ module.exports = {
                 .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}`)
                 .setTitle(`Edit Modstats (${timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time'})`);
 
+            console.log(`[MODAL DEBUG] About to set values - mutes: ${periodStats.mutes}, bans: ${periodStats.bans}, kicks: ${periodStats.kicks}, warns: ${periodStats.warns}`);
+
+            const mutesInput = new TextInputBuilder()
+                .setCustomId(MODAL_MODSTATS_MUTES_INPUT_ID)
+                .setLabel('Mutes')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setValue(String(periodStats.mutes || 0));
+            
+            const bansInput = new TextInputBuilder()
+                .setCustomId(MODAL_MODSTATS_BANS_INPUT_ID)
+                .setLabel('Bans')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setValue(String(periodStats.bans || 0));
+            
+            const kicksInput = new TextInputBuilder()
+                .setCustomId(MODAL_MODSTATS_KICKS_INPUT_ID)
+                .setLabel('Kicks')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setValue(String(periodStats.kicks || 0));
+            
+            const warnsInput = new TextInputBuilder()
+                .setCustomId(MODAL_MODSTATS_WARNS_INPUT_ID)
+                .setLabel('Warns')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setValue(String(periodStats.warns || 0));
+
             modal.addComponents(
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId(MODAL_MODSTATS_MUTES_INPUT_ID)
-                        .setLabel('Mutes')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                        .setValue(String(periodStats.mutes || 0))
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId(MODAL_MODSTATS_BANS_INPUT_ID)
-                        .setLabel('Bans')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                        .setValue(String(periodStats.bans || 0))
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId(MODAL_MODSTATS_KICKS_INPUT_ID)
-                        .setLabel('Kicks')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                        .setValue(String(periodStats.kicks || 0))
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId(MODAL_MODSTATS_WARNS_INPUT_ID)
-                        .setLabel('Warns')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                        .setValue(String(periodStats.warns || 0))
-                )
+                new ActionRowBuilder().addComponents(mutesInput),
+                new ActionRowBuilder().addComponents(bansInput),
+                new ActionRowBuilder().addComponents(kicksInput),
+                new ActionRowBuilder().addComponents(warnsInput)
             );
+            
+            console.log(`[MODAL DEBUG] Modal components added`);
 
             await interaction.showModal(modal);
             return true;
