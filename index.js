@@ -2639,6 +2639,18 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
+        if (interaction.customId.startsWith('manage_modstats_modal:')) {
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const manageCommand = client.slashCommands.get('manage');
+            if (manageCommand && typeof manageCommand.handleModalSubmit === 'function') {
+                const handled = await manageCommand.handleModalSubmit({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId === 'gv_create_modal') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
