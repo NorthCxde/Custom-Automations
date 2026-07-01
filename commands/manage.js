@@ -521,6 +521,7 @@ module.exports = {
             // Calculate stats from logs using the EXACT same method as the panel
             const logs = client.modLogs?.get(interaction.guild.id) || [];
             const userLogs = logs.filter(log => String(log.moderatorId) === String(userId));
+            const userOverrides = client.modStatsOverrides.get(interaction.guild.id).get(userId) || {};
             
             const MS_7D  = 7  * 24 * 60 * 60 * 1000;
             const MS_30D = 30 * 24 * 60 * 60 * 1000;
@@ -532,30 +533,36 @@ module.exports = {
                     const ts = new Date(log.timestamp).getTime();
                     return !isNaN(ts) && now - ts <= MS_7D;
                 });
-                periodStats = {
+                const logsStats = {
                     mutes: logs7d.filter(log => log.action === 'Mute').length,
                     bans: logs7d.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
                     kicks: logs7d.filter(log => log.action === 'Kick').length,
                     warns: logs7d.filter(log => log.action === 'Warn').length
                 };
+                // Use override if it exists, otherwise use logs
+                periodStats = userOverrides[timePeriod] || logsStats;
             } else if (timePeriod === '30d') {
                 const logs30d = userLogs.filter(log => {
                     const ts = new Date(log.timestamp).getTime();
                     return !isNaN(ts) && now - ts <= MS_30D;
                 });
-                periodStats = {
+                const logsStats = {
                     mutes: logs30d.filter(log => log.action === 'Mute').length,
                     bans: logs30d.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
                     kicks: logs30d.filter(log => log.action === 'Kick').length,
                     warns: logs30d.filter(log => log.action === 'Warn').length
                 };
+                // Use override if it exists, otherwise use logs
+                periodStats = userOverrides[timePeriod] || logsStats;
             } else {
-                periodStats = {
+                const logsStats = {
                     mutes: userLogs.filter(log => log.action === 'Mute').length,
                     bans: userLogs.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
                     kicks: userLogs.filter(log => log.action === 'Kick').length,
                     warns: userLogs.filter(log => log.action === 'Warn').length
                 };
+                // Use override if it exists, otherwise use logs
+                periodStats = userOverrides[timePeriod] || logsStats;
             }
             
             // Ensure all values are valid numbers
