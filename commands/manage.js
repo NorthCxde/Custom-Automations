@@ -347,32 +347,35 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
             const ts = new Date(log.timestamp).getTime();
             return !isNaN(ts) && now - ts <= MS_7D;
         });
-        stats7d = {
+        const logs7dStats = {
             mutes: logs7d.filter(log => log.action === 'Mute').length,
             bans: logs7d.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
             kicks: logs7d.filter(log => log.action === 'Kick').length,
             warns: logs7d.filter(log => log.action === 'Warn').length
         };
+        stats7d = userOverrides['7d'] || logs7dStats;
 
         // 30 days
         const logs30d = userLogs.filter(log => {
             const ts = new Date(log.timestamp).getTime();
             return !isNaN(ts) && now - ts <= MS_30D;
         });
-        stats30d = {
+        const logs30dStats = {
             mutes: logs30d.filter(log => log.action === 'Mute').length,
             bans: logs30d.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
             kicks: logs30d.filter(log => log.action === 'Kick').length,
             warns: logs30d.filter(log => log.action === 'Warn').length
         };
+        stats30d = userOverrides['30d'] || logs30dStats;
 
         // All time
-        statsAll = {
+        const logsAllStats = {
             mutes: userLogs.filter(log => log.action === 'Mute').length,
             bans: userLogs.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
             kicks: userLogs.filter(log => log.action === 'Kick').length,
             warns: userLogs.filter(log => log.action === 'Warn').length
         };
+        statsAll = userOverrides['all'] || logsAllStats;
     }
 
     const embed = new EmbedBuilder()
@@ -830,56 +833,43 @@ module.exports = {
 
         // Modstats: Save edited stats
         if (interaction.customId.startsWith(MANAGE_MODSTATS_MODAL_PREFIX)) {
-            try {
-                const payload = interaction.customId.slice(MANAGE_MODSTATS_MODAL_PREFIX.length);
-                const parts = payload.split(':');
-                const userId = parts[0];
-                const timePeriod = parts[1] || 'all';
-                // parts[2] is the random number suffix, ignore it
-                
-                console.log(`[MODAL SUBMIT] userId: ${userId}, timePeriod: ${timePeriod}`);
+            const payload = interaction.customId.slice(MANAGE_MODSTATS_MODAL_PREFIX.length);
+            const parts = payload.split(':');
+            const userId = parts[0];
+            const timePeriod = parts[1] || 'all';
+            // parts[2] is the random number suffix, ignore it
 
-                const mutesStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_MUTES_INPUT_ID).trim();
-                const bansStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_BANS_INPUT_ID).trim();
-                const kicksStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_KICKS_INPUT_ID).trim();
-                const warnsStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_WARNS_INPUT_ID).trim();
+            const mutesStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_MUTES_INPUT_ID).trim();
+            const bansStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_BANS_INPUT_ID).trim();
+            const kicksStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_KICKS_INPUT_ID).trim();
+            const warnsStr = interaction.fields.getTextInputValue(MODAL_MODSTATS_WARNS_INPUT_ID).trim();
 
-                const mutes = Math.max(0, parseInt(mutesStr, 10) || 0);
-                const bans = Math.max(0, parseInt(bansStr, 10) || 0);
-                const kicks = Math.max(0, parseInt(kicksStr, 10) || 0);
-                const warns = Math.max(0, parseInt(warnsStr, 10) || 0);
-                
-                console.log(`[MODAL SUBMIT] Values: mutes=${mutes}, bans=${bans}, kicks=${kicks}, warns=${warns}`);
+            const mutes = Math.max(0, parseInt(mutesStr, 10) || 0);
+            const bans = Math.max(0, parseInt(bansStr, 10) || 0);
+            const kicks = Math.max(0, parseInt(kicksStr, 10) || 0);
+            const warns = Math.max(0, parseInt(warnsStr, 10) || 0);
 
-                if (!client.modStatsOverrides) {
-                    client.modStatsOverrides = new Map();
-                }
-                if (!client.modStatsOverrides.has(interaction.guild.id)) {
-                    client.modStatsOverrides.set(interaction.guild.id, new Map());
-                }
-
-                const userOverrides = client.modStatsOverrides.get(interaction.guild.id).get(userId) || {};
-                userOverrides[timePeriod] = { mutes, bans, kicks, warns };
-                client.modStatsOverrides.get(interaction.guild.id).set(userId, userOverrides);
-                
-                console.log(`[MODAL SUBMIT] Saved overrides for ${userId}:${timePeriod}`);
-
-                const periodLabel = timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time';
-                await interaction.reply({
-                    content: `Updated ${periodLabel} modstats for <@${userId}>: Mutes: ${mutes}, Bans: ${bans}, Kicks: ${kicks}, Warns: ${warns}`,
-                    ...buildManagePayload(client, interaction.guild.id, {
-                        panel: MANAGE_PANEL_MODSTATS,
-                        selectedModstatsUserId: userId
-                    }),
-                    ephemeral: true
-                });
-                console.log(`[MODAL SUBMIT] Reply sent successfully`);
-                return true;
-            } catch (error) {
-                console.error(`[MODAL SUBMIT ERROR]`, error);
-                await interaction.reply({ content: `Error: ${error.message}`, ephemeral: true }).catch(() => {});
-                return true;
+            if (!client.modStatsOverrides) {
+                client.modStatsOverrides = new Map();
             }
+            if (!client.modStatsOverrides.has(interaction.guild.id)) {
+                client.modStatsOverrides.set(interaction.guild.id, new Map());
+            }
+
+            const userOverrides = client.modStatsOverrides.get(interaction.guild.id).get(userId) || {};
+            userOverrides[timePeriod] = { mutes, bans, kicks, warns };
+            client.modStatsOverrides.get(interaction.guild.id).set(userId, userOverrides);
+
+            const periodLabel = timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time';
+            await interaction.reply({
+                content: `Updated ${periodLabel} modstats for <@${userId}>: Mutes: ${mutes}, Bans: ${bans}, Kicks: ${kicks}, Warns: ${warns}`,
+                ...buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_MODSTATS,
+                    selectedModstatsUserId: userId
+                }),
+                ephemeral: true
+            });
+            return true;
         }
 
         const ruleKey = interaction.customId.slice(MANAGE_MODAL_PREFIX.length);
