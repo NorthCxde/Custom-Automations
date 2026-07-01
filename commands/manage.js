@@ -565,7 +565,7 @@ module.exports = {
             const warnsVal = Math.max(0, Number(periodStats.warns) || 0);
 
             const modal = new ModalBuilder()
-                .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}:${Math.floor(Math.random() * 999999)}`)
+                .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}:${Math.floor(Math.random() * 9999)}`)
                 .setTitle(`Edit Modstats (${timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time'})`);
 
             const mutesInput = new TextInputBuilder()
