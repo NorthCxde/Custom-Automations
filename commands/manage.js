@@ -518,7 +518,7 @@ module.exports = {
                 client.modStatsOverrides.set(interaction.guild.id, new Map());
             }
             
-            // Calculate stats from logs for this user to use as defaults
+            // Calculate stats from logs using the EXACT same method as the panel
             const logs = client.modLogs?.get(interaction.guild.id) || [];
             const userLogs = logs.filter(log => String(log.moderatorId) === String(userId));
             
@@ -526,13 +526,13 @@ module.exports = {
             const MS_30D = 30 * 24 * 60 * 60 * 1000;
             const now = Date.now();
             
-            let statsFromLogs;
+            let periodStats;
             if (timePeriod === '7d') {
                 const logs7d = userLogs.filter(log => {
                     const ts = new Date(log.timestamp).getTime();
                     return !isNaN(ts) && now - ts <= MS_7D;
                 });
-                statsFromLogs = {
+                periodStats = {
                     mutes: logs7d.filter(log => log.action === 'Mute').length,
                     bans: logs7d.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
                     kicks: logs7d.filter(log => log.action === 'Kick').length,
@@ -543,22 +543,20 @@ module.exports = {
                     const ts = new Date(log.timestamp).getTime();
                     return !isNaN(ts) && now - ts <= MS_30D;
                 });
-                statsFromLogs = {
+                periodStats = {
                     mutes: logs30d.filter(log => log.action === 'Mute').length,
                     bans: logs30d.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
                     kicks: logs30d.filter(log => log.action === 'Kick').length,
                     warns: logs30d.filter(log => log.action === 'Warn').length
                 };
             } else {
-                statsFromLogs = {
+                periodStats = {
                     mutes: userLogs.filter(log => log.action === 'Mute').length,
                     bans: userLogs.filter(log => log.action === 'Ban' || log.action === 'Temp Ban').length,
                     kicks: userLogs.filter(log => log.action === 'Kick').length,
                     warns: userLogs.filter(log => log.action === 'Warn').length
                 };
             }
-            
-            const periodStats = statsFromLogs;
 
             const modal = new ModalBuilder()
                 .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}`)
