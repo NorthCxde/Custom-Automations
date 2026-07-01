@@ -561,40 +561,50 @@ module.exports = {
             }
             
             console.log(`[MODAL DEBUG] Final periodStats for ${timePeriod}:`, periodStats);
+            
+            // Ensure all values are valid numbers
+            const mutesVal = Math.max(0, Number(periodStats.mutes) || 0);
+            const bansVal = Math.max(0, Number(periodStats.bans) || 0);
+            const kicksVal = Math.max(0, Number(periodStats.kicks) || 0);
+            const warnsVal = Math.max(0, Number(periodStats.warns) || 0);
+            
+            console.log(`[MODAL DEBUG] About to set values - mutes: ${mutesVal}, bans: ${bansVal}, kicks: ${kicksVal}, warns: ${warnsVal}`);
 
             const modal = new ModalBuilder()
                 .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}`)
                 .setTitle(`Edit Modstats (${timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time'})`);
-
-            console.log(`[MODAL DEBUG] About to set values - mutes: ${periodStats.mutes}, bans: ${periodStats.bans}, kicks: ${periodStats.kicks}, warns: ${periodStats.warns}`);
 
             const mutesInput = new TextInputBuilder()
                 .setCustomId(MODAL_MODSTATS_MUTES_INPUT_ID)
                 .setLabel('Mutes')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
-                .setValue(String(periodStats.mutes || 0));
+                .setValue(String(mutesVal));
+            console.log(`[MODAL DEBUG] Mutes input value: ${mutesInput.data.value}`);
             
             const bansInput = new TextInputBuilder()
                 .setCustomId(MODAL_MODSTATS_BANS_INPUT_ID)
                 .setLabel('Bans')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
-                .setValue(String(periodStats.bans || 0));
+                .setValue(String(bansVal));
+            console.log(`[MODAL DEBUG] Bans input value: ${bansInput.data.value}`);
             
             const kicksInput = new TextInputBuilder()
                 .setCustomId(MODAL_MODSTATS_KICKS_INPUT_ID)
                 .setLabel('Kicks')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
-                .setValue(String(periodStats.kicks || 0));
+                .setValue(String(kicksVal));
+            console.log(`[MODAL DEBUG] Kicks input value: ${kicksInput.data.value}`);
             
             const warnsInput = new TextInputBuilder()
                 .setCustomId(MODAL_MODSTATS_WARNS_INPUT_ID)
                 .setLabel('Warns')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
-                .setValue(String(periodStats.warns || 0));
+                .setValue(String(warnsVal));
+            console.log(`[MODAL DEBUG] Warns input value: ${warnsInput.data.value}`);
 
             modal.addComponents(
                 new ActionRowBuilder().addComponents(mutesInput),
