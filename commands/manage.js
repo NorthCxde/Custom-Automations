@@ -558,14 +558,7 @@ module.exports = {
                 };
             }
             
-            const userOverrides = client.modStatsOverrides.get(interaction.guild.id).get(userId) || {};
-            // Use override if it exists for this period, otherwise use value from logs
-            const periodStats = {
-                mutes: userOverrides[timePeriod]?.mutes ?? statsFromLogs.mutes,
-                bans: userOverrides[timePeriod]?.bans ?? statsFromLogs.bans,
-                kicks: userOverrides[timePeriod]?.kicks ?? statsFromLogs.kicks,
-                warns: userOverrides[timePeriod]?.warns ?? statsFromLogs.warns
-            };
+            const periodStats = statsFromLogs;
 
             const modal = new ModalBuilder()
                 .setCustomId(`${MANAGE_MODSTATS_MODAL_PREFIX}${userId}:${timePeriod}`)
