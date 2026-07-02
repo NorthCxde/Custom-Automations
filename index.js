@@ -842,7 +842,7 @@ client.buildAutoresponderConfigPayload = (draft) => {
         ignoredRolesMenu.setDefaultRoles(draft.ignoredRoleIds.slice(0, 25));
     }
 
-    const controlsRow = new ActionRowBuilder().addComponents(
+    const primaryControlsRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('ar_toggle_exact')
             .setLabel(`Match: ${draft.matchType === 'exact' ? 'Exact' : 'Contains'}`)
@@ -869,8 +869,9 @@ client.buildAutoresponderConfigPayload = (draft) => {
             .setStyle(ButtonStyle.Secondary)
     );
 
+    const secondaryControlsRow = new ActionRowBuilder();
     if (draft.editingId) {
-        controlsRow.addComponents(
+        secondaryControlsRow.addComponents(
             new ButtonBuilder()
                 .setCustomId('ar_delete')
                 .setLabel('Delete')
@@ -885,7 +886,8 @@ client.buildAutoresponderConfigPayload = (draft) => {
             new ActionRowBuilder().addComponents(ignoredChannelsMenu),
             new ActionRowBuilder().addComponents(allowedRolesMenu),
             new ActionRowBuilder().addComponents(ignoredRolesMenu),
-            controlsRow
+            primaryControlsRow,
+            ...(secondaryControlsRow.components.length ? [secondaryControlsRow] : [])
         ]
     };
 };
