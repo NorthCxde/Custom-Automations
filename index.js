@@ -869,16 +869,6 @@ client.buildAutoresponderConfigPayload = (draft) => {
             .setStyle(ButtonStyle.Secondary)
     );
 
-    const secondaryControlsRow = new ActionRowBuilder();
-    if (draft.editingId) {
-        secondaryControlsRow.addComponents(
-            new ButtonBuilder()
-                .setCustomId('ar_delete')
-                .setLabel('Delete')
-                .setStyle(ButtonStyle.Danger)
-        );
-    }
-
     return {
         embeds: [embed],
         components: [
@@ -886,8 +876,7 @@ client.buildAutoresponderConfigPayload = (draft) => {
             new ActionRowBuilder().addComponents(ignoredChannelsMenu),
             new ActionRowBuilder().addComponents(allowedRolesMenu),
             new ActionRowBuilder().addComponents(ignoredRolesMenu),
-            primaryControlsRow,
-            ...(secondaryControlsRow.components.length ? [secondaryControlsRow] : [])
+            primaryControlsRow
         ]
     };
 };
