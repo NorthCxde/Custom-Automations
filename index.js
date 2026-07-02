@@ -2501,7 +2501,7 @@ client.isIgnorableInteractionError = (error) => {
 client.syncSlashCommands = async (options = {}) => {
     const {
         guildIds,
-        perGuildTimeoutMs = 12_000
+        perGuildTimeoutMs = 45_000
     } = options;
 
     const slashData = [];
