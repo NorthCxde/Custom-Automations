@@ -848,6 +848,14 @@ client.buildAutoresponderConfigPayload = (draft) => {
             .setLabel(`Match: ${draft.matchType === 'exact' ? 'Exact' : 'Contains'}`)
             .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
+            .setCustomId('ar_toggle_enabled')
+            .setLabel(draft.enabled ? 'Disable' : 'Enable')
+            .setStyle(draft.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId('ar_edit_response')
+            .setLabel('Field')
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
             .setCustomId('ar_config_users')
             .setLabel('Users')
             .setStyle(ButtonStyle.Primary),
@@ -2704,7 +2712,7 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
-        if (interaction.customId !== 'ar_create_modal') return;
+        if (interaction.customId !== 'ar_create_modal' && interaction.customId !== 'ar_edit_response_modal') return;
 
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -2713,33 +2721,55 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
         }
 
-        const trigger = interaction.fields.getTextInputValue('ar_trigger').trim();
-        const response = interaction.fields.getTextInputValue('ar_response').trim();
+        const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
+        const draft = client.autoresponderDrafts.get(draftKey);
 
-        if (!trigger || !response) {
-            return interaction.reply({ content: 'Trigger and response are required.', ephemeral: true });
+        if (interaction.customId === 'ar_create_modal') {
+            const trigger = interaction.fields.getTextInputValue('ar_trigger').trim();
+            const response = interaction.fields.getTextInputValue('ar_response').trim();
+
+            if (!trigger || !response) {
+                return interaction.reply({ content: 'Trigger and response are required.', ephemeral: true });
+            }
+
+            const nextDraft = {
+                trigger,
+                response,
+                enabled: true,
+                matchType: 'contains',
+                allowedChannelIds: [],
+                ignoredChannelIds: [],
+                allowedRoleIds: [],
+                ignoredRoleIds: [],
+                allowedUserIds: [],
+                ignoredUserIds: [],
+                createdBy: interaction.user.id,
+                createdAt: new Date().toISOString()
+            };
+
+            client.autoresponderDrafts.set(draftKey, nextDraft);
+
+            return interaction.reply({
+                content: 'Initial values saved. Configure filters below:',
+                ...client.buildAutoresponderConfigPayload(nextDraft),
+                ephemeral: true
+            });
         }
 
-        const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
-        const draft = {
-            trigger,
-            response,
-            enabled: true,
-            matchType: 'contains',
-            allowedChannelIds: [],
-            ignoredChannelIds: [],
-            allowedRoleIds: [],
-            ignoredRoleIds: [],
-            allowedUserIds: [],
-            ignoredUserIds: [],
-            createdBy: interaction.user.id,
-            createdAt: new Date().toISOString()
-        };
+        if (!draft) {
+            return interaction.reply({ content: 'No active autoresponder draft was found. Run /autoresponder again.', ephemeral: true });
+        }
 
+        const response = interaction.fields.getTextInputValue('ar_edit_response_text').trim();
+        if (!response) {
+            return interaction.reply({ content: 'Response text is required.', ephemeral: true });
+        }
+
+        draft.response = response;
         client.autoresponderDrafts.set(draftKey, draft);
 
         return interaction.reply({
-            content: 'Initial values saved. Configure filters below:',
+            content: 'Updated autoresponder response field.',
             ...client.buildAutoresponderConfigPayload(draft),
             ephemeral: true
         });
@@ -3047,7 +3077,7 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: 'You have left this giveaway.', ephemeral: true });
         }
 
-        if (interaction.customId === 'ar_create_start' || interaction.customId === 'ar_toggle_exact' || interaction.customId === 'ar_save' || interaction.customId === 'ar_cancel' || interaction.customId === 'ar_config_users' || interaction.customId === 'ar_delete') {
+        if (interaction.customId === 'ar_create_start' || interaction.customId === 'ar_toggle_exact' || interaction.customId === 'ar_toggle_enabled' || interaction.customId === 'ar_edit_response' || interaction.customId === 'ar_save' || interaction.customId === 'ar_cancel' || interaction.customId === 'ar_config_users' || interaction.customId === 'ar_delete') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
             }
@@ -3097,6 +3127,32 @@ client.on('interactionCreate', async (interaction) => {
                     content: 'Updated match mode.',
                     ...client.buildAutoresponderConfigPayload(draft)
                 });
+            }
+
+            if (interaction.customId === 'ar_toggle_enabled') {
+                draft.enabled = !draft.enabled;
+                client.autoresponderDrafts.set(draftKey, draft);
+                return interaction.update({
+                    content: draft.enabled ? 'Autoresponder enabled.' : 'Autoresponder disabled.',
+                    ...client.buildAutoresponderConfigPayload(draft)
+                });
+            }
+
+            if (interaction.customId === 'ar_edit_response') {
+                const modal = new ModalBuilder()
+                    .setCustomId('ar_edit_response_modal')
+                    .setTitle('Edit Autoresponder Response');
+
+                const responseInput = new TextInputBuilder()
+                    .setCustomId('ar_edit_response_text')
+                    .setLabel('Response Text')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(true)
+                    .setMaxLength(1800)
+                    .setValue(draft.response || '');
+
+                modal.addComponents(new ActionRowBuilder().addComponents(responseInput));
+                return interaction.showModal(modal);
             }
 
             if (interaction.customId === 'ar_config_users') {
