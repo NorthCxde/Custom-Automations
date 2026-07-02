@@ -863,10 +863,6 @@ client.buildAutoresponderConfigPayload = (draft) => {
             .setCustomId('ar_save')
             .setLabel('Save')
             .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-            .setCustomId('ar_cancel')
-            .setLabel('Cancel')
-            .setStyle(ButtonStyle.Secondary)
     );
 
     return {
