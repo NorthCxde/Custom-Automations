@@ -69,6 +69,8 @@ const MODAL_AUTOMOD_ACTION_INPUT_ID = 'action';
 const MODAL_AUTOMOD_TIMEOUT_INPUT_ID = 'timeout';
 const MODAL_AUTOMOD_CUSTOM_A_ID = 'custom_a';
 const MODAL_AUTOMOD_CUSTOM_B_ID = 'custom_b';
+const MODAL_AUTOMOD_LOG_CHANNEL_INPUT_ID = 'log_channel';
+const MODAL_AUTOMOD_CUSTOM_RESPONSE_INPUT_ID = 'custom_response';
 
 function truncate(text, max = 100) {
     const value = String(text || '').trim();
@@ -680,6 +682,8 @@ function buildAutomodDraftFromRule(rule, userId) {
         allowedUserIds: Array.isArray(rule?.allowedUserIds) ? [...rule.allowedUserIds] : [],
         ignoredUserIds: Array.isArray(rule?.ignoredUserIds) ? [...rule.ignoredUserIds] : [],
         custom: sanitizeCustomByType(type, rule?.custom),
+        logChannelId: String(rule?.logChannelId || '').trim(),
+        customResponse: String(rule?.customResponse || '').trim(),
         createdBy: String(rule?.createdBy || userId || ''),
         createdAt: String(rule?.createdAt || new Date().toISOString())
     };
@@ -936,7 +940,8 @@ function buildAutomodDraftPayload(draft, notice) {
             { name: 'Trigger / Pattern', value: draft.trigger || 'None', inline: false },
             { name: 'Timeout Duration', value: draft.timeoutDuration || '10m', inline: true },
             { name: 'Custom Settings', value: formatAutomodCustom(draft.type, draft.custom), inline: false },
-            { name: 'Custom Key Preset', value: getAutomodCustomHint(draft.type), inline: false },
+            { name: 'Log Channel', value: draft.logChannelId ? `<#${draft.logChannelId}>` : 'None', inline: true },
+            { name: 'Custom Response', value: draft.customResponse || 'None', inline: true },
             { name: 'Allowed Channels', value: channelMentions(draft.allowedChannelIds), inline: false },
             { name: 'Ignored Channels', value: channelMentions(draft.ignoredChannelIds), inline: false },
             { name: 'Allowed Roles', value: roleMentions(draft.allowedRoleIds), inline: false },
@@ -1493,6 +1498,25 @@ module.exports = {
                 return true;
             }
 
+            const logChannelInput = new TextInputBuilder()
+                .setCustomId(MODAL_AUTOMOD_LOG_CHANNEL_INPUT_ID)
+                .setLabel('Log Channel ID (optional)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(false)
+                .setValue(String(draft.logChannelId || '').slice(0, 4000));
+
+            const customResponseInput = new TextInputBuilder()
+                .setCustomId(MODAL_AUTOMOD_CUSTOM_RESPONSE_INPUT_ID)
+                .setLabel('Custom Response (optional)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(false)
+                .setValue(String(draft.customResponse || '').slice(0, 4000));
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(logChannelInput),
+                new ActionRowBuilder().addComponents(customResponseInput)
+            );
+
             await interaction.showModal(modal);
             return true;
         }
@@ -1626,6 +1650,8 @@ module.exports = {
                 allowedUserIds: [...new Set((draft.allowedUserIds || []).map(String))],
                 ignoredUserIds: [...new Set((draft.ignoredUserIds || []).map(String))],
                 custom: sanitizeCustomByType(draft.type, draft.custom),
+                logChannelId: String(draft.logChannelId || '').trim(),
+                customResponse: String(draft.customResponse || '').trim(),
                 createdBy: draft.createdBy || interaction.user.id,
                 createdAt: draft.createdAt || new Date().toISOString()
             };
@@ -1915,6 +1941,18 @@ module.exports = {
             } catch (_) {
                 customB = '';
             }
+            let logChannelId = '';
+            let customResponse = '';
+            try {
+                logChannelId = interaction.fields.getTextInputValue(MODAL_AUTOMOD_LOG_CHANNEL_INPUT_ID).trim();
+            } catch (_) {
+                logChannelId = '';
+            }
+            try {
+                customResponse = interaction.fields.getTextInputValue(MODAL_AUTOMOD_CUSTOM_RESPONSE_INPUT_ID).trim();
+            } catch (_) {
+                customResponse = '';
+            }
 
             const nextCustom = { ...(draft.custom || {}) };
             const errors = [];
@@ -1973,7 +2011,14 @@ module.exports = {
                 return true;
             }
 
+            if (logChannelId && !/^\d{17,20}$/.test(logChannelId)) {
+                await interaction.reply({ content: 'Log Channel ID must be a valid Discord snowflake ID.', ephemeral: true });
+                return true;
+            }
+
             draft.custom = sanitizeCustomByType(draft.type, nextCustom);
+            draft.logChannelId = logChannelId;
+            draft.customResponse = customResponse.slice(0, 200);
             client.automodDrafts.set(draftKey, draft);
 
             await interaction.reply({

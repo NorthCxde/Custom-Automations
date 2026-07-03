@@ -789,6 +789,8 @@ client.loadAutomodRules = () => {
                         allowedUserIds: Array.isArray(entry.allowedUserIds) ? entry.allowedUserIds.map(String) : [],
                         ignoredUserIds: Array.isArray(entry.ignoredUserIds) ? entry.ignoredUserIds.map(String) : [],
                         custom: entry.custom && typeof entry.custom === 'object' ? entry.custom : {},
+                        logChannelId: String(entry.logChannelId || '').trim(),
+                        customResponse: String(entry.customResponse || '').trim(),
                         createdBy: String(entry.createdBy || ''),
                         createdAt: String(entry.createdAt || new Date().toISOString())
                     };
@@ -4164,6 +4166,9 @@ client.on('messageCreate', async (message) => {
                 if (!matched) continue;
 
                 const reason = `AutoMod ${rule.name || rule.type || 'rule'} matched (${matchDetails || 'rule trigger'})`;
+                const logChannelId = String(rule.logChannelId || '').trim();
+                const customResponse = String(rule.customResponse || '').trim();
+                const executedActions = [];
                 let messageDeleted = false;
                 const ensureDeleted = async () => {
                     if (messageDeleted) return;
@@ -4176,15 +4181,17 @@ client.on('messageCreate', async (message) => {
                 for (const action of actions) {
                     if (action === 'delete') {
                         await ensureDeleted();
+                        executedActions.push('Delete');
                         continue;
                     }
 
                     if (action === 'delete_warn') {
                         await ensureDeleted();
                         const warning = await message.channel.send({
-                            content: `<@${message.author.id}>, your message was removed by AutoMod.`,
+                            content: customResponse || `<@${message.author.id}>, your message was removed by AutoMod.`,
                             allowedMentions: { parse: [], users: [message.author.id], roles: [], repliedUser: false }
                         }).catch(() => null);
+                        executedActions.push('Warn + Delete');
 
                         if (warning) {
                             setTimeout(() => {
@@ -4215,6 +4222,7 @@ client.on('messageCreate', async (message) => {
                                 });
                             }
                         }
+                        executedActions.push(`Timeout (${String(rule.timeoutDuration || '10m')})`);
                         continue;
                     }
 
@@ -4235,6 +4243,7 @@ client.on('messageCreate', async (message) => {
                                 });
                             }
                         }
+                        executedActions.push('Kick');
                         continue;
                     }
 
@@ -4255,6 +4264,27 @@ client.on('messageCreate', async (message) => {
                                 });
                             }
                         }
+                        executedActions.push('Ban');
+                    }
+                }
+
+                if (logChannelId) {
+                    const logChannel = message.guild.channels.cache.get(logChannelId)
+                        || await message.guild.channels.fetch(logChannelId).catch(() => null);
+                    if (logChannel && logChannel.isTextBased()) {
+                        const preview = String(message.content || '').slice(0, 300) || '(no text content)';
+                        const logLines = [
+                            `AutoMod Rule: ${rule.name || rule.type || 'Unknown Rule'}`,
+                            `User: <@${message.author.id}> (${message.author.tag})`,
+                            `Channel: <#${message.channel.id}>`,
+                            `Actions: ${executedActions.length ? executedActions.join(', ') : actions.join(', ')}`,
+                            `Reason: ${reason}`,
+                            `Message: ${preview}`
+                        ];
+                        await logChannel.send({
+                            content: logLines.join('\n'),
+                            allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
+                        }).catch(() => {});
                     }
                 }
 
