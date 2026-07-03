@@ -28,7 +28,7 @@ const {
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
-const { DEFAULT_INFRACTION_RULES, sanitizeInfractionRules, cloneInfractionRules, cloneInfractionRule } = require('./infractions');
+const { DEFAULT_INFRACTION_RULES, sanitizeInfractionRules, cloneInfractionRules, cloneInfractionRule, parseDurationMs } = require('./infractions');
 
 if (!token) {
     throw new Error("Missing Discord token. Set DISCORD_TOKEN or add token to config.json.");
@@ -176,6 +176,7 @@ const bloxlinkHistoryFile = path.join(dataPath, "bloxlinkHistory.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
 const autorespondersFile = path.join(dataPath, "autoresponders.json");
+const automodFile = path.join(dataPath, "automod.json");
 const giveawaysFile = path.join(dataPath, "giveaways.json");
 const entryRolesFile = path.join(dataPath, "entryroles.json");
 const infractionsFile = path.join(dataPath, "infractions.json");
@@ -198,6 +199,10 @@ client.slashCommands = new Map();
 client.autoresponders = new Map();
 client.autoresponderDrafts = new Map();
 client.autoresponderCooldowns = new Map();
+client.automodRules = new Map();
+client.automodDrafts = new Map();
+client.automodMessageBuckets = new Map();
+client.automodMentionBuckets = new Map();
 client.giveaways = new Map();
 client.giveawayTimers = new Map();
 client.giveawayDrafts = new Map();
@@ -710,6 +715,124 @@ client.deleteAutoresponder = (guildId, entryId) => {
     if (!deleted) return false;
     client.autoresponders.set(guildId, next);
     client.saveAutoresponders();
+    return true;
+};
+
+client.loadAutomodRules = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    if (!fs.existsSync(automodFile)) {
+        fs.writeFileSync(automodFile, '{}', 'utf8');
+    }
+
+    let raw = '{}';
+    try {
+        raw = fs.readFileSync(automodFile, 'utf8') || '{}';
+    } catch (err) {
+        console.error('Failed to read automod file:', err);
+    }
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(raw);
+    } catch (err) {
+        console.error('Failed to parse automod file:', err);
+    }
+
+    client.automodRules.clear();
+    for (const [guildId, entries] of Object.entries(parsed)) {
+        const validTypes = new Set([
+            'mentions_cooldown',
+            'masked_links',
+            'invite_links',
+            'fast_message_spam',
+            'anti_newline',
+            'character_count',
+            'zalgo_text',
+            'word_blacklist',
+            'emoji_spam',
+            'anti_links',
+            'keyword'
+        ]);
+        const validActions = new Set(['delete', 'delete_warn', 'timeout', 'kick', 'ban']);
+        const normalizeActions = (raw, fallback) => {
+            const source = Array.isArray(raw) ? raw : [raw || fallback || 'delete'];
+            const values = [...new Set(source
+                .map(v => String(v || '').trim().toLowerCase())
+                .filter(v => validActions.has(v)))];
+            return values.length ? values : ['delete'];
+        };
+
+        const normalized = Array.isArray(entries)
+            ? entries
+                .filter(entry => entry && typeof entry === 'object')
+                .map((entry, index) => {
+                    const action = String(entry.action || 'delete').trim().toLowerCase();
+                    const type = String(entry.type || (entry.trigger ? 'keyword' : 'anti_links')).trim().toLowerCase();
+                    const actions = normalizeActions(entry.actions, action);
+                    return {
+                        id: String(entry.id || `am_${Date.now()}_${index}`),
+                        name: String(entry.name || '').trim() || String(type || 'Automod Rule').replace(/_/g, ' '),
+                        type: validTypes.has(type) ? type : 'keyword',
+                        trigger: String(entry.trigger || '').trim(),
+                        enabled: entry.enabled !== false,
+                        matchType: entry.matchType === 'exact' ? 'exact' : 'contains',
+                        actions,
+                        action: actions[0],
+                        timeoutDuration: String(entry.timeoutDuration || '10m').trim() || '10m',
+                        ignoreAdmins: entry.ignoreAdmins !== false,
+                        allowedChannelIds: Array.isArray(entry.allowedChannelIds) ? entry.allowedChannelIds.map(String) : [],
+                        ignoredChannelIds: Array.isArray(entry.ignoredChannelIds) ? entry.ignoredChannelIds.map(String) : [],
+                        allowedRoleIds: Array.isArray(entry.allowedRoleIds) ? entry.allowedRoleIds.map(String) : [],
+                        ignoredRoleIds: Array.isArray(entry.ignoredRoleIds) ? entry.ignoredRoleIds.map(String) : [],
+                        allowedUserIds: Array.isArray(entry.allowedUserIds) ? entry.allowedUserIds.map(String) : [],
+                        ignoredUserIds: Array.isArray(entry.ignoredUserIds) ? entry.ignoredUserIds.map(String) : [],
+                        custom: entry.custom && typeof entry.custom === 'object' ? entry.custom : {},
+                        createdBy: String(entry.createdBy || ''),
+                        createdAt: String(entry.createdAt || new Date().toISOString())
+                    };
+                })
+                .filter(entry => entry.type !== 'keyword' || entry.trigger.length > 0)
+            : [];
+
+        client.automodRules.set(guildId, normalized);
+    }
+};
+
+client.saveAutomodRules = () => {
+    const out = {};
+    for (const [guildId, entries] of client.automodRules.entries()) {
+        out[guildId] = entries;
+    }
+    fs.writeFileSync(automodFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getAutomodRules = (guildId) => {
+    if (!guildId) return [];
+    return client.automodRules.get(guildId) || [];
+};
+
+client.upsertAutomodRule = (guildId, entry) => {
+    const existing = client.getAutomodRules(guildId);
+    const idx = existing.findIndex(item => item.id === entry.id);
+    const next = [...existing];
+    if (idx === -1) {
+        next.push(entry);
+    } else {
+        next[idx] = { ...next[idx], ...entry };
+    }
+    client.automodRules.set(guildId, next);
+    client.saveAutomodRules();
+};
+
+client.deleteAutomodRule = (guildId, entryId) => {
+    const existing = client.getAutomodRules(guildId);
+    const next = existing.filter(item => item.id !== entryId);
+    const deleted = next.length !== existing.length;
+    if (!deleted) return false;
+    client.automodRules.set(guildId, next);
+    client.saveAutomodRules();
     return true;
 };
 
@@ -2394,6 +2517,7 @@ client.loadBloxlinkHistory();
 client.loadBoostChannels();
 client.loadPrefixCommandState();
 client.loadAutoresponders();
+client.loadAutomodRules();
 client.loadGiveaways();
 client.loadEntryRoles();
 client.loadInfractionRules();
@@ -2635,6 +2759,18 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (interaction.customId.startsWith('manage_modstats_modal:')) {
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const manageCommand = client.slashCommands.get('manage');
+            if (manageCommand && typeof manageCommand.handleModalSubmit === 'function') {
+                const handled = await manageCommand.handleModalSubmit({ client, interaction });
+                if (handled) return;
+            }
+        }
+
+        if (interaction.customId.startsWith('manage_automod_modal:')) {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
             }
@@ -3425,6 +3561,21 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isChannelSelectMenu()) {
+        if (interaction.customId.startsWith('manage_')) {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const manageCommand = client.slashCommands.get('manage');
+            if (manageCommand && typeof manageCommand.handleChannelSelect === 'function') {
+                const handled = await manageCommand.handleChannelSelect({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId !== 'ar_allowed_channels' && interaction.customId !== 'ar_ignored_channels') return;
 
         if (!interaction.guild) {
@@ -3675,6 +3826,21 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isRoleSelectMenu()) {
+        if (interaction.customId.startsWith('manage_')) {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const manageCommand = client.slashCommands.get('manage');
+            if (manageCommand && typeof manageCommand.handleRoleSelect === 'function') {
+                const handled = await manageCommand.handleRoleSelect({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId === 'publicperms_role_select') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
@@ -3861,6 +4027,241 @@ client.on('messageCreate', async (message) => {
     if (message.author?.bot) return;
 
     if (message.guild && message.member && message.content) {
+        const guildAutomodRules = client.getAutomodRules(message.guild.id);
+        if (guildAutomodRules.length) {
+            const contentLower = message.content.toLowerCase();
+            const now = Date.now();
+
+            for (const rule of guildAutomodRules) {
+                if (!rule.enabled) continue;
+
+                if (rule.ignoreAdmins && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                    continue;
+                }
+
+                const allowedChannels = Array.isArray(rule.allowedChannelIds) ? rule.allowedChannelIds : [];
+                const ignoredChannels = Array.isArray(rule.ignoredChannelIds) ? rule.ignoredChannelIds : [];
+                const allowedRoles = Array.isArray(rule.allowedRoleIds) ? rule.allowedRoleIds : [];
+                const ignoredRoles = Array.isArray(rule.ignoredRoleIds) ? rule.ignoredRoleIds : [];
+                const allowedUsers = Array.isArray(rule.allowedUserIds) ? rule.allowedUserIds : [];
+                const ignoredUsers = Array.isArray(rule.ignoredUserIds) ? rule.ignoredUserIds : [];
+                const hasAllowedIdentityFilters = allowedRoles.length > 0 || allowedUsers.length > 0;
+                const matchesAllowedRole = allowedRoles.length > 0 && message.member.roles.cache.some(role => allowedRoles.includes(role.id));
+                const matchesAllowedUser = allowedUsers.includes(message.author.id);
+
+                if (allowedChannels.length && !allowedChannels.includes(message.channel.id)) continue;
+                if (ignoredChannels.includes(message.channel.id)) continue;
+                if (ignoredRoles.length && message.member.roles.cache.some(role => ignoredRoles.includes(role.id))) continue;
+                if (ignoredUsers.includes(message.author.id)) continue;
+                if (hasAllowedIdentityFilters && !matchesAllowedRole && !matchesAllowedUser) continue;
+
+                const type = String(rule.type || (rule.trigger ? 'keyword' : 'anti_links')).trim().toLowerCase();
+                const normalizedActions = [...new Set((Array.isArray(rule.actions) ? rule.actions : [rule.action || 'delete'])
+                    .map(v => String(v || '').trim().toLowerCase())
+                    .filter(v => ['delete', 'delete_warn', 'timeout', 'kick', 'ban'].includes(v)))];
+                const actions = normalizedActions.length ? normalizedActions : ['delete'];
+                const custom = rule.custom && typeof rule.custom === 'object' ? rule.custom : {};
+                let matched = false;
+                let matchDetails = null;
+
+                if (type === 'mentions_cooldown') {
+                    const mentionCount = (message.mentions.users?.size || 0) + (message.mentions.roles?.size || 0);
+                    if (mentionCount > 0) {
+                        const maxMentions = Math.max(1, Number(custom.maxMentions) || 6);
+                        const windowMs = Math.max(1000, (Number(custom.windowSeconds) || 30) * 1000);
+                        const bucketKey = `${message.guild.id}:${message.author.id}:${rule.id}`;
+                        const bucket = client.automodMentionBuckets.get(bucketKey) || [];
+                        const filtered = bucket.filter(item => now - item.ts <= windowMs);
+                        filtered.push({ ts: now, count: mentionCount });
+                        client.automodMentionBuckets.set(bucketKey, filtered);
+                        const totalMentions = filtered.reduce((sum, item) => sum + item.count, 0);
+                        matched = totalMentions >= maxMentions;
+                        matchDetails = `${totalMentions} mentions in ${Math.round(windowMs / 1000)}s`;
+                    }
+                } else if (type === 'fast_message_spam') {
+                    const maxMessages = Math.max(2, Number(custom.maxMessages) || 8);
+                    const windowMs = Math.max(1000, (Number(custom.windowSeconds) || 5) * 1000);
+                    const bucketKey = `${message.guild.id}:${message.author.id}:${rule.id}`;
+                    const bucket = client.automodMessageBuckets.get(bucketKey) || [];
+                    const filtered = bucket.filter(ts => now - ts <= windowMs);
+                    filtered.push(now);
+                    client.automodMessageBuckets.set(bucketKey, filtered);
+                    matched = filtered.length >= maxMessages;
+                    matchDetails = `${filtered.length} messages in ${Math.round(windowMs / 1000)}s`;
+                } else if (type === 'anti_newline') {
+                    const maxNewlines = Math.max(1, Number(custom.maxNewlines) || 7);
+                    const runs = message.content.match(/\n+/g) || [];
+                    const highestRun = runs.length ? Math.max(...runs.map(run => run.length)) : 0;
+                    matched = highestRun >= maxNewlines;
+                    matchDetails = `newline run: ${highestRun}`;
+                } else if (type === 'character_count') {
+                    const maxCharacters = Math.max(25, Number(custom.maxCharacters) || 350);
+                    matched = message.content.length >= maxCharacters;
+                    matchDetails = `characters: ${message.content.length}`;
+                } else if (type === 'emoji_spam') {
+                    const maxEmojis = Math.max(1, Number(custom.maxEmojis) || 6);
+                    const customEmojiCount = (message.content.match(/<a?:\w+:\d+>/g) || []).length;
+                    const unicodeEmojiCount = (message.content.match(/\p{Extended_Pictographic}/gu) || []).length;
+                    const emojiCount = customEmojiCount + unicodeEmojiCount;
+                    matched = emojiCount >= maxEmojis;
+                    matchDetails = `emoji count: ${emojiCount}`;
+                } else if (type === 'word_blacklist') {
+                    const wildcardWords = Array.isArray(custom.bannedWordsWildcard) ? custom.bannedWordsWildcard.map(v => String(v).toLowerCase()) : [];
+                    const exactWords = Array.isArray(custom.bannedWordsExact) ? custom.bannedWordsExact.map(v => String(v).toLowerCase()) : [];
+                    const normalizedTokens = contentLower.split(/[^a-z0-9_]+/g).filter(Boolean);
+                    const hasWildcard = wildcardWords.some(word => word && contentLower.includes(word));
+                    const hasExact = exactWords.some(word => word && normalizedTokens.includes(word));
+                    matched = hasWildcard || hasExact;
+                    matchDetails = hasExact ? 'exact banned word' : (hasWildcard ? 'wildcard banned phrase' : null);
+                } else if (type === 'anti_links') {
+                    const links = message.content.match(/((?:https?:\/\/|www\.)[^\s<]+)/gi) || [];
+                    if (links.length) {
+                        const deleteAllLinks = custom.deleteAllLinks !== false;
+                        const allowlist = Array.isArray(custom.allowedLinks) ? custom.allowedLinks.map(v => String(v).toLowerCase()) : [];
+                        const disallowed = links.filter((link) => {
+                            const lower = link.toLowerCase();
+                            if (deleteAllLinks) return !allowlist.some(prefix => prefix && lower.includes(prefix));
+                            return !allowlist.some(prefix => prefix && lower.includes(prefix));
+                        });
+                        matched = deleteAllLinks ? disallowed.length > 0 : disallowed.length > 0;
+                        matchDetails = `links found: ${links.length}`;
+                    }
+                } else if (type === 'invite_links') {
+                    const inviteMatches = [...message.content.matchAll(/(?:https?:\/\/)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com\/invite)\/([A-Za-z0-9-]+)/gi)];
+                    if (inviteMatches.length) {
+                        const allowedInvites = Array.isArray(custom.allowedInvites)
+                            ? custom.allowedInvites.map(v => String(v).toLowerCase())
+                            : [];
+                        const blocked = inviteMatches.filter((match) => {
+                            const code = String(match[1] || '').toLowerCase();
+                            const full = String(match[0] || '').toLowerCase();
+                            return !allowedInvites.some(value => value && (code === value || full.includes(value)));
+                        });
+                        matched = blocked.length > 0;
+                        matchDetails = `invite links: ${inviteMatches.length}`;
+                    }
+                } else if (type === 'masked_links') {
+                    const masked = [...message.content.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi)];
+                    matched = masked.some(match => {
+                        const text = String(match[1] || '').toLowerCase();
+                        const url = String(match[2] || '').toLowerCase();
+                        return !text.includes(url.replace(/^https?:\/\//, ''));
+                    });
+                    matchDetails = matched ? 'masked markdown link' : null;
+                } else if (type === 'zalgo_text') {
+                    const zalgoMarks = message.content.match(/[\u0300-\u036f\u0483-\u0489\u0591-\u05BD\u05BF\u05C1-\u05C2\u05C4-\u05C5\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7-\u06E8\u06EA-\u06ED]/g) || [];
+                    matched = zalgoMarks.length >= 6;
+                    matchDetails = `zalgo marks: ${zalgoMarks.length}`;
+                } else {
+                    const trigger = String(rule.trigger || '').trim().toLowerCase();
+                    if (!trigger) continue;
+                    matched = rule.matchType === 'exact'
+                        ? contentLower === trigger
+                        : contentLower.includes(trigger);
+                    matchDetails = `keyword: ${trigger}`;
+                }
+
+                if (!matched) continue;
+
+                const reason = `AutoMod ${rule.name || rule.type || 'rule'} matched (${matchDetails || 'rule trigger'})`;
+                let messageDeleted = false;
+                const ensureDeleted = async () => {
+                    if (messageDeleted) return;
+                    if (message.deletable) {
+                        await message.delete().catch(err => console.error('AutoMod failed to delete message:', err));
+                        messageDeleted = true;
+                    }
+                };
+
+                for (const action of actions) {
+                    if (action === 'delete') {
+                        await ensureDeleted();
+                        continue;
+                    }
+
+                    if (action === 'delete_warn') {
+                        await ensureDeleted();
+                        const warning = await message.channel.send({
+                            content: `<@${message.author.id}>, your message was removed by AutoMod.`,
+                            allowedMentions: { parse: [], users: [message.author.id], roles: [], repliedUser: false }
+                        }).catch(() => null);
+
+                        if (warning) {
+                            setTimeout(() => {
+                                warning.delete().catch(() => {});
+                            }, 10_000);
+                        }
+                        continue;
+                    }
+
+                    if (action === 'timeout') {
+                        const timeoutMs = parseDurationMs(String(rule.timeoutDuration || '').trim()) || parseDurationMs('10m');
+                        if (timeoutMs && message.member.moderatable && !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                            await message.member.timeout(timeoutMs, reason)
+                                .catch(err => console.error('AutoMod failed to timeout member:', err));
+
+                            if (typeof client.addModLog === 'function') {
+                                client.addModLog(message.guild.id, {
+                                    action: 'Mute',
+                                    userId: message.author.id,
+                                    userTag: message.author.tag,
+                                    moderatorId: client.user?.id || '0',
+                                    moderatorTag: `${client.user?.tag || 'AutoMod'}`,
+                                    reason,
+                                    duration: String(rule.timeoutDuration || '10m'),
+                                    timestamp: new Date().toISOString(),
+                                    infractionRule: 'automod',
+                                    infractionRuleLabel: 'AutoMod'
+                                });
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (action === 'kick') {
+                        if (message.member.kickable && !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                            await message.member.kick(reason).catch(err => console.error('AutoMod failed to kick member:', err));
+                            if (typeof client.addModLog === 'function') {
+                                client.addModLog(message.guild.id, {
+                                    action: 'Kick',
+                                    userId: message.author.id,
+                                    userTag: message.author.tag,
+                                    moderatorId: client.user?.id || '0',
+                                    moderatorTag: `${client.user?.tag || 'AutoMod'}`,
+                                    reason,
+                                    timestamp: new Date().toISOString(),
+                                    infractionRule: 'automod',
+                                    infractionRuleLabel: 'AutoMod'
+                                });
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (action === 'ban') {
+                        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                            await message.guild.members.ban(message.author.id, { reason }).catch(err => console.error('AutoMod failed to ban member:', err));
+                            if (typeof client.addModLog === 'function') {
+                                client.addModLog(message.guild.id, {
+                                    action: 'Ban',
+                                    userId: message.author.id,
+                                    userTag: message.author.tag,
+                                    moderatorId: client.user?.id || '0',
+                                    moderatorTag: `${client.user?.tag || 'AutoMod'}`,
+                                    reason,
+                                    timestamp: new Date().toISOString(),
+                                    infractionRule: 'automod',
+                                    infractionRuleLabel: 'AutoMod'
+                                });
+                            }
+                        }
+                    }
+                }
+
+                break;
+            }
+        }
+
         const guildAutoresponders = client.getAutoresponders(message.guild.id);
         if (guildAutoresponders.length) {
             const contentLower = message.content.toLowerCase();
