@@ -1078,6 +1078,33 @@ function parseAutomodCustomInput(text, draftType, currentCustom) {
     return { custom: sanitizeCustomByType(draftType, out), errors };
 }
 
+function buildAutomodRulePayloadFromDraft(draft, fallbackUserId) {
+    const actions = normalizeAutomodActions(draft.actions, draft.action);
+    return {
+        id: draft.id,
+        name: String(draft.name || (AUTOMOD_TYPE_LABELS[draft.type] || 'Automod Rule')).trim(),
+        type: AUTOMOD_TYPE_ORDER.includes(draft.type) ? draft.type : 'keyword',
+        trigger: String(draft.trigger || '').trim(),
+        matchType: draft.matchType === 'exact' ? 'exact' : 'contains',
+        actions,
+        action: actions[0],
+        timeoutDuration: String(draft.timeoutDuration || '10m').trim() || '10m',
+        enabled: draft.enabled !== false,
+        ignoreAdmins: draft.ignoreAdmins !== false,
+        allowedChannelIds: [...new Set((draft.allowedChannelIds || []).map(String))],
+        ignoredChannelIds: [...new Set((draft.ignoredChannelIds || []).map(String))],
+        allowedRoleIds: [...new Set((draft.allowedRoleIds || []).map(String))],
+        ignoredRoleIds: [...new Set((draft.ignoredRoleIds || []).map(String))],
+        allowedUserIds: [...new Set((draft.allowedUserIds || []).map(String))],
+        ignoredUserIds: [...new Set((draft.ignoredUserIds || []).map(String))],
+        custom: sanitizeCustomByType(draft.type, draft.custom),
+        logChannelId: String(draft.logChannelId || '').trim(),
+        customResponse: String(draft.customResponse || '').trim(),
+        createdBy: draft.createdBy || fallbackUserId,
+        createdAt: draft.createdAt || new Date().toISOString()
+    };
+}
+
 function buildManagePayload(client, guildId, options = {}) {
     const {
         panel = MANAGE_PANEL_RULES,
@@ -1635,35 +1662,13 @@ module.exports = {
                 return true;
             }
 
-            const actions = normalizeAutomodActions(draft.actions, draft.action);
-            if (actions.includes('timeout') && !parseDurationMs(String(draft.timeoutDuration || '').trim())) {
+            const normalizedActions = normalizeAutomodActions(draft.actions, draft.action);
+            if (normalizedActions.includes('timeout') && !parseDurationMs(String(draft.timeoutDuration || '').trim())) {
                 await interaction.reply({ content: 'Timeout action requires a valid duration like 5m, 1h, 2d.', ephemeral: true });
                 return true;
             }
 
-            const payload = {
-                id: draft.id,
-                name: String(draft.name || (AUTOMOD_TYPE_LABELS[draft.type] || 'Automod Rule')).trim(),
-                type: AUTOMOD_TYPE_ORDER.includes(draft.type) ? draft.type : 'keyword',
-                trigger: String(draft.trigger || '').trim(),
-                matchType: draft.matchType === 'exact' ? 'exact' : 'contains',
-                actions,
-                action: actions[0],
-                timeoutDuration: String(draft.timeoutDuration || '10m').trim() || '10m',
-                enabled: draft.enabled !== false,
-                ignoreAdmins: draft.ignoreAdmins !== false,
-                allowedChannelIds: [...new Set((draft.allowedChannelIds || []).map(String))],
-                ignoredChannelIds: [...new Set((draft.ignoredChannelIds || []).map(String))],
-                allowedRoleIds: [...new Set((draft.allowedRoleIds || []).map(String))],
-                ignoredRoleIds: [...new Set((draft.ignoredRoleIds || []).map(String))],
-                allowedUserIds: [...new Set((draft.allowedUserIds || []).map(String))],
-                ignoredUserIds: [...new Set((draft.ignoredUserIds || []).map(String))],
-                custom: sanitizeCustomByType(draft.type, draft.custom),
-                logChannelId: String(draft.logChannelId || '').trim(),
-                customResponse: String(draft.customResponse || '').trim(),
-                createdBy: draft.createdBy || interaction.user.id,
-                createdAt: draft.createdAt || new Date().toISOString()
-            };
+            const payload = buildAutomodRulePayloadFromDraft(draft, interaction.user.id);
 
             if (typeof client.upsertAutomodRule !== 'function') {
                 await interaction.reply({ content: 'Automod storage is not available in this build.', ephemeral: true });
@@ -1922,8 +1927,19 @@ module.exports = {
         }
 
         client.automodDrafts.set(draftKey, draft);
+
+        const hasExistingRule = typeof client.getAutomodRules === 'function'
+            ? client.getAutomodRules(interaction.guild.id).some(rule => rule.id === draft.id)
+            : false;
+        if (hasExistingRule && typeof client.upsertAutomodRule === 'function') {
+            const payload = buildAutomodRulePayloadFromDraft(draft, interaction.user.id);
+            client.upsertAutomodRule(interaction.guild.id, payload);
+        }
+
         await interaction.update({
-            content: 'Updated role filters.',
+            content: hasExistingRule
+                ? 'Updated role filters and saved them to this rule.'
+                : 'Updated role filters.',
             ...buildAutomodRoleFiltersPayload(draft)
         });
         return true;
