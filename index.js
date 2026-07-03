@@ -621,6 +621,53 @@ client.savePrefixCommandState = () => {
     fs.writeFileSync(prefixStateFile, JSON.stringify({ enabled: Boolean(client.prefixCommandsEnabled) }, null, 2), 'utf8');
 };
 
+const AUTORESPONDER_MODES = ['online', 'maintenance', 'paused', 'outdated'];
+const AUTORESPONDER_MODE_LABELS = {
+    online: 'Online',
+    maintenance: 'Maintenance',
+    paused: 'Paused',
+    outdated: 'Outdated'
+};
+
+const toAutoresponderMode = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return AUTORESPONDER_MODES.includes(normalized) ? normalized : null;
+};
+
+const normalizeAutoresponderModeResponses = (rawResponses, fallbackResponse = '') => {
+    const safe = {};
+    for (const mode of AUTORESPONDER_MODES) {
+        const candidate = rawResponses && typeof rawResponses === 'object'
+            ? rawResponses[mode]
+            : '';
+        safe[mode] = String(candidate || '');
+    }
+
+    if (!safe.online.trim() && String(fallbackResponse || '').trim()) {
+        safe.online = String(fallbackResponse);
+    }
+
+    return safe;
+};
+
+const getAutoresponderActiveResponse = (entry) => {
+    const modeResponses = normalizeAutoresponderModeResponses(entry?.modeResponses, entry?.response || '');
+    const currentMode = toAutoresponderMode(entry?.currentMode) || 'online';
+    const current = String(modeResponses[currentMode] || '').trim();
+    if (current) {
+        return { mode: currentMode, response: modeResponses[currentMode], modeResponses };
+    }
+
+    for (const mode of AUTORESPONDER_MODES) {
+        const candidate = String(modeResponses[mode] || '').trim();
+        if (candidate) {
+            return { mode, response: modeResponses[mode], modeResponses };
+        }
+    }
+
+    return { mode: currentMode, response: '', modeResponses };
+};
+
 client.loadAutoresponders = () => {
     if (!fs.existsSync(dataPath)) {
         fs.mkdirSync(dataPath, { recursive: true });
@@ -648,21 +695,29 @@ client.loadAutoresponders = () => {
         const normalized = Array.isArray(entries)
             ? entries
                 .filter(entry => entry && typeof entry === 'object')
-                .map((entry, index) => ({
-                    id: String(entry.id || `ar_${Date.now()}_${index}`),
-                    trigger: String(entry.trigger || '').trim(),
-                    response: String(entry.response || ''),
-                    enabled: entry.enabled !== false,
-                    matchType: entry.matchType === 'exact' ? 'exact' : 'contains',
-                    allowedChannelIds: Array.isArray(entry.allowedChannelIds) ? entry.allowedChannelIds.map(String) : [],
-                    ignoredChannelIds: Array.isArray(entry.ignoredChannelIds) ? entry.ignoredChannelIds.map(String) : [],
-                    allowedRoleIds: Array.isArray(entry.allowedRoleIds) ? entry.allowedRoleIds.map(String) : [],
-                    ignoredRoleIds: Array.isArray(entry.ignoredRoleIds) ? entry.ignoredRoleIds.map(String) : [],
-                    allowedUserIds: Array.isArray(entry.allowedUserIds) ? entry.allowedUserIds.map(String) : [],
-                    ignoredUserIds: Array.isArray(entry.ignoredUserIds) ? entry.ignoredUserIds.map(String) : [],
-                    createdBy: String(entry.createdBy || ''),
-                    createdAt: String(entry.createdAt || new Date().toISOString())
-                }))
+                .map((entry, index) => {
+                    const currentMode = toAutoresponderMode(entry.currentMode) || 'online';
+                    const modeResponses = normalizeAutoresponderModeResponses(entry.modeResponses, entry.response || '');
+                    const active = getAutoresponderActiveResponse({ currentMode, modeResponses, response: entry.response || '' });
+
+                    return {
+                        id: String(entry.id || `ar_${Date.now()}_${index}`),
+                        trigger: String(entry.trigger || '').trim(),
+                        response: String(active.response || ''),
+                        currentMode: currentMode,
+                        modeResponses,
+                        enabled: entry.enabled !== false,
+                        matchType: entry.matchType === 'exact' ? 'exact' : 'contains',
+                        allowedChannelIds: Array.isArray(entry.allowedChannelIds) ? entry.allowedChannelIds.map(String) : [],
+                        ignoredChannelIds: Array.isArray(entry.ignoredChannelIds) ? entry.ignoredChannelIds.map(String) : [],
+                        allowedRoleIds: Array.isArray(entry.allowedRoleIds) ? entry.allowedRoleIds.map(String) : [],
+                        ignoredRoleIds: Array.isArray(entry.ignoredRoleIds) ? entry.ignoredRoleIds.map(String) : [],
+                        allowedUserIds: Array.isArray(entry.allowedUserIds) ? entry.allowedUserIds.map(String) : [],
+                        ignoredUserIds: Array.isArray(entry.ignoredUserIds) ? entry.ignoredUserIds.map(String) : [],
+                        createdBy: String(entry.createdBy || ''),
+                        createdAt: String(entry.createdAt || new Date().toISOString())
+                    };
+                })
                 .filter(entry => entry.trigger.length > 0 && entry.response.length > 0)
             : [];
 
@@ -712,6 +767,8 @@ client.deleteAutoresponder = (guildId, entryId) => {
     client.saveAutoresponders();
     return true;
 };
+
+client.getAutoresponderActiveResponse = (entry) => getAutoresponderActiveResponse(entry);
 
 client.applyAutoresponderVariables = (template, message) => {
     let output = String(template || '');
@@ -783,9 +840,11 @@ client.buildAutoresponderConfigPayload = (draft) => {
     const channelMentions = (ids) => ids.length ? ids.map(id => `<#${id}>`).join(', ') : 'None';
     const roleMentions = (ids) => ids.length ? ids.map(id => `<@&${id}>`).join(', ') : 'None';
     const userMentions = (ids) => ids.length ? ids.map(id => `<@${id}>`).join(', ') : 'None';
-    const responsePreview = draft.response.length > 180
-        ? `${draft.response.slice(0, 177)}...`
-        : draft.response;
+    const active = getAutoresponderActiveResponse(draft);
+    const modeLabel = AUTORESPONDER_MODE_LABELS[active.mode] || 'Online';
+    const responsePreview = active.response.length > 180
+        ? `${active.response.slice(0, 177)}...`
+        : active.response;
 
     const embed = new EmbedBuilder()
         .setColor(0x2F3136)
@@ -795,6 +854,7 @@ client.buildAutoresponderConfigPayload = (draft) => {
             { name: 'Trigger', value: `\`${draft.trigger}\``, inline: false },
             { name: 'Match Mode', value: draft.matchType === 'exact' ? 'Exact' : 'Contains', inline: true },
             { name: 'Enabled', value: draft.enabled ? 'Yes' : 'No', inline: true },
+            { name: 'Current Status', value: modeLabel, inline: true },
             { name: 'Response', value: responsePreview || 'No text', inline: false },
             { name: 'Allowed Channels', value: channelMentions(draft.allowedChannelIds), inline: false },
             { name: 'Ignored Channels', value: channelMentions(draft.ignoredChannelIds), inline: false },
@@ -2722,6 +2782,8 @@ client.on('interactionCreate', async (interaction) => {
             const nextDraft = {
                 trigger,
                 response,
+                currentMode: 'online',
+                modeResponses: normalizeAutoresponderModeResponses({ online: response }, response),
                 enabled: true,
                 matchType: 'contains',
                 allowedChannelIds: [],
@@ -2747,11 +2809,23 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: 'No active autoresponder draft was found. Run /autoresponder again.', ephemeral: true });
         }
 
+        const modeRaw = interaction.fields.getTextInputValue('ar_edit_response_mode').trim();
+        const mode = toAutoresponderMode(modeRaw);
+        if (!mode) {
+            return interaction.reply({
+                content: 'Invalid status. Use one of: online, maintenance, paused, outdated.',
+                ephemeral: true
+            });
+        }
+
         const response = interaction.fields.getTextInputValue('ar_edit_response_text').trim();
         if (!response) {
             return interaction.reply({ content: 'Response text is required.', ephemeral: true });
         }
 
+        draft.modeResponses = normalizeAutoresponderModeResponses(draft.modeResponses, draft.response || '');
+        draft.modeResponses[mode] = response;
+        draft.currentMode = mode;
         draft.response = response;
         client.autoresponderDrafts.set(draftKey, draft);
 
@@ -3126,9 +3200,18 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (interaction.customId === 'ar_edit_response') {
+                const active = getAutoresponderActiveResponse(draft);
                 const modal = new ModalBuilder()
                     .setCustomId('ar_edit_response_modal')
                     .setTitle('Edit Autoresponder Response');
+
+                const modeInput = new TextInputBuilder()
+                    .setCustomId('ar_edit_response_mode')
+                    .setLabel('Status (online/maintenance/paused/outdated)')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setMaxLength(20)
+                    .setValue(active.mode);
 
                 const responseInput = new TextInputBuilder()
                     .setCustomId('ar_edit_response_text')
@@ -3136,9 +3219,12 @@ client.on('interactionCreate', async (interaction) => {
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true)
                     .setMaxLength(1800)
-                    .setValue(draft.response || '');
+                    .setValue(active.response || '');
 
-                modal.addComponents(new ActionRowBuilder().addComponents(responseInput));
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(modeInput),
+                    new ActionRowBuilder().addComponents(responseInput)
+                );
                 return interaction.showModal(modal);
             }
 
@@ -3175,7 +3261,16 @@ client.on('interactionCreate', async (interaction) => {
 
             if (interaction.customId === 'ar_save') {
                 const entryId = draft.editingId || `ar_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
-                const entry = { ...draft, id: entryId };
+                const currentMode = toAutoresponderMode(draft.currentMode) || 'online';
+                const modeResponses = normalizeAutoresponderModeResponses(draft.modeResponses, draft.response || '');
+                const active = getAutoresponderActiveResponse({ currentMode, modeResponses, response: draft.response || '' });
+                const entry = {
+                    ...draft,
+                    id: entryId,
+                    currentMode,
+                    modeResponses,
+                    response: active.response
+                };
                 delete entry.editingId;
                 client.upsertAutoresponder(interaction.guildId, entry);
                 client.autoresponderDrafts.delete(draftKey);
@@ -3501,10 +3596,13 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: 'That autoresponder no longer exists.', ephemeral: true });
             }
 
+            const existingActive = getAutoresponderActiveResponse(existing);
             const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
             const draft = {
                 trigger: existing.trigger,
-                response: existing.response,
+                response: existingActive.response,
+                currentMode: existingActive.mode,
+                modeResponses: existingActive.modeResponses,
                 enabled: existing.enabled !== false,
                 matchType: existing.matchType === 'exact' ? 'exact' : 'contains',
                 allowedChannelIds: Array.isArray(existing.allowedChannelIds) ? [...existing.allowedChannelIds] : [],
@@ -3896,8 +3994,11 @@ client.on('messageCreate', async (message) => {
                 const lastSentAt = client.autoresponderCooldowns.get(cooldownKey) || 0;
                 if (Date.now() - lastSentAt < 5000) continue;
 
+                const active = client.getAutoresponderActiveResponse(responder);
+                if (!String(active.response || '').trim()) continue;
+
                 client.autoresponderCooldowns.set(cooldownKey, Date.now());
-                const rendered = client.applyAutoresponderVariables(responder.response, message);
+                const rendered = client.applyAutoresponderVariables(active.response, message);
                 await message.channel.send({
                     content: rendered.output,
                     allowedMentions: {
