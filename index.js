@@ -913,7 +913,7 @@ client.buildAutoresponderConfigPayload = (draft) => {
             .setStyle(draft.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
         new ButtonBuilder()
             .setCustomId('ar_edit_response')
-            .setLabel('Field')
+            .setLabel('Status/Field')
             .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
             .setCustomId('ar_config_users')
