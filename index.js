@@ -4274,16 +4274,16 @@ client.on('messageCreate', async (message) => {
                     if (logChannel && logChannel.isTextBased()) {
                         const preview = String(message.content || '').replace(/\s+/g, ' ').trim();
                         const previewShort = preview.length > 120 ? `${preview.slice(0, 117)}...` : (preview || '(no text content)');
+                        const previewInline = previewShort.replace(/`/g, '\\`');
                         const avatarUrl = message.author.displayAvatarURL({ extension: 'png', size: 256 });
                         const ruleLabel = String(rule.name || rule.type || 'Unknown Rule').slice(0, 200);
-                        const actionsLabel = String(executedActions.length ? executedActions.join(', ') : actions.join(', ')).slice(0, 200);
                         const automodEmbed = new EmbedBuilder()
                             .setColor(0xED4245)
                             .setAuthor({ name: message.author.tag, iconURL: avatarUrl })
-                            .setDescription(`Message sent by <@${message.author.id}> deleted in <#${message.channel.id}>\n> ${previewShort}`)
+                            .setDescription(`Message sent by <@${message.author.id}> deleted in <#${message.channel.id}>\n${previewShort}`)
                             .addFields(
                                 { name: 'Reason', value: ruleLabel, inline: true },
-                                { name: 'Detailed Reason', value: `${String(reason).slice(0, 300)}\nActions: ${actionsLabel}\nAvatar: [Open](${avatarUrl})`, inline: true }
+                                { name: 'Detailed Reason', value: `\`${previewInline}\``, inline: true }
                             )
                             .setFooter({ text: `ID: ${message.author.id}` })
                             .setTimestamp();
