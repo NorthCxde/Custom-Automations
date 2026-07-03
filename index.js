@@ -3201,13 +3201,15 @@ client.on('interactionCreate', async (interaction) => {
 
             if (interaction.customId === 'ar_edit_response') {
                 const active = getAutoresponderActiveResponse(draft);
+                const activeModeLabel = AUTORESPONDER_MODE_LABELS[active.mode] || 'Online';
                 const modal = new ModalBuilder()
                     .setCustomId('ar_edit_response_modal')
                     .setTitle('Edit Autoresponder Response');
 
                 const modeInput = new TextInputBuilder()
                     .setCustomId('ar_edit_response_mode')
-                    .setLabel('Status (online/maintenance/paused/outdated)')
+                    .setLabel('Status Key (one word)')
+                    .setPlaceholder('online | maintenance | paused | outdated')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
                     .setMaxLength(20)
@@ -3215,7 +3217,7 @@ client.on('interactionCreate', async (interaction) => {
 
                 const responseInput = new TextInputBuilder()
                     .setCustomId('ar_edit_response_text')
-                    .setLabel('Response Text')
+                    .setLabel(`Response Text (${activeModeLabel})`)
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true)
                     .setMaxLength(1800)
