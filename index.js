@@ -2759,7 +2759,7 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
-        if (interaction.customId !== 'ar_create_modal' && interaction.customId !== 'ar_edit_response_modal') return;
+        if (interaction.customId !== 'ar_create_modal' && !interaction.customId.startsWith('ar_edit_response_modal:')) return;
 
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -3203,12 +3203,12 @@ client.on('interactionCreate', async (interaction) => {
                 const active = getAutoresponderActiveResponse(draft);
                 const activeModeLabel = AUTORESPONDER_MODE_LABELS[active.mode] || 'Online';
                 const modal = new ModalBuilder()
-                    .setCustomId('ar_edit_response_modal')
+                    .setCustomId(`ar_edit_response_modal:${Date.now()}`)
                     .setTitle('Edit Autoresponder Response');
 
                 const modeInput = new TextInputBuilder()
                     .setCustomId('ar_edit_response_mode')
-                    .setLabel('Status Key (one word)')
+                    .setLabel('Status Key (type one: online/maintenance/paused/outdated)')
                     .setPlaceholder('online | maintenance | paused | outdated')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
