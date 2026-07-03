@@ -47,6 +47,7 @@ const MANAGE_AUTOMOD_EDIT_PREFIX = 'manage_automod_edit:';
 const MANAGE_AUTOMOD_DELETE_PREFIX = 'manage_automod_delete:';
 const MANAGE_AUTOMOD_DRAFT_ALLOWED_CHANNELS_ID = 'manage_automod_draft_allowed_channels';
 const MANAGE_AUTOMOD_DRAFT_IGNORED_CHANNELS_ID = 'manage_automod_draft_ignored_channels';
+const MANAGE_AUTOMOD_DRAFT_LOG_CHANNEL_ID = 'manage_automod_draft_log_channel';
 const MANAGE_AUTOMOD_DRAFT_ALLOWED_ROLES_ID = 'manage_automod_draft_allowed_roles';
 const MANAGE_AUTOMOD_DRAFT_IGNORED_ROLES_ID = 'manage_automod_draft_ignored_roles';
 const MANAGE_AUTOMOD_DRAFT_ALLOWED_USERS_ID = 'manage_automod_draft_allowed_users';
@@ -69,7 +70,6 @@ const MODAL_AUTOMOD_ACTION_INPUT_ID = 'action';
 const MODAL_AUTOMOD_TIMEOUT_INPUT_ID = 'timeout';
 const MODAL_AUTOMOD_CUSTOM_A_ID = 'custom_a';
 const MODAL_AUTOMOD_CUSTOM_B_ID = 'custom_b';
-const MODAL_AUTOMOD_LOG_CHANNEL_INPUT_ID = 'log_channel';
 const MODAL_AUTOMOD_CUSTOM_RESPONSE_INPUT_ID = 'custom_response';
 
 function truncate(text, max = 100) {
@@ -969,6 +969,15 @@ function buildAutomodDraftPayload(draft, notice) {
         ignoredChannelsMenu.setDefaultChannels(draft.ignoredChannelIds.slice(0, 25));
     }
 
+    const logChannelMenu = new ChannelSelectMenuBuilder()
+        .setCustomId(MANAGE_AUTOMOD_DRAFT_LOG_CHANNEL_ID)
+        .setPlaceholder('Log Channel (optional)')
+        .setMinValues(0)
+        .setMaxValues(1);
+    if (typeof logChannelMenu.setDefaultChannels === 'function' && draft.logChannelId) {
+        logChannelMenu.setDefaultChannels([draft.logChannelId]);
+    }
+
     const primaryRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(MANAGE_AUTOMOD_DRAFT_TYPE_ID)
@@ -1019,9 +1028,9 @@ function buildAutomodDraftPayload(draft, notice) {
         content: notice || null,
         embeds: [embed],
         components: [
-            buildPanelSelectRow(MANAGE_PANEL_AUTOMOD),
             new ActionRowBuilder().addComponents(allowedChannelsMenu),
             new ActionRowBuilder().addComponents(ignoredChannelsMenu),
+            new ActionRowBuilder().addComponents(logChannelMenu),
             primaryRow,
             secondaryRow
         ]
@@ -1498,13 +1507,6 @@ module.exports = {
                 return true;
             }
 
-            const logChannelInput = new TextInputBuilder()
-                .setCustomId(MODAL_AUTOMOD_LOG_CHANNEL_INPUT_ID)
-                .setLabel('Log Channel ID (optional)')
-                .setStyle(TextInputStyle.Short)
-                .setRequired(false)
-                .setValue(String(draft.logChannelId || '').slice(0, 4000));
-
             const customResponseInput = new TextInputBuilder()
                 .setCustomId(MODAL_AUTOMOD_CUSTOM_RESPONSE_INPUT_ID)
                 .setLabel('Custom Response (optional)')
@@ -1513,7 +1515,6 @@ module.exports = {
                 .setValue(String(draft.customResponse || '').slice(0, 4000));
 
             modal.addComponents(
-                new ActionRowBuilder().addComponents(logChannelInput),
                 new ActionRowBuilder().addComponents(customResponseInput)
             );
 
@@ -1855,7 +1856,8 @@ module.exports = {
     },
     async handleChannelSelect({ client, interaction }) {
         if (interaction.customId !== MANAGE_AUTOMOD_DRAFT_ALLOWED_CHANNELS_ID
-            && interaction.customId !== MANAGE_AUTOMOD_DRAFT_IGNORED_CHANNELS_ID) return false;
+            && interaction.customId !== MANAGE_AUTOMOD_DRAFT_IGNORED_CHANNELS_ID
+            && interaction.customId !== MANAGE_AUTOMOD_DRAFT_LOG_CHANNEL_ID) return false;
 
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
@@ -1872,9 +1874,11 @@ module.exports = {
         if (interaction.customId === MANAGE_AUTOMOD_DRAFT_ALLOWED_CHANNELS_ID) {
             draft.allowedChannelIds = [...new Set(interaction.values.map(String))];
             draft.ignoredChannelIds = draft.ignoredChannelIds.filter(id => !draft.allowedChannelIds.includes(id));
-        } else {
+        } else if (interaction.customId === MANAGE_AUTOMOD_DRAFT_IGNORED_CHANNELS_ID) {
             draft.ignoredChannelIds = [...new Set(interaction.values.map(String))];
             draft.allowedChannelIds = draft.allowedChannelIds.filter(id => !draft.ignoredChannelIds.includes(id));
+        } else {
+            draft.logChannelId = String(interaction.values?.[0] || '').trim();
         }
 
         client.automodDrafts.set(draftKey, draft);
@@ -1941,13 +1945,7 @@ module.exports = {
             } catch (_) {
                 customB = '';
             }
-            let logChannelId = '';
             let customResponse = '';
-            try {
-                logChannelId = interaction.fields.getTextInputValue(MODAL_AUTOMOD_LOG_CHANNEL_INPUT_ID).trim();
-            } catch (_) {
-                logChannelId = '';
-            }
             try {
                 customResponse = interaction.fields.getTextInputValue(MODAL_AUTOMOD_CUSTOM_RESPONSE_INPUT_ID).trim();
             } catch (_) {
@@ -2011,13 +2009,7 @@ module.exports = {
                 return true;
             }
 
-            if (logChannelId && !/^\d{17,20}$/.test(logChannelId)) {
-                await interaction.reply({ content: 'Log Channel ID must be a valid Discord snowflake ID.', ephemeral: true });
-                return true;
-            }
-
             draft.custom = sanitizeCustomByType(draft.type, nextCustom);
-            draft.logChannelId = logChannelId;
             draft.customResponse = customResponse.slice(0, 200);
             client.automodDrafts.set(draftKey, draft);
 
