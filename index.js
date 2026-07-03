@@ -4273,13 +4273,17 @@ client.on('messageCreate', async (message) => {
                         || await message.guild.channels.fetch(logChannelId).catch(() => null);
                     if (logChannel && logChannel.isTextBased()) {
                         const preview = String(message.content || '').slice(0, 300) || '(no text content)';
+                        const avatarUrl = message.author.displayAvatarURL({ extension: 'png', size: 256 });
                         const automodEmbed = new EmbedBuilder()
                             .setColor(0xED4245)
                             .setTitle('AutoMod Triggered')
+                            .setThumbnail(avatarUrl)
                             .addFields(
                                 { name: 'Rule', value: String(rule.name || rule.type || 'Unknown Rule').slice(0, 1024), inline: true },
                                 { name: 'Actions', value: String(executedActions.length ? executedActions.join(', ') : actions.join(', ')).slice(0, 1024), inline: true },
                                 { name: 'User', value: `<@${message.author.id}> (${message.author.tag})`, inline: false },
+                                { name: 'User ID', value: message.author.id, inline: true },
+                                { name: 'Profile Picture', value: `[Open Avatar](${avatarUrl})`, inline: true },
                                 { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
                                 { name: 'Reason', value: String(reason).slice(0, 1024), inline: false },
                                 { name: 'Message', value: String(preview).slice(0, 1024), inline: false }
