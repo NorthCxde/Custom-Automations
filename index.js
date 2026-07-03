@@ -3208,7 +3208,7 @@ client.on('interactionCreate', async (interaction) => {
 
                 const modeInput = new TextInputBuilder()
                     .setCustomId('ar_edit_response_mode')
-                    .setLabel('Status Key (type one: online/maintenance/paused/outdated)')
+                    .setLabel('Status Key')
                     .setPlaceholder('online | maintenance | paused | outdated')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
