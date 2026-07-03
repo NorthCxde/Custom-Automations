@@ -4272,18 +4272,46 @@ client.on('messageCreate', async (message) => {
                     const logChannel = message.guild.channels.cache.get(logChannelId)
                         || await message.guild.channels.fetch(logChannelId).catch(() => null);
                     if (logChannel && logChannel.isTextBased()) {
-                        const preview = String(message.content || '').replace(/\s+/g, ' ').trim();
-                        const previewShort = preview.length > 120 ? `${preview.slice(0, 117)}...` : (preview || '(no text content)');
-                        const previewInline = previewShort.replace(/`/g, '\\`');
+                        const rawPreview = String(message.content || '').trim();
+                        const normalizedPreview = rawPreview
+                            .replace(/<a?:([a-zA-Z0-9_]+):\d+>/g, ':$1:')
+                            .replace(/\s+/g, ' ')
+                            .trim();
+                        const previewShort = normalizedPreview.length > 180
+                            ? `${normalizedPreview.slice(0, 177)}...`
+                            : (normalizedPreview || '(no text content)');
                         const avatarUrl = message.author.displayAvatarURL({ extension: 'png', size: 256 });
-                        const ruleLabel = String(rule.name || rule.type || 'Unknown Rule').slice(0, 200);
+                        const prettyReasonByType = {
+                            mentions_cooldown: 'Too many mentions',
+                            fast_message_spam: 'Message spam',
+                            anti_newline: 'Too many new lines',
+                            character_count: 'Message too long',
+                            emoji_spam: 'Too many emojis',
+                            word_blacklist: 'Banned Word',
+                            anti_links: 'Links detected',
+                            invite_links: 'Invite links detected',
+                            masked_links: 'Masked links',
+                            zalgo_text: 'Zalgo text',
+                            keyword: 'Keyword matched'
+                        };
+                        const reasonLabel = prettyReasonByType[String(rule.type || '').trim().toLowerCase()]
+                            || String(rule.name || rule.type || 'AutoMod').slice(0, 200);
+                        let detailText = String(matchDetails || '').trim();
+                        if (!detailText) {
+                            detailText = executedActions.length
+                                ? executedActions.join(', ')
+                                : String(actions.join(', '));
+                        }
+                        if (String(rule.type || '').trim().toLowerCase() === 'word_blacklist') {
+                            detailText = previewShort;
+                        }
                         const automodEmbed = new EmbedBuilder()
                             .setColor(0xED4245)
                             .setAuthor({ name: message.author.tag, iconURL: avatarUrl })
                             .setDescription(`Message sent by <@${message.author.id}> deleted in <#${message.channel.id}>\n${previewShort}`)
                             .addFields(
-                                { name: 'Reason', value: ruleLabel, inline: true },
-                                { name: 'Detailed Reason', value: `\`${previewInline}\``, inline: true }
+                                { name: 'Reason', value: String(reasonLabel).slice(0, 1024), inline: true },
+                                { name: 'Detailed Reason', value: String(detailText).slice(0, 1024), inline: true }
                             )
                             .setFooter({ text: `ID: ${message.author.id}` })
                             .setTimestamp();
