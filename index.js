@@ -4274,7 +4274,6 @@ client.on('messageCreate', async (message) => {
                     if (logChannel && logChannel.isTextBased()) {
                         const rawPreview = String(message.content || '').trim();
                         const normalizedPreview = rawPreview
-                            .replace(/<a?:([a-zA-Z0-9_]+):\d+>/g, ':$1:')
                             .replace(/\s+/g, ' ')
                             .trim();
                         const previewShort = normalizedPreview.length > 180
