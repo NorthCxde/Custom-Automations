@@ -4272,22 +4272,20 @@ client.on('messageCreate', async (message) => {
                     const logChannel = message.guild.channels.cache.get(logChannelId)
                         || await message.guild.channels.fetch(logChannelId).catch(() => null);
                     if (logChannel && logChannel.isTextBased()) {
-                        const preview = String(message.content || '').slice(0, 300) || '(no text content)';
+                        const preview = String(message.content || '').replace(/\s+/g, ' ').trim();
+                        const previewShort = preview.length > 120 ? `${preview.slice(0, 117)}...` : (preview || '(no text content)');
                         const avatarUrl = message.author.displayAvatarURL({ extension: 'png', size: 256 });
+                        const ruleLabel = String(rule.name || rule.type || 'Unknown Rule').slice(0, 200);
+                        const actionsLabel = String(executedActions.length ? executedActions.join(', ') : actions.join(', ')).slice(0, 200);
                         const automodEmbed = new EmbedBuilder()
                             .setColor(0xED4245)
-                            .setTitle('AutoMod Triggered')
-                            .setThumbnail(avatarUrl)
+                            .setAuthor({ name: message.author.tag, iconURL: avatarUrl })
+                            .setDescription(`Message sent by <@${message.author.id}> deleted in <#${message.channel.id}>\n> ${previewShort}`)
                             .addFields(
-                                { name: 'Rule', value: String(rule.name || rule.type || 'Unknown Rule').slice(0, 1024), inline: true },
-                                { name: 'Actions', value: String(executedActions.length ? executedActions.join(', ') : actions.join(', ')).slice(0, 1024), inline: true },
-                                { name: 'User', value: `<@${message.author.id}> (${message.author.tag})`, inline: false },
-                                { name: 'User ID', value: message.author.id, inline: true },
-                                { name: 'Profile Picture', value: `[Open Avatar](${avatarUrl})`, inline: true },
-                                { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
-                                { name: 'Reason', value: String(reason).slice(0, 1024), inline: false },
-                                { name: 'Message', value: String(preview).slice(0, 1024), inline: false }
+                                { name: 'Reason', value: ruleLabel, inline: true },
+                                { name: 'Detailed Reason', value: `${String(reason).slice(0, 300)}\nActions: ${actionsLabel}\nAvatar: [Open](${avatarUrl})`, inline: true }
                             )
+                            .setFooter({ text: `ID: ${message.author.id}` })
                             .setTimestamp();
 
                         await logChannel.send({
