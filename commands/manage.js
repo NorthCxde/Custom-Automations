@@ -57,13 +57,18 @@ const MANAGE_AUTOMOD_DRAFT_ACTION_ID = 'manage_automod_draft_action';
 const MANAGE_AUTOMOD_DRAFT_IGNORE_ADMINS_ID = 'manage_automod_draft_ignore_admins';
 const MANAGE_AUTOMOD_DRAFT_ENABLED_ID = 'manage_automod_draft_enabled';
 const MANAGE_AUTOMOD_DRAFT_FIELD_ID = 'manage_automod_draft_field';
+const MANAGE_AUTOMOD_DRAFT_CUSTOM_ID = 'manage_automod_draft_custom';
+const MANAGE_AUTOMOD_DRAFT_ROLES_ID = 'manage_automod_draft_roles';
 const MANAGE_AUTOMOD_DRAFT_USERS_ID = 'manage_automod_draft_users';
 const MANAGE_AUTOMOD_DRAFT_SAVE_ID = 'manage_automod_draft_save';
 const MANAGE_AUTOMOD_MODAL_PREFIX = 'manage_automod_modal:';
+const MANAGE_AUTOMOD_CUSTOM_MODAL_PREFIX = 'manage_automod_custom_modal:';
+const MODAL_AUTOMOD_NAME_INPUT_ID = 'name';
 const MODAL_AUTOMOD_TRIGGER_INPUT_ID = 'trigger';
 const MODAL_AUTOMOD_ACTION_INPUT_ID = 'action';
 const MODAL_AUTOMOD_TIMEOUT_INPUT_ID = 'timeout';
-const MODAL_AUTOMOD_CUSTOM_INPUT_ID = 'custom';
+const MODAL_AUTOMOD_CUSTOM_A_ID = 'custom_a';
+const MODAL_AUTOMOD_CUSTOM_B_ID = 'custom_b';
 
 function truncate(text, max = 100) {
     const value = String(text || '').trim();
@@ -711,6 +716,26 @@ function formatAutomodCustom(type, custom = {}) {
     return 'No extra settings.';
 }
 
+function getAutomodCustomHint(type) {
+    if (type === 'mentions_cooldown') return 'maxMentions=6\nwindowSeconds=30';
+    if (type === 'fast_message_spam') return 'maxMessages=8\nwindowSeconds=5';
+    if (type === 'anti_newline') return 'maxNewlines=7';
+    if (type === 'character_count') return 'maxCharacters=350';
+    if (type === 'emoji_spam') return 'maxEmojis=6';
+    if (type === 'word_blacklist') return 'bannedWordsWildcard=paypal, /discord.gg\nbannedWordsExact=paypal, bio';
+    if (type === 'anti_links') return 'deleteAllLinks=true\nallowedLinks=https://youtube.com, https://roblox.com';
+    if (type === 'invite_links') return 'allowedInvites=myserver, discord.gg/myserver';
+    return 'No custom keys for this rule type.';
+}
+
+function parsePositiveIntInput(value, fieldLabel, min = 1) {
+    const parsed = Number(String(value || '').trim());
+    if (!Number.isFinite(parsed) || parsed < min) {
+        return { value: null, error: `${fieldLabel} must be a number >= ${min}.` };
+    }
+    return { value: Math.floor(parsed), error: null };
+}
+
 function formatAutomodRuleSummary(rule, idx) {
     const typeLabel = AUTOMOD_TYPE_LABELS[rule.type] || rule.type || 'Unknown';
     const actionLabel = formatAutomodActions(rule.actions || rule.action);
@@ -846,6 +871,50 @@ function buildAutomodUserFiltersPayload(draft) {
 
 const MANAGE_AUTOMOD_DRAFT_BACK_ID = 'manage_automod_draft_back';
 
+function buildAutomodRoleFiltersPayload(draft) {
+    const roleMentions = (ids) => ids.length ? ids.map(id => `<@&${id}>`).join(', ') : 'None';
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Automod Rule - Role Filters')
+        .setDescription('Configure allowed or ignored roles for this automod rule.')
+        .addFields(
+            { name: 'Allowed Roles', value: roleMentions(draft.allowedRoleIds), inline: false },
+            { name: 'Ignored Roles', value: roleMentions(draft.ignoredRoleIds), inline: false }
+        );
+
+    const allowedRolesMenu = new RoleSelectMenuBuilder()
+        .setCustomId(MANAGE_AUTOMOD_DRAFT_ALLOWED_ROLES_ID)
+        .setPlaceholder('Allowed Roles')
+        .setMinValues(0)
+        .setMaxValues(25);
+    if (draft.allowedRoleIds.length) {
+        allowedRolesMenu.setDefaultRoles(draft.allowedRoleIds.slice(0, 25));
+    }
+
+    const ignoredRolesMenu = new RoleSelectMenuBuilder()
+        .setCustomId(MANAGE_AUTOMOD_DRAFT_IGNORED_ROLES_ID)
+        .setPlaceholder('Ignored Roles')
+        .setMinValues(0)
+        .setMaxValues(25);
+    if (draft.ignoredRoleIds.length) {
+        ignoredRolesMenu.setDefaultRoles(draft.ignoredRoleIds.slice(0, 25));
+    }
+
+    return {
+        embeds: [embed],
+        components: [
+            new ActionRowBuilder().addComponents(allowedRolesMenu),
+            new ActionRowBuilder().addComponents(ignoredRolesMenu),
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_AUTOMOD_DRAFT_BACK_ID)
+                    .setLabel('Back')
+                    .setStyle(ButtonStyle.Secondary)
+            )
+        ]
+    };
+}
+
 function buildAutomodDraftPayload(draft, notice) {
     const channelMentions = (ids) => ids.length ? ids.map(id => `<#${id}>`).join(', ') : 'None';
     const roleMentions = (ids) => ids.length ? ids.map(id => `<@&${id}>`).join(', ') : 'None';
@@ -867,6 +936,7 @@ function buildAutomodDraftPayload(draft, notice) {
             { name: 'Trigger / Pattern', value: draft.trigger || 'None', inline: false },
             { name: 'Timeout Duration', value: draft.timeoutDuration || '10m', inline: true },
             { name: 'Custom Settings', value: formatAutomodCustom(draft.type, draft.custom), inline: false },
+            { name: 'Custom Key Preset', value: getAutomodCustomHint(draft.type), inline: false },
             { name: 'Allowed Channels', value: channelMentions(draft.allowedChannelIds), inline: false },
             { name: 'Ignored Channels', value: channelMentions(draft.ignoredChannelIds), inline: false },
             { name: 'Allowed Roles', value: roleMentions(draft.allowedRoleIds), inline: false },
@@ -892,24 +962,6 @@ function buildAutomodDraftPayload(draft, notice) {
         .setMaxValues(25);
     if (typeof ignoredChannelsMenu.setDefaultChannels === 'function' && draft.ignoredChannelIds.length) {
         ignoredChannelsMenu.setDefaultChannels(draft.ignoredChannelIds.slice(0, 25));
-    }
-
-    const allowedRolesMenu = new RoleSelectMenuBuilder()
-        .setCustomId(MANAGE_AUTOMOD_DRAFT_ALLOWED_ROLES_ID)
-        .setPlaceholder('Allowed Roles')
-        .setMinValues(0)
-        .setMaxValues(25);
-    if (draft.allowedRoleIds.length) {
-        allowedRolesMenu.setDefaultRoles(draft.allowedRoleIds.slice(0, 25));
-    }
-
-    const ignoredRolesMenu = new RoleSelectMenuBuilder()
-        .setCustomId(MANAGE_AUTOMOD_DRAFT_IGNORED_ROLES_ID)
-        .setPlaceholder('Ignored Roles')
-        .setMinValues(0)
-        .setMaxValues(25);
-    if (draft.ignoredRoleIds.length) {
-        ignoredRolesMenu.setDefaultRoles(draft.ignoredRoleIds.slice(0, 25));
     }
 
     const primaryRow = new ActionRowBuilder().addComponents(
@@ -941,17 +993,21 @@ function buildAutomodDraftPayload(draft, notice) {
             .setLabel('Field')
             .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
+            .setCustomId(MANAGE_AUTOMOD_DRAFT_CUSTOM_ID)
+            .setLabel('Custom')
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+            .setCustomId(MANAGE_AUTOMOD_DRAFT_ROLES_ID)
+            .setLabel('Roles')
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
             .setCustomId(MANAGE_AUTOMOD_DRAFT_USERS_ID)
             .setLabel('Users')
             .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
             .setCustomId(MANAGE_AUTOMOD_DRAFT_SAVE_ID)
             .setLabel('Save')
-            .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-            .setCustomId(MANAGE_AUTOMOD_DRAFT_BACK_ID)
-            .setLabel('Back')
-            .setStyle(ButtonStyle.Secondary)
+            .setStyle(ButtonStyle.Success)
     );
 
     return {
@@ -961,8 +1017,6 @@ function buildAutomodDraftPayload(draft, notice) {
             buildPanelSelectRow(MANAGE_PANEL_AUTOMOD),
             new ActionRowBuilder().addComponents(allowedChannelsMenu),
             new ActionRowBuilder().addComponents(ignoredChannelsMenu),
-            new ActionRowBuilder().addComponents(allowedRolesMenu),
-            new ActionRowBuilder().addComponents(ignoredRolesMenu),
             primaryRow,
             secondaryRow
         ]
@@ -1241,6 +1295,8 @@ module.exports = {
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_IGNORE_ADMINS_ID
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_ENABLED_ID
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_FIELD_ID
+            && interaction.customId !== MANAGE_AUTOMOD_DRAFT_CUSTOM_ID
+            && interaction.customId !== MANAGE_AUTOMOD_DRAFT_ROLES_ID
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_USERS_ID
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_SAVE_ID
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_BACK_ID
@@ -1331,6 +1387,116 @@ module.exports = {
             return true;
         }
 
+        if (interaction.customId === MANAGE_AUTOMOD_DRAFT_ROLES_ID) {
+            const draft = getDraft();
+            if (!draft) {
+                await interaction.reply({ content: 'No active automod draft found. Open Automod panel and create/edit a rule first.', ephemeral: true });
+                return true;
+            }
+
+            await interaction.update({
+                content: 'Configure role filters, then return to the main draft.',
+                ...buildAutomodRoleFiltersPayload(draft)
+            });
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_AUTOMOD_DRAFT_CUSTOM_ID) {
+            const draft = getDraft();
+            if (!draft) {
+                await interaction.reply({ content: 'No active automod draft found. Open Automod panel and create/edit a rule first.', ephemeral: true });
+                return true;
+            }
+
+            const custom = sanitizeCustomByType(draft.type, draft.custom);
+            const modal = new ModalBuilder()
+                .setCustomId(`${MANAGE_AUTOMOD_CUSTOM_MODAL_PREFIX}${draft.id}`)
+                .setTitle(`Custom: ${String(draft.name || 'Automod').slice(0, 25)}`);
+
+            if (draft.type === 'mentions_cooldown' || draft.type === 'fast_message_spam') {
+                const countLabel = draft.type === 'mentions_cooldown' ? 'Max Mentions' : 'Max Messages';
+                const countValue = draft.type === 'mentions_cooldown' ? custom.maxMentions : custom.maxMessages;
+                const countInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_A_ID)
+                    .setLabel(countLabel)
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(String(countValue || '1'));
+                const windowInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_B_ID)
+                    .setLabel('Window Seconds')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(String(custom.windowSeconds || '5'));
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(countInput),
+                    new ActionRowBuilder().addComponents(windowInput)
+                );
+            } else if (draft.type === 'anti_newline' || draft.type === 'character_count' || draft.type === 'emoji_spam') {
+                const inputLabel = draft.type === 'anti_newline'
+                    ? 'Max Newlines'
+                    : (draft.type === 'character_count' ? 'Max Characters' : 'Max Emojis');
+                const value = draft.type === 'anti_newline'
+                    ? custom.maxNewlines
+                    : (draft.type === 'character_count' ? custom.maxCharacters : custom.maxEmojis);
+                const input = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_A_ID)
+                    .setLabel(inputLabel)
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(String(value || '1'));
+                modal.addComponents(new ActionRowBuilder().addComponents(input));
+            } else if (draft.type === 'word_blacklist') {
+                const wildcardInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_A_ID)
+                    .setLabel('Wildcard Words (comma separated)')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(false)
+                    .setValue((custom.bannedWordsWildcard || []).join(', ').slice(0, 4000));
+                const exactInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_B_ID)
+                    .setLabel('Exact Words (comma separated)')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(false)
+                    .setValue((custom.bannedWordsExact || []).join(', ').slice(0, 4000));
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(wildcardInput),
+                    new ActionRowBuilder().addComponents(exactInput)
+                );
+            } else if (draft.type === 'anti_links') {
+                const modeInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_A_ID)
+                    .setLabel('Delete All Links? (true/false)')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(String(custom.deleteAllLinks !== false));
+                const allowInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_B_ID)
+                    .setLabel('Allowed Links (comma separated)')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(false)
+                    .setValue((custom.allowedLinks || []).join(', ').slice(0, 4000));
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(modeInput),
+                    new ActionRowBuilder().addComponents(allowInput)
+                );
+            } else if (draft.type === 'invite_links') {
+                const inviteInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_A_ID)
+                    .setLabel('Allowed Invites (comma separated)')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(false)
+                    .setValue((custom.allowedInvites || []).join(', ').slice(0, 4000));
+                modal.addComponents(new ActionRowBuilder().addComponents(inviteInput));
+            } else {
+                await interaction.reply({ content: 'This rule type has no custom settings.', ephemeral: true });
+                return true;
+            }
+
+            await interaction.showModal(modal);
+            return true;
+        }
+
         if (interaction.customId === MANAGE_AUTOMOD_DRAFT_FIELD_ID) {
             const draft = getDraft();
             if (!draft) {
@@ -1338,26 +1504,23 @@ module.exports = {
                 return true;
             }
 
-            const customLines = [];
-            const custom = sanitizeCustomByType(draft.type, draft.custom);
-            for (const [key, value] of Object.entries(custom)) {
-                if (Array.isArray(value)) {
-                    customLines.push(`${key}=${value.join(', ')}`);
-                } else {
-                    customLines.push(`${key}=${value}`);
-                }
-            }
-
             const modal = new ModalBuilder()
                 .setCustomId(`${MANAGE_AUTOMOD_MODAL_PREFIX}${draft.id}`)
                 .setTitle(`Automod Field: ${draft.name.slice(0, 30)}`);
 
-            const triggerInput = new TextInputBuilder()
-                .setCustomId(MODAL_AUTOMOD_TRIGGER_INPUT_ID)
-                .setLabel('Name|Type|Trigger (name|type|trigger)')
+            const nameInput = new TextInputBuilder()
+                .setCustomId(MODAL_AUTOMOD_NAME_INPUT_ID)
+                .setLabel('Rule Name')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
-                .setValue(`${draft.name}|${draft.type}|${draft.trigger}`.slice(0, 4000));
+                .setValue(String(draft.name || '').slice(0, 4000));
+
+            const triggerInput = new TextInputBuilder()
+                .setCustomId(MODAL_AUTOMOD_TRIGGER_INPUT_ID)
+                .setLabel('Trigger / Pattern (leave blank if not needed)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(false)
+                .setValue(String(draft.trigger || '').slice(0, 4000));
 
             const actionInput = new TextInputBuilder()
                 .setCustomId(MODAL_AUTOMOD_ACTION_INPUT_ID)
@@ -1373,18 +1536,11 @@ module.exports = {
                 .setRequired(false)
                 .setValue(String(draft.timeoutDuration || '10m').slice(0, 4000));
 
-            const customInput = new TextInputBuilder()
-                .setCustomId(MODAL_AUTOMOD_CUSTOM_INPUT_ID)
-                .setLabel('Custom settings key=value (one per line)')
-                .setStyle(TextInputStyle.Paragraph)
-                .setRequired(false)
-                .setValue(customLines.join('\n').slice(0, 4000));
-
             modal.addComponents(
+                new ActionRowBuilder().addComponents(nameInput),
                 new ActionRowBuilder().addComponents(triggerInput),
                 new ActionRowBuilder().addComponents(actionInput),
-                new ActionRowBuilder().addComponents(timeoutInput),
-                new ActionRowBuilder().addComponents(customInput)
+                new ActionRowBuilder().addComponents(timeoutInput)
             );
 
             await interaction.showModal(modal);
@@ -1728,19 +1884,106 @@ module.exports = {
         }
 
         client.automodDrafts.set(draftKey, draft);
-        await interaction.update(buildManagePayload(client, interaction.guild.id, {
-            panel: MANAGE_PANEL_AUTOMOD,
-            automodDraft: draft,
-            notice: 'Updated role filters.'
-        }));
+        await interaction.update({
+            content: 'Updated role filters.',
+            ...buildAutomodRoleFiltersPayload(draft)
+        });
         return true;
     },
     async handleModalSubmit({ client, interaction }) {
         if (!interaction.customId.startsWith(MANAGE_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_MODSTATS_MODAL_PREFIX)
-            && !interaction.customId.startsWith(MANAGE_AUTOMOD_MODAL_PREFIX)) return false;
+            && !interaction.customId.startsWith(MANAGE_AUTOMOD_MODAL_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_AUTOMOD_CUSTOM_MODAL_PREFIX)) return false;
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        if (interaction.customId.startsWith(MANAGE_AUTOMOD_CUSTOM_MODAL_PREFIX)) {
+            const draftKey = getAutomodDraftKey(interaction.guild.id, interaction.user.id);
+            const draft = client.automodDrafts?.get(draftKey);
+            if (!draft) {
+                await interaction.reply({ content: 'No active automod draft found. Open Automod panel and create/edit a rule first.', ephemeral: true });
+                return true;
+            }
+
+            const customA = interaction.fields.getTextInputValue(MODAL_AUTOMOD_CUSTOM_A_ID).trim();
+            let customB = '';
+            try {
+                customB = interaction.fields.getTextInputValue(MODAL_AUTOMOD_CUSTOM_B_ID).trim();
+            } catch (_) {
+                customB = '';
+            }
+
+            const nextCustom = { ...(draft.custom || {}) };
+            const errors = [];
+
+            if (draft.type === 'mentions_cooldown') {
+                const maxMentions = parsePositiveIntInput(customA, 'Max Mentions', 1);
+                const windowSeconds = parsePositiveIntInput(customB, 'Window Seconds', 1);
+                if (maxMentions.error) errors.push(maxMentions.error);
+                if (windowSeconds.error) errors.push(windowSeconds.error);
+                if (!errors.length) {
+                    nextCustom.maxMentions = maxMentions.value;
+                    nextCustom.windowSeconds = windowSeconds.value;
+                }
+            } else if (draft.type === 'fast_message_spam') {
+                const maxMessages = parsePositiveIntInput(customA, 'Max Messages', 2);
+                const windowSeconds = parsePositiveIntInput(customB, 'Window Seconds', 1);
+                if (maxMessages.error) errors.push(maxMessages.error);
+                if (windowSeconds.error) errors.push(windowSeconds.error);
+                if (!errors.length) {
+                    nextCustom.maxMessages = maxMessages.value;
+                    nextCustom.windowSeconds = windowSeconds.value;
+                }
+            } else if (draft.type === 'anti_newline') {
+                const maxNewlines = parsePositiveIntInput(customA, 'Max Newlines', 1);
+                if (maxNewlines.error) errors.push(maxNewlines.error);
+                else nextCustom.maxNewlines = maxNewlines.value;
+            } else if (draft.type === 'character_count') {
+                const maxCharacters = parsePositiveIntInput(customA, 'Max Characters', 25);
+                if (maxCharacters.error) errors.push(maxCharacters.error);
+                else nextCustom.maxCharacters = maxCharacters.value;
+            } else if (draft.type === 'emoji_spam') {
+                const maxEmojis = parsePositiveIntInput(customA, 'Max Emojis', 1);
+                if (maxEmojis.error) errors.push(maxEmojis.error);
+                else nextCustom.maxEmojis = maxEmojis.value;
+            } else if (draft.type === 'word_blacklist') {
+                nextCustom.bannedWordsWildcard = customA
+                    ? customA.split(',').map(v => v.trim()).filter(Boolean)
+                    : [];
+                nextCustom.bannedWordsExact = customB
+                    ? customB.split(',').map(v => v.trim()).filter(Boolean)
+                    : [];
+            } else if (draft.type === 'anti_links') {
+                const deleteAllLinks = ['true', '1', 'yes', 'on'].includes(customA.toLowerCase());
+                nextCustom.deleteAllLinks = deleteAllLinks;
+                nextCustom.allowedLinks = customB
+                    ? customB.split(',').map(v => v.trim()).filter(Boolean)
+                    : [];
+            } else if (draft.type === 'invite_links') {
+                nextCustom.allowedInvites = customA
+                    ? customA.split(',').map(v => v.trim()).filter(Boolean)
+                    : [];
+            }
+
+            if (errors.length) {
+                await interaction.reply({ content: `Could not save custom settings:\n${errors.map(error => `- ${error}`).join('\n')}`, ephemeral: true });
+                return true;
+            }
+
+            draft.custom = sanitizeCustomByType(draft.type, nextCustom);
+            client.automodDrafts.set(draftKey, draft);
+
+            await interaction.reply({
+                ...buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_AUTOMOD,
+                    automodDraft: draft,
+                    notice: 'Updated custom settings.'
+                }),
+                ephemeral: true
+            });
             return true;
         }
 
@@ -1752,31 +1995,14 @@ module.exports = {
                 return true;
             }
 
+            const nameField = interaction.fields.getTextInputValue(MODAL_AUTOMOD_NAME_INPUT_ID).trim();
             const triggerField = interaction.fields.getTextInputValue(MODAL_AUTOMOD_TRIGGER_INPUT_ID).trim();
             const actionField = interaction.fields.getTextInputValue(MODAL_AUTOMOD_ACTION_INPUT_ID).trim().toLowerCase();
             const timeoutField = (interaction.fields.getTextInputValue(MODAL_AUTOMOD_TIMEOUT_INPUT_ID) || '').trim();
-            const customField = (interaction.fields.getTextInputValue(MODAL_AUTOMOD_CUSTOM_INPUT_ID) || '').trim();
 
-            const triggerParts = triggerField.split('|').map(part => part.trim());
-            if (triggerParts.length < 3) {
-                await interaction.reply({
-                    content: 'First field must use this format: name|type|trigger (example: Mentions Cooldown|mentions_cooldown|)',
-                    ephemeral: true
-                });
-                return true;
-            }
-
-            const name = triggerParts[0] || draft.name;
-            const type = triggerParts[1] || draft.type;
-            const trigger = triggerParts.slice(2).join('|').trim();
-
-            if (!AUTOMOD_TYPE_ORDER.includes(type)) {
-                await interaction.reply({
-                    content: `Unknown rule type: ${type}. Valid types: ${AUTOMOD_TYPE_ORDER.join(', ')}`,
-                    ephemeral: true
-                });
-                return true;
-            }
+            const name = nameField || draft.name;
+            const type = draft.type;
+            const trigger = triggerField;
 
             const parsed = parseAutomodActionsInput(actionField);
             if (parsed.invalid.length) {
@@ -1799,19 +2025,13 @@ module.exports = {
                 return true;
             }
 
-            const { custom, errors } = parseAutomodCustomInput(customField, type, draft.custom);
-            if (errors.length) {
-                await interaction.reply({ content: `Could not save custom settings:\n${errors.slice(0, 6).map(e => `- ${e}`).join('\n')}`, ephemeral: true });
-                return true;
-            }
-
             draft.name = name;
             draft.type = type;
             draft.trigger = trigger;
             draft.actions = parsedActions;
             draft.action = parsedActions[0];
             draft.timeoutDuration = timeoutDuration;
-            draft.custom = custom;
+            draft.custom = sanitizeCustomByType(draft.type, draft.custom);
             client.automodDrafts.set(draftKey, draft);
 
             await interaction.reply({
