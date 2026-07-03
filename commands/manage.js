@@ -1380,10 +1380,18 @@ module.exports = {
         }
 
         if (interaction.customId === MANAGE_AUTOMOD_DRAFT_BACK_ID) {
-            if (client.automodDrafts) client.automodDrafts.delete(automodDraftKey);
-            await interaction.update(buildManagePayload(client, interaction.guild.id, {
-                panel: MANAGE_PANEL_AUTOMOD
-            }));
+            const draft = getDraft();
+            if (draft) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_AUTOMOD,
+                    automodDraft: draft,
+                    notice: 'Returned to automod editor.'
+                }));
+            } else {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_AUTOMOD
+                }));
+            }
             return true;
         }
 
