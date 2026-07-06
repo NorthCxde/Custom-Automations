@@ -153,9 +153,7 @@ function buildCanceledEmbed(reminder) {
 function parseTargets(raw, interaction) {
     const text = String(raw || '').trim();
     if (!text) {
-        if (interaction.guildId && interaction.channelId) {
-            return [{ kind: 'channel', id: interaction.channelId }];
-        }
+        // Default to a private reminder unless explicit channel/user mentions are provided.
         return [{ kind: 'user', id: interaction.user.id }];
     }
 
