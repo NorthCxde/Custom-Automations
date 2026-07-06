@@ -33,7 +33,7 @@ module.exports = {
 
         await interaction.deferReply({ ephemeral: true });
 
-        const { slashData, results } = await client.syncSlashCommands({ guildIds });
+        const { slashData, globalSlashData, guildSlashData, globalResult, results } = await client.syncSlashCommands({ guildIds });
         const successLines = results
             .filter(result => result.success)
             .map(result => `- ${result.guildName}: synced ${result.count} command(s)`);
@@ -43,6 +43,9 @@ module.exports = {
 
         const parts = [
             `Re-synced ${slashData.length} slash command(s).`,
+            `Global commands: ${globalSlashData.length ? globalSlashData.map(cmd => `/${cmd.name}`).join(', ') : 'none'}`,
+            `Guild commands: ${guildSlashData.length ? guildSlashData.map(cmd => `/${cmd.name}`).join(', ') : 'none'}`,
+            `Global sync: ${globalResult?.success ? `ok (${globalResult.count} command(s))` : `failed (${globalResult?.error || 'unknown error'})`}`,
             `Scope: ${shouldSyncAll ? 'all guilds' : 'current guild'}`,
             `Commands: ${slashData.map(cmd => `/${cmd.name}`).join(', ')}`
         ];

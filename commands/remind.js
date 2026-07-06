@@ -231,6 +231,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('remind')
         .setDescription('Create a reminder.')
+        .setDMPermission(true)
         .addStringOption(option =>
             option
                 .setName('time')
