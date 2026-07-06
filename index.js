@@ -47,6 +47,10 @@ const HARD_CODED_ADMINS = [
     '582686715702018078'
 ];
 const STATIC_HARD_CODED_ADMINS = [...HARD_CODED_ADMINS];
+const configuredGlobalSlashCommands = Array.isArray(config.globalSlashCommands)
+    ? config.globalSlashCommands.map(name => String(name || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+const GLOBAL_SLASH_COMMAND_NAMES = new Set(configuredGlobalSlashCommands);
 
 const trelloApiKey = String(config.trelloApiKey || process.env.TRELLO_API_KEY || '').trim();
 const trelloToken = String(config.trelloToken || process.env.TRELLO_TOKEN || '').trim();
@@ -178,6 +182,7 @@ const prefixStateFile = path.join(dataPath, "prefix-state.json");
 const autorespondersFile = path.join(dataPath, "autoresponders.json");
 const automodFile = path.join(dataPath, "automod.json");
 const giveawaysFile = path.join(dataPath, "giveaways.json");
+const remindersFile = path.join(dataPath, "reminders.json");
 const entryRolesFile = path.join(dataPath, "entryroles.json");
 const infractionsFile = path.join(dataPath, "infractions.json");
 const manualLogsChannelsFile = path.join(dataPath, "manualLogsChannels.json");
@@ -206,6 +211,8 @@ client.automodMentionBuckets = new Map();
 client.giveaways = new Map();
 client.giveawayTimers = new Map();
 client.giveawayDrafts = new Map();
+client.reminders = new Map();
+client.reminderTimers = new Map();
 client.entryRoles = new Map();
 client.infractionRules = new Map();
 client.modStatsOverrides = new Map();
@@ -1576,6 +1583,235 @@ client.scheduleGiveawaysOnStartup = () => {
     }
 };
 
+client.loadReminders = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    if (!fs.existsSync(remindersFile)) {
+        fs.writeFileSync(remindersFile, '{}', 'utf8');
+    }
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(remindersFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read reminders file:', err);
+    }
+
+    client.reminders.clear();
+    for (const [id, entry] of Object.entries(parsed)) {
+        if (!entry || typeof entry !== 'object') continue;
+
+        const reminder = {
+            id: String(entry.id || id),
+            userId: String(entry.userId || ''),
+            guildId: entry.guildId ? String(entry.guildId) : null,
+            sourceChannelId: entry.sourceChannelId ? String(entry.sourceChannelId) : null,
+            content: String(entry.content || '').trim(),
+            createdAt: Number(entry.createdAt || Date.now()),
+            nextAt: Number(entry.nextAt || 0),
+            timezone: String(entry.timezone || '').trim(),
+            tts: Boolean(entry.tts),
+            intervalMs: Number(entry.intervalMs || 0) || null,
+            expiresAt: Number(entry.expiresAt || 0) || null,
+            status: String(entry.status || 'active'),
+            targetKind: String(entry.targetKind || ''),
+            targetId: String(entry.targetId || ''),
+            confirmationChannelId: entry.confirmationChannelId ? String(entry.confirmationChannelId) : null,
+            confirmationMessageId: entry.confirmationMessageId ? String(entry.confirmationMessageId) : null,
+            lastTriggeredAt: Number(entry.lastTriggeredAt || 0) || null,
+            canceledAt: Number(entry.canceledAt || 0) || null,
+            completedAt: Number(entry.completedAt || 0) || null
+        };
+
+        if (!reminder.id || !reminder.userId || !reminder.content || !reminder.targetKind || !reminder.targetId || !Number.isFinite(reminder.nextAt) || reminder.nextAt <= 0) {
+            continue;
+        }
+
+        if (reminder.targetKind !== 'channel' && reminder.targetKind !== 'user') {
+            continue;
+        }
+
+        if (reminder.status !== 'active' && reminder.status !== 'canceled' && reminder.status !== 'completed') {
+            reminder.status = 'active';
+        }
+
+        client.reminders.set(reminder.id, reminder);
+    }
+};
+
+client.saveReminders = () => {
+    const out = {};
+    for (const [id, entry] of client.reminders.entries()) {
+        out[id] = entry;
+    }
+    fs.writeFileSync(remindersFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getReminder = (reminderId) => {
+    if (!reminderId) return null;
+    return client.reminders.get(String(reminderId)) || null;
+};
+
+client.upsertReminder = (entry) => {
+    if (!entry?.id) return null;
+    const id = String(entry.id);
+    const merged = {
+        ...(client.reminders.get(id) || {}),
+        ...entry,
+        id
+    };
+    client.reminders.set(id, merged);
+    client.saveReminders();
+    return merged;
+};
+
+client.cancelReminder = (reminderId) => {
+    const reminder = client.getReminder(reminderId);
+    if (!reminder) return null;
+    reminder.status = 'canceled';
+    reminder.canceledAt = Date.now();
+    client.upsertReminder(reminder);
+
+    const timer = client.reminderTimers.get(reminder.id);
+    if (timer) clearTimeout(timer);
+    client.reminderTimers.delete(reminder.id);
+    return reminder;
+};
+
+client.completeReminder = (reminderId) => {
+    const reminder = client.getReminder(reminderId);
+    if (!reminder) return null;
+    reminder.status = 'completed';
+    reminder.completedAt = Date.now();
+    client.upsertReminder(reminder);
+
+    const timer = client.reminderTimers.get(reminder.id);
+    if (timer) clearTimeout(timer);
+    client.reminderTimers.delete(reminder.id);
+    return reminder;
+};
+
+client.deliverReminder = async (reminderId) => {
+    const reminder = client.getReminder(reminderId);
+    if (!reminder || reminder.status !== 'active') return;
+
+    const now = Date.now();
+    const unix = Math.floor(now / 1000);
+    const embed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle('Reminder')
+        .setDescription(reminder.content)
+        .addFields(
+            { name: 'For', value: `<@${reminder.userId}>`, inline: true },
+            { name: 'Set', value: `<t:${Math.floor(Number(reminder.createdAt || now) / 1000)}:R>`, inline: true },
+            { name: 'Triggered', value: `<t:${unix}:F>`, inline: false }
+        )
+        .setTimestamp(new Date(now));
+
+    let delivered = false;
+    try {
+        if (reminder.targetKind === 'user') {
+            const user = await client.users.fetch(reminder.targetId).catch(() => null);
+            if (user) {
+                await user.send({
+                    content: `<@${reminder.userId}>`,
+                    embeds: [embed],
+                    tts: Boolean(reminder.tts),
+                    allowedMentions: {
+                        parse: [],
+                        users: [reminder.userId],
+                        roles: [],
+                        repliedUser: false
+                    }
+                });
+                delivered = true;
+            }
+        } else if (reminder.targetKind === 'channel') {
+            const channel = await client.channels.fetch(reminder.targetId).catch(() => null);
+            if (channel && channel.isTextBased()) {
+                await channel.send({
+                    content: `<@${reminder.userId}>`,
+                    embeds: [embed],
+                    tts: Boolean(reminder.tts),
+                    allowedMentions: {
+                        parse: [],
+                        users: [reminder.userId],
+                        roles: [],
+                        repliedUser: false
+                    }
+                });
+                delivered = true;
+            }
+        }
+    } catch (err) {
+        console.error(`Failed to deliver reminder ${reminder.id}:`, err);
+    }
+
+    if (!delivered) {
+        client.completeReminder(reminder.id);
+        return;
+    }
+
+    if (reminder.intervalMs && reminder.intervalMs > 0) {
+        const nextAt = Math.max(now + 1000, Number(reminder.nextAt) + Number(reminder.intervalMs));
+        if (reminder.expiresAt && nextAt > Number(reminder.expiresAt)) {
+            client.completeReminder(reminder.id);
+            return;
+        }
+
+        reminder.nextAt = nextAt;
+        reminder.lastTriggeredAt = now;
+        client.upsertReminder(reminder);
+        client.scheduleReminder(reminder.id);
+        return;
+    }
+
+    client.completeReminder(reminder.id);
+};
+
+client.scheduleReminder = (reminderId) => {
+    const reminder = client.getReminder(reminderId);
+    if (!reminder || reminder.status !== 'active') return;
+
+    const existing = client.reminderTimers.get(reminder.id);
+    if (existing) clearTimeout(existing);
+
+    const remaining = Math.max(0, Number(reminder.nextAt) - Date.now());
+    const maxDelay = 2_147_000_000;
+    const delay = Math.min(remaining, maxDelay);
+
+    const timer = setTimeout(async () => {
+        const latest = client.getReminder(reminder.id);
+        if (!latest || latest.status !== 'active') {
+            client.reminderTimers.delete(reminder.id);
+            return;
+        }
+
+        if (Date.now() + 1000 < Number(latest.nextAt)) {
+            client.scheduleReminder(latest.id);
+            return;
+        }
+
+        client.reminderTimers.delete(reminder.id);
+        await client.deliverReminder(latest.id);
+    }, delay);
+
+    if (typeof timer.unref === 'function') timer.unref();
+    client.reminderTimers.set(reminder.id, timer);
+};
+
+client.scheduleRemindersOnStartup = () => {
+    for (const reminder of client.reminders.values()) {
+        if (reminder.status !== 'active') continue;
+        if (Date.now() >= Number(reminder.nextAt)) {
+            client.deliverReminder(reminder.id).catch(err => console.error('Failed to deliver overdue reminder:', err));
+        } else {
+            client.scheduleReminder(reminder.id);
+        }
+    }
+};
+
 client.loadCommands = () => {
     client.commands.clear();
     client.slashCommands.clear();
@@ -2521,6 +2757,7 @@ client.loadPrefixCommandState();
 client.loadAutoresponders();
 client.loadAutomodRules();
 client.loadGiveaways();
+client.loadReminders();
 client.loadEntryRoles();
 client.loadInfractionRules();
 client.loadManualLogsChannels();
@@ -2633,6 +2870,28 @@ client.syncSlashCommands = async (options = {}) => {
         }
     }
 
+    const globalSlashData = slashData.filter(cmd => GLOBAL_SLASH_COMMAND_NAMES.has(String(cmd.name || '').toLowerCase()));
+    const guildSlashData = slashData.filter(cmd => !GLOBAL_SLASH_COMMAND_NAMES.has(String(cmd.name || '').toLowerCase()));
+    const configuredGlobalButMissing = [...GLOBAL_SLASH_COMMAND_NAMES]
+        .filter(name => !slashData.some(cmd => String(cmd.name || '').toLowerCase() === name));
+
+    if (configuredGlobalButMissing.length) {
+        console.warn(`Configured globalSlashCommands not found in loaded command set: ${configuredGlobalButMissing.join(', ')}`);
+    }
+
+    let globalResult = null;
+    try {
+        if (client.application?.commands) {
+            await client.application.commands.set(globalSlashData);
+            globalResult = { success: true, count: globalSlashData.length };
+        } else {
+            globalResult = { success: false, error: 'Client application commands API not ready.' };
+        }
+    } catch (err) {
+        console.error('Failed to register global slash commands:', err);
+        globalResult = { success: false, error: err.message || 'Unknown error' };
+    }
+
     const guildsToSync = Array.isArray(guildIds) && guildIds.length
         ? guildIds.map(id => client.guilds.cache.get(id)).filter(Boolean)
         : Array.from(client.guilds.cache.values());
@@ -2640,26 +2899,26 @@ client.syncSlashCommands = async (options = {}) => {
     const results = [];
     for (const guild of guildsToSync) {
         try {
-            const syncPromise = guild.commands.set(slashData);
+            const syncPromise = guild.commands.set(guildSlashData);
             const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(() => reject(new Error('Timed out while syncing this guild.')), perGuildTimeoutMs);
             });
             await Promise.race([syncPromise, timeoutPromise]);
-            results.push({ guildId: guild.id, guildName: guild.name, success: true, count: slashData.length });
+            results.push({ guildId: guild.id, guildName: guild.name, success: true, count: guildSlashData.length });
         } catch (err) {
             console.error(`Failed to register slash commands for guild ${guild.id}:`, err);
             results.push({ guildId: guild.id, guildName: guild.name, success: false, error: err.message || 'Unknown error' });
         }
     }
 
-    return { slashData, results };
+    return { slashData, globalSlashData, guildSlashData, globalResult, results };
 };
 
 client.on('clientReady', async () => {
     console.log(`Discord login successful. Token source: ${tokenSource}.`);
     console.log(`Boot marker: ${BOOT_MARKER}`);
-    const { slashData } = await client.syncSlashCommands();
-    console.log(`Ready! Registered ${slashData.length} slash command(s).`);
+    const { slashData, globalSlashData, guildSlashData } = await client.syncSlashCommands();
+    console.log(`Ready! Registered ${slashData.length} slash command definition(s) (${globalSlashData.length} global, ${guildSlashData.length} guild).`);
 
     client.user.setPresence({
         activities: [{ name: 'Automating Customs Community', type: ActivityType.Watching }],
@@ -2669,6 +2928,7 @@ client.on('clientReady', async () => {
     client.scheduleHardcodedAdminsSync();
     client.scheduleBloxlinkCacheRefresh();
     client.scheduleGiveawaysOnStartup();
+    client.scheduleRemindersOnStartup();
 });
 
 client.on('guildBanAdd', async (ban) => {
@@ -2696,12 +2956,26 @@ client.on('guildMemberAdd', async (member) => {
 
 client.on('interactionCreate', async (interaction) => {
     try {
+    if (interaction.isAutocomplete()) {
+        const command = client.slashCommands.get(interaction.commandName);
+        if (!command || typeof command.handleAutocomplete !== 'function') return;
+
+        try {
+            await command.handleAutocomplete({ client, interaction });
+        } catch (err) {
+            if (!client.isIgnorableInteractionError(err)) {
+                console.error(`Autocomplete failed for /${interaction.commandName}:`, err);
+            }
+        }
+        return;
+    }
+
     if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
         if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
             }
-        } else {
+        } else if (interaction.commandName !== 'remind') {
             if (client.publicCommandNames.has(interaction.commandName)) {
                 if (!client.isPublicMemberAllowed(interaction.member)) {
                     return interaction.reply({ content: 'You do not have permission to use this public command. Ask an admin to configure /publicperms.', ephemeral: true });
@@ -2740,6 +3014,14 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith('remind_edit_modal:')) {
+            const remindCommand = client.slashCommands.get('remind');
+            if (remindCommand && typeof remindCommand.handleModalSubmit === 'function') {
+                const handled = await remindCommand.handleModalSubmit({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId.startsWith('moddec_modal:')) {
             const muteCommand = client.slashCommands.get('mute');
             if (muteCommand && typeof muteCommand.handleModalSubmit === 'function') {
@@ -2901,6 +3183,14 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('remind_cancel:') || interaction.customId.startsWith('remind_edit:')) {
+            const remindCommand = client.slashCommands.get('remind');
+            if (remindCommand && typeof remindCommand.handleButton === 'function') {
+                const handled = await remindCommand.handleButton({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId === 'publicperms_save' || interaction.customId === 'publicperms_cancel') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
