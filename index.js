@@ -2880,8 +2880,18 @@ client.logInviteJoin = async (member, source, stats) => {
         .setThumbnail(member.user.displayAvatarURL({ extension: 'png', size: 256 }))
         .setTimestamp();
 
+    const components = [];
+    if (source.type === 'user_invite' && source.invite?.code) {
+        const revokeButton = new ButtonBuilder()
+            .setCustomId(`invite_revoke:${source.invite.code}`)
+            .setLabel('Revoke Invite')
+            .setStyle(ButtonStyle.Danger);
+        components.push(new ActionRowBuilder().addComponents(revokeButton));
+    }
+
     await channel.send({
         embeds: [embed],
+        components,
         allowedMentions: {
             parse: [],
             users: [member.id, source.invite?.inviterId].filter(Boolean),
@@ -3533,6 +3543,48 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('invite_revoke:')) {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            }
+
+            if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
+            }
+
+            const inviteCode = interaction.customId.split(':')[1];
+            if (!inviteCode) {
+                return interaction.reply({ content: 'Invite code is missing on this button.', ephemeral: true });
+            }
+
+            if (!interaction.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+                return interaction.reply({ content: 'I need Manage Server permission to revoke invites.', ephemeral: true });
+            }
+
+            try {
+                const invite = await interaction.guild.invites.fetch(inviteCode).catch(() => null);
+                if (!invite) {
+                    return interaction.reply({ content: `Invite \`${inviteCode}\` is already gone or inaccessible.`, ephemeral: true });
+                }
+
+                await invite.delete(`Revoked by ${interaction.user.tag} (${interaction.user.id}) from invite tracker log button`);
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`invite_revoke_done:${inviteCode}`)
+                        .setLabel('Invite Revoked')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(true)
+                );
+
+                await interaction.update({ components: [row] });
+                return interaction.followUp({ content: `Revoked invite \`${inviteCode}\`.`, ephemeral: true });
+            } catch (err) {
+                console.error(`Failed to revoke invite ${inviteCode}:`, err);
+                return interaction.reply({ content: `Failed to revoke invite \`${inviteCode}\`.`, ephemeral: true });
+            }
+        }
+
         if (interaction.customId.startsWith('remind_cancel:') || interaction.customId.startsWith('remind_edit:')) {
             const remindCommand = client.slashCommands.get('remind');
             if (remindCommand && typeof remindCommand.handleButton === 'function') {
