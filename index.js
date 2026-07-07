@@ -225,6 +225,7 @@ client.inviteLogChannels = new Map();
 client.inviteMemberStats = new Map();
 client.inviteCacheByGuild = new Map();
 client.vanityUsesByGuild = new Map();
+client.recentDeletedInvitesByGuild = new Map();
 client.revokedInvites = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
@@ -2805,6 +2806,7 @@ client.refreshInviteCacheForGuild = async (guild) => {
                 {
                     code: invite.code,
                     uses: Number(invite.uses || 0),
+                    maxUses: Number(invite.maxUses || 0) || 0,
                     inviterId: invite.inviterId || null,
                     inviterTag: invite.inviter?.tag || null
                 }
@@ -2835,43 +2837,73 @@ client.resolveMemberJoinSource = async (member) => {
     const guild = member.guild;
     const guildId = guild.id;
 
-    const previousInvites = client.inviteCacheByGuild.get(guildId) || new Map();
-    const previousVanityUses = Number(client.vanityUsesByGuild.get(guildId) || 0);
-
-    await client.refreshInviteCacheForGuild(guild);
-
-    const currentInvites = client.inviteCacheByGuild.get(guildId) || new Map();
-    const currentVanityUses = Number(client.vanityUsesByGuild.get(guildId) || 0);
-
     if (member.user.bot) {
         return { type: 'bot', invite: null, vanityCode: guild.vanityURLCode || null };
     }
 
-    if (currentVanityUses > previousVanityUses) {
-        return {
-            type: 'vanity',
-            invite: null,
-            vanityCode: guild.vanityURLCode || null
-        };
-    }
+    // Retry a few times because invite usage updates and invite-delete events can lag behind memberAdd.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const previousInvites = client.inviteCacheByGuild.get(guildId) || new Map();
+        const previousVanityUses = Number(client.vanityUsesByGuild.get(guildId) || 0);
 
-    let matchedInvite = null;
-    for (const [code, current] of currentInvites.entries()) {
-        const previousUses = Number(previousInvites.get(code)?.uses || 0);
-        const currentUses = Number(current?.uses || 0);
-        if (currentUses > previousUses) {
-            matchedInvite = {
-                code,
-                uses: currentUses,
-                inviterId: current?.inviterId || null,
-                inviterTag: current?.inviterTag || null
+        await client.refreshInviteCacheForGuild(guild);
+
+        const currentInvites = client.inviteCacheByGuild.get(guildId) || new Map();
+        const currentVanityUses = Number(client.vanityUsesByGuild.get(guildId) || 0);
+
+        if (currentVanityUses > previousVanityUses) {
+            return {
+                type: 'vanity',
+                invite: null,
+                vanityCode: guild.vanityURLCode || null
             };
-            break;
+        }
+
+        let matchedInvite = null;
+        for (const [code, current] of currentInvites.entries()) {
+            const previousUses = Number(previousInvites.get(code)?.uses || 0);
+            const currentUses = Number(current?.uses || 0);
+            if (currentUses > previousUses) {
+                matchedInvite = {
+                    code,
+                    uses: currentUses,
+                    inviterId: current?.inviterId || null,
+                    inviterTag: current?.inviterTag || null
+                };
+                break;
+            }
+        }
+
+        if (matchedInvite) {
+            return { type: 'user_invite', invite: matchedInvite, vanityCode: guild.vanityURLCode || null };
+        }
+
+        if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 1200));
         }
     }
 
-    if (matchedInvite) {
-        return { type: 'user_invite', invite: matchedInvite, vanityCode: guild.vanityURLCode || null };
+    const recentlyDeleted = (client.recentDeletedInvitesByGuild.get(guildId) || [])
+        .filter(entry => (Date.now() - Number(entry.deletedAt || 0)) <= 20_000)
+        .sort((a, b) => Number(b.deletedAt || 0) - Number(a.deletedAt || 0));
+
+    const inferredDeleted = recentlyDeleted.find(entry => {
+        const maxUses = Number(entry.maxUses || 0);
+        if (maxUses <= 0) return true;
+        return Number(entry.uses || 0) >= maxUses;
+    });
+
+    if (inferredDeleted) {
+        return {
+            type: 'user_invite',
+            invite: {
+                code: inferredDeleted.code,
+                uses: Number(inferredDeleted.uses || 0),
+                inviterId: inferredDeleted.inviterId || null,
+                inviterTag: inferredDeleted.inviterTag || null
+            },
+            vanityCode: guild.vanityURLCode || null
+        };
     }
 
     return { type: 'unknown', invite: null, vanityCode: guild.vanityURLCode || null };
@@ -3383,6 +3415,7 @@ client.on('inviteCreate', async (invite) => {
     existing.set(invite.code, {
         code: invite.code,
         uses: Number(invite.uses || 0),
+        maxUses: Number(invite.maxUses || 0) || 0,
         inviterId: invite.inviterId || null,
         inviterTag: invite.inviter?.tag || null
     });
@@ -3394,6 +3427,19 @@ client.on('inviteDelete', async (invite) => {
     if (!guildId) return;
 
     const existing = client.inviteCacheByGuild.get(guildId);
+    const cachedInvite = existing?.get(invite.code) || null;
+
+    const deletedList = client.recentDeletedInvitesByGuild.get(guildId) || [];
+    deletedList.unshift({
+        code: invite.code,
+        uses: Number(invite.uses || cachedInvite?.uses || 0),
+        maxUses: Number(invite.maxUses || cachedInvite?.maxUses || 0) || 0,
+        inviterId: invite.inviterId || cachedInvite?.inviterId || null,
+        inviterTag: invite.inviter?.tag || cachedInvite?.inviterTag || null,
+        deletedAt: Date.now()
+    });
+    client.recentDeletedInvitesByGuild.set(guildId, deletedList.slice(0, 50));
+
     if (!existing) return;
     existing.delete(invite.code);
 });
