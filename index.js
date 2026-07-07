@@ -2808,8 +2808,31 @@ client.logInviteJoin = async (member, source, stats) => {
     }
     if (!channel || !channel.isTextBased()) return;
 
-    const createdUnix = Math.floor(member.user.createdTimestamp / 1000);
-    const joinedUnix = Math.floor((member.joinedTimestamp || Date.now()) / 1000);
+    const createdTs = Number(member.user.createdTimestamp || Date.now());
+    const joinedTs = Number(member.joinedTimestamp || Date.now());
+    const staffEmoji = '<:Staff:1518753622618407062>';
+    const wrap = (value) => `\`${String(value || '').replace(/`/g, "'")}\``;
+    const formatAbsolute = (timestamp) => new Date(timestamp).toLocaleString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+    const formatRelative = (timestamp) => {
+        const diffMs = Math.max(0, Date.now() - Number(timestamp || Date.now()));
+        const minutes = Math.floor(diffMs / 60_000);
+        if (minutes < 1) return 'just now';
+        if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+        const days = Math.floor(hours / 24);
+        if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+        const months = Math.floor(days / 30);
+        if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`;
+        const years = Math.floor(months / 12);
+        return `${years} year${years === 1 ? '' : 's'} ago`;
+    };
 
     let title = 'Invite Tracked (Unknown Invite)';
     let color = 0xF23F43;
@@ -2819,39 +2842,39 @@ client.logInviteJoin = async (member, source, stats) => {
         title = 'Invite Tracked (Vanity Invite)';
         color = 0x57F287;
         const vanityCode = source.vanityCode ? `/${source.vanityCode}` : '/vanity';
-        description = `<@${member.id}> joined using a vanity invite. (${vanityCode})`;
+        description = `<@${member.id}> joined using a ${wrap('vanity')} invite. (${wrap(vanityCode)})`;
     } else if (source.type === 'user_invite') {
         title = 'Invite Tracked (User Invite)';
         color = 0x57F287;
         const inviterText = source.invite?.inviterId ? `<@${source.invite.inviterId}>` : 'an unknown inviter';
         const uses = Number(source.invite?.uses || 0);
-        description = `<@${member.id}> has been invited by ${inviterText} and has now ${uses} invites.`;
+        description = `<@${member.id}> has been invited by ${inviterText} and has now ${wrap(uses)} invites.`;
     } else if (source.type === 'bot') {
         title = 'Invite Tracked (Bot Invite)';
         color = 0x1F2328;
-        description = `<@${member.id}> joined using OAuth.`;
+        description = `<@${member.id}> joined using ${wrap('OAuth')}.`;
     }
 
     const lines = [
         description,
         '',
-        `**User ID:** ${member.id}`,
-        `**Username:** ${member.user.username}`,
-        `**Account Created:** <t:${createdUnix}:R> | <t:${createdUnix}:F>`,
-        `**Joined Server:** <t:${joinedUnix}:R> | <t:${joinedUnix}:F>`,
-        `**Times Joined:** ${Number(stats?.joins || 0)}`,
-        `**Times Left:** ${Number(stats?.leaves || 0)}`
+        `**User ID:** ${wrap(member.id)}`,
+        `**Username:** ${wrap(member.user.username)}`,
+        `**Account Created:** ${wrap(formatRelative(createdTs))} | ${wrap(formatAbsolute(createdTs))}`,
+        `**Joined Server:** ${wrap(formatRelative(joinedTs))} | ${wrap(formatAbsolute(joinedTs))}`,
+        `**Times Joined:** ${wrap(Number(stats?.joins || 0))}`,
+        `**Times Left:** ${wrap(Number(stats?.leaves || 0))}`
     ];
 
     if (source.type === 'user_invite' && source.invite?.code) {
         lines.push('');
-        lines.push(`**Invite:** ${source.invite.code}`);
-        lines.push(`**Uses:** ${Number(source.invite.uses || 0)}`);
+        lines.push(`**Invite:** ${wrap(source.invite.code)}`);
+        lines.push(`**Uses:** ${wrap(Number(source.invite.uses || 0))}`);
     }
 
     const embed = new EmbedBuilder()
         .setColor(color)
-        .setTitle(source.type === 'unknown' ? `⚠️ ${title}` : `🛠️ ${title}`)
+        .setTitle(`${staffEmoji} ${title}`)
         .setDescription(lines.join('\n'))
         .setThumbnail(member.user.displayAvatarURL({ extension: 'png', size: 256 }))
         .setTimestamp();
