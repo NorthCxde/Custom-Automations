@@ -2906,7 +2906,7 @@ client.resolveMemberJoinSource = async (member) => {
         };
     }
 
-    return { type: 'unknown', invite: null, vanityCode: guild.vanityURLCode || null };
+    return { type: 'possible_external', invite: null, vanityCode: guild.vanityURLCode || null };
 };
 
 client.buildInviteLogPayload = (member, source, stats) => {
@@ -2940,9 +2940,9 @@ client.buildInviteLogPayload = (member, source, stats) => {
     };
     const fieldLine = (label, value) => `**${label}:** ${wrap(value)}`;
 
-    let title = 'Invite Tracked (Unknown Invite)';
+    let title = 'Invite Tracked (Possible Discovery/External)';
     let color = 0xF23F43;
-    let description = `I can not figure out how <@${member.id}> joined the server.`;
+    let description = `I could not detect an invite or vanity delta for <@${member.id}>. This is usually a Server Discovery or external join flow.`;
 
     if (source.type === 'vanity') {
         title = 'Invite Tracked (Vanity Invite)';
@@ -2959,6 +2959,10 @@ client.buildInviteLogPayload = (member, source, stats) => {
         title = 'Invite Tracked (Bot Invite)';
         color = 0x1F2328;
         description = `<@${member.id}> joined using ${wrap('OAuth')}.`;
+    } else if (source.type === 'unknown') {
+        title = 'Invite Tracked (Unknown Invite)';
+        color = 0xF23F43;
+        description = `I can not figure out how <@${member.id}> joined the server.`;
     }
 
     const lines = [
@@ -3379,11 +3383,11 @@ client.on('guildMemberAdd', async (member) => {
         const source = await client.resolveMemberJoinSource(member);
         const sentMessage = await client.logInviteJoin(member, source, stats);
 
-        if (source.type === 'unknown' && sentMessage) {
+        if ((source.type === 'unknown' || source.type === 'possible_external') && sentMessage) {
             const retryTimer = setTimeout(async () => {
                 try {
                     const refreshedSource = await client.resolveMemberJoinSource(member);
-                    if (!refreshedSource || refreshedSource.type === 'unknown') return;
+                    if (!refreshedSource || refreshedSource.type === 'unknown' || refreshedSource.type === 'possible_external') return;
 
                     const payload = client.buildInviteLogPayload(member, refreshedSource, stats);
                     await sentMessage.edit(payload).catch(() => null);
