@@ -189,6 +189,7 @@ const manualLogsChannelsFile = path.join(dataPath, "manualLogsChannels.json");
 const publicPermsFile = path.join(dataPath, "publicperms.json");
 const inviteLogsFile = path.join(dataPath, "invitelogs.json");
 const inviteMemberStatsFile = path.join(dataPath, "inviteMemberStats.json");
+const revokedInvitesFile = path.join(dataPath, "revokedInvites.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -224,6 +225,7 @@ client.inviteLogChannels = new Map();
 client.inviteMemberStats = new Map();
 client.inviteCacheByGuild = new Map();
 client.vanityUsesByGuild = new Map();
+client.revokedInvites = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.banStickerId = '1480253710969082108';
@@ -2683,6 +2685,84 @@ client.saveInviteMemberStats = () => {
     }
     fs.writeFileSync(inviteMemberStatsFile, JSON.stringify(out, null, 2), 'utf8');
 };
+client.loadRevokedInvites = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(revokedInvitesFile)) fs.writeFileSync(revokedInvitesFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(revokedInvitesFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read revoked invites file:', err);
+    }
+
+    client.revokedInvites.clear();
+    for (const [guildId, entries] of Object.entries(parsed)) {
+        const normalized = Array.isArray(entries)
+            ? entries
+                .filter(entry => entry && typeof entry === 'object')
+                .map(entry => ({
+                    id: String(entry.id || `rvk_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`),
+                    code: String(entry.code || '').trim(),
+                    revokedById: String(entry.revokedById || ''),
+                    revokedByTag: String(entry.revokedByTag || ''),
+                    inviterId: entry.inviterId ? String(entry.inviterId) : null,
+                    inviterTag: entry.inviterTag ? String(entry.inviterTag) : null,
+                    usesAtRevoke: Number(entry.usesAtRevoke || 0) || 0,
+                    revokedAt: String(entry.revokedAt || new Date().toISOString())
+                }))
+                .filter(entry => entry.code.length > 0)
+            : [];
+        client.revokedInvites.set(String(guildId), normalized);
+    }
+};
+
+client.saveRevokedInvites = () => {
+    const out = {};
+    for (const [guildId, entries] of client.revokedInvites.entries()) {
+        out[guildId] = entries;
+    }
+    fs.writeFileSync(revokedInvitesFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getRevokedInvites = (guildId) => {
+    if (!guildId) return [];
+    return client.revokedInvites.get(String(guildId)) || [];
+};
+
+client.addRevokedInvite = (guildId, entry) => {
+    if (!guildId || !entry?.code) return null;
+    const existing = client.getRevokedInvites(guildId);
+    const id = String(entry.id || `rvk_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`);
+    const nextEntry = {
+        id,
+        code: String(entry.code).trim(),
+        revokedById: String(entry.revokedById || ''),
+        revokedByTag: String(entry.revokedByTag || ''),
+        inviterId: entry.inviterId ? String(entry.inviterId) : null,
+        inviterTag: entry.inviterTag ? String(entry.inviterTag) : null,
+        usesAtRevoke: Number(entry.usesAtRevoke || 0) || 0,
+        revokedAt: String(entry.revokedAt || new Date().toISOString())
+    };
+    client.revokedInvites.set(String(guildId), [nextEntry, ...existing].slice(0, 500));
+    client.saveRevokedInvites();
+    return nextEntry;
+};
+
+client.removeRevokedInvite = (guildId, entryId) => {
+    const existing = client.getRevokedInvites(guildId);
+    const next = existing.filter(item => item.id !== String(entryId));
+    const changed = next.length !== existing.length;
+    if (!changed) return false;
+    client.revokedInvites.set(String(guildId), next);
+    client.saveRevokedInvites();
+    return true;
+};
+
+client.clearRevokedInvites = (guildId) => {
+    client.revokedInvites.set(String(guildId), []);
+    client.saveRevokedInvites();
+};
 
 client.getInviteMemberStats = (guildId, userId) => {
     const guildMap = client.inviteMemberStats.get(String(guildId));
@@ -3071,6 +3151,7 @@ client.loadManualLogsChannels();
 client.loadPublicPermissions();
 client.loadInviteLogChannels();
 client.loadInviteMemberStats();
+client.loadRevokedInvites();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -3571,6 +3652,18 @@ client.on('interactionCreate', async (interaction) => {
                 }
 
                 await invite.delete(`Revoked by ${interaction.user.tag} (${interaction.user.id}) from invite tracker log button`);
+
+                if (typeof client.addRevokedInvite === 'function') {
+                    client.addRevokedInvite(interaction.guild.id, {
+                        code: invite.code,
+                        revokedById: interaction.user.id,
+                        revokedByTag: interaction.user.tag,
+                        inviterId: invite.inviterId || null,
+                        inviterTag: invite.inviter?.tag || null,
+                        usesAtRevoke: Number(invite.uses || 0),
+                        revokedAt: new Date().toISOString()
+                    });
+                }
 
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder()

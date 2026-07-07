@@ -40,6 +40,11 @@ const MANAGE_PANEL_RULES = 'rules';
 const MANAGE_PANEL_USER_INFRACTIONS = 'user_infractions';
 const MANAGE_PANEL_MODSTATS = 'modstats';
 const MANAGE_PANEL_AUTOMOD = 'automod';
+const MANAGE_PANEL_REVOKED_INVITES = 'revoked_invites';
+
+const MANAGE_REVOKED_INVITE_SELECT_ID = 'manage_revoked_invite_select';
+const MANAGE_REVOKED_INVITE_REMOVE_PREFIX = 'manage_revoked_invite_remove:';
+const MANAGE_REVOKED_INVITES_CLEAR_ID = 'manage_revoked_invites_clear';
 
 const MANAGE_AUTOMOD_RULE_SELECT_ID = 'manage_automod_rule_select';
 const MANAGE_AUTOMOD_CREATE_ID = 'manage_automod_create';
@@ -128,6 +133,12 @@ function buildPanelSelectRow(selectedPanel) {
                     value: MANAGE_PANEL_AUTOMOD,
                     description: 'Create and manage custom automod rules',
                     default: selectedPanel === MANAGE_PANEL_AUTOMOD
+                },
+                {
+                    label: 'Revoked Invites',
+                    value: MANAGE_PANEL_REVOKED_INVITES,
+                    description: 'Review and manage revoked invite history',
+                    default: selectedPanel === MANAGE_PANEL_REVOKED_INVITES
                 }
             ])
     );
@@ -488,6 +499,87 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
                     .setCustomId(MANAGE_MODSTATS_RESET_ALL_ID)
                     .setLabel('Reset All Modstats in Server')
                     .setStyle(ButtonStyle.Danger)
+            )
+        );
+    }
+
+    return {
+        content: notice || null,
+        embeds: [embed],
+        components
+    };
+}
+
+function buildRevokedInvitesPayload(client, guildId, selectedEntryId, notice) {
+    const entries = typeof client.getRevokedInvites === 'function'
+        ? client.getRevokedInvites(guildId)
+        : [];
+    const selected = selectedEntryId
+        ? entries.find(entry => entry.id === selectedEntryId)
+        : null;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Manage Panel - Revoked Invites')
+        .setDescription('View revoked invite history. Remove single entries or clear the whole history.')
+        .setTimestamp();
+
+    if (!entries.length) {
+        embed.addFields({ name: 'History', value: 'No revoked invites recorded yet.', inline: false });
+    } else {
+        const lines = entries.slice(0, 10).map((entry, index) => {
+            const when = entry.revokedAt ? `<t:${Math.floor(new Date(entry.revokedAt).getTime() / 1000)}:R>` : 'Unknown time';
+            const by = entry.revokedById ? `<@${entry.revokedById}>` : (entry.revokedByTag || 'Unknown admin');
+            return `${index + 1}. \`${entry.code}\` - by ${by} - ${when}`;
+        });
+
+        embed.addFields({ name: 'Recent Revoked Invites', value: lines.join('\n'), inline: false });
+    }
+
+    if (selected) {
+        embed.addFields({
+            name: 'Selected Entry',
+            value: [
+                `Code: \`${selected.code}\``,
+                `Revoked By: ${selected.revokedById ? `<@${selected.revokedById}>` : (selected.revokedByTag || 'Unknown')}`,
+                `Inviter: ${selected.inviterId ? `<@${selected.inviterId}>` : (selected.inviterTag || 'Unknown')}`,
+                `Uses At Revoke: ${Number(selected.usesAtRevoke || 0)}`,
+                selected.revokedAt ? `Revoked At: <t:${Math.floor(new Date(selected.revokedAt).getTime() / 1000)}:F>` : null
+            ].filter(Boolean).join('\n'),
+            inline: false
+        });
+    }
+
+    const components = [buildPanelSelectRow(MANAGE_PANEL_REVOKED_INVITES)];
+
+    if (entries.length) {
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId(MANAGE_REVOKED_INVITE_SELECT_ID)
+                    .setPlaceholder('Select a revoked invite entry')
+                    .setMinValues(1)
+                    .setMaxValues(1)
+                    .addOptions(entries.slice(0, 25).map((entry) => ({
+                        label: String(entry.code || 'unknown').slice(0, 100),
+                        value: entry.id,
+                        description: `By ${entry.revokedByTag || entry.revokedById || 'Unknown'} | Uses ${Number(entry.usesAtRevoke || 0)}`.slice(0, 100),
+                        default: entry.id === selectedEntryId
+                    })))
+            )
+        );
+
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(selected ? `${MANAGE_REVOKED_INVITE_REMOVE_PREFIX}${selected.id}` : `${MANAGE_REVOKED_INVITE_REMOVE_PREFIX}none`)
+                    .setLabel('Remove Selected')
+                    .setStyle(ButtonStyle.Danger)
+                    .setDisabled(!selected),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_REVOKED_INVITES_CLEAR_ID)
+                    .setLabel('Clear All')
+                    .setStyle(ButtonStyle.Secondary)
             )
         );
     }
@@ -1113,6 +1205,7 @@ function buildManagePayload(client, guildId, options = {}) {
         selectedCaseNumber,
         selectedModstatsUserId,
         selectedAutomodRuleId,
+        selectedRevokedInviteId,
         automodDraft,
         notice
     } = options;
@@ -1128,6 +1221,10 @@ function buildManagePayload(client, guildId, options = {}) {
     if (panel === MANAGE_PANEL_AUTOMOD) {
         if (automodDraft) return buildAutomodDraftPayload(automodDraft, notice);
         return buildAutomodListPayload(client, guildId, selectedAutomodRuleId, notice);
+    }
+
+    if (panel === MANAGE_PANEL_REVOKED_INVITES) {
+        return buildRevokedInvitesPayload(client, guildId, selectedRevokedInviteId, notice);
     }
 
     return buildRuleManagePayload(client, guildId, selectedRuleKey);
@@ -1154,6 +1251,7 @@ module.exports = {
         if (interaction.customId !== MANAGE_RULE_SELECT_ID
             && interaction.customId !== MANAGE_PANEL_SELECT_ID
             && interaction.customId !== MANAGE_AUTOMOD_RULE_SELECT_ID
+            && interaction.customId !== MANAGE_REVOKED_INVITE_SELECT_ID
             && !interaction.customId.startsWith(`${MANAGE_USER_CASE_SELECT_ID}:`)
             && !interaction.customId.startsWith(MANAGE_MODSTATS_EDIT_PERIOD_PREFIX)) {
             return false;
@@ -1288,6 +1386,11 @@ module.exports = {
                 return true;
             }
 
+            if (panel === MANAGE_PANEL_REVOKED_INVITES) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_REVOKED_INVITES }));
+                return true;
+            }
+
             const firstRule = RULE_CHOICES[0]?.value;
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_RULES,
@@ -1301,6 +1404,15 @@ module.exports = {
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_AUTOMOD,
                 selectedAutomodRuleId
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_REVOKED_INVITE_SELECT_ID) {
+            const selectedRevokedInviteId = interaction.values?.[0] || null;
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_REVOKED_INVITES,
+                selectedRevokedInviteId
             }));
             return true;
         }
@@ -1343,7 +1455,9 @@ module.exports = {
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_BACK_ID
             && !interaction.customId.startsWith(MANAGE_MODSTATS_EDIT_PREFIX)
             && !interaction.customId.startsWith(MANAGE_MODSTATS_RESET_USER_PREFIX)
-            && interaction.customId !== MANAGE_MODSTATS_RESET_ALL_ID) {
+            && interaction.customId !== MANAGE_MODSTATS_RESET_ALL_ID
+            && !interaction.customId.startsWith(MANAGE_REVOKED_INVITE_REMOVE_PREFIX)
+            && interaction.customId !== MANAGE_REVOKED_INVITES_CLEAR_ID) {
             return false;
         }
 
@@ -1358,6 +1472,41 @@ module.exports = {
             if (!client.automodDrafts) client.automodDrafts = new Map();
             client.automodDrafts.set(automodDraftKey, draft);
         };
+
+        if (interaction.customId.startsWith(MANAGE_REVOKED_INVITE_REMOVE_PREFIX)) {
+            const entryId = interaction.customId.slice(MANAGE_REVOKED_INVITE_REMOVE_PREFIX.length);
+            if (!entryId || entryId === 'none') {
+                await interaction.reply({ content: 'No revoked invite entry is selected.', ephemeral: true });
+                return true;
+            }
+
+            const removed = typeof client.removeRevokedInvite === 'function'
+                ? client.removeRevokedInvite(interaction.guild.id, entryId)
+                : false;
+
+            if (!removed) {
+                await interaction.reply({ content: 'That revoked invite entry no longer exists.', ephemeral: true });
+                return true;
+            }
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_REVOKED_INVITES,
+                notice: 'Removed selected revoked invite entry.'
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_REVOKED_INVITES_CLEAR_ID) {
+            if (typeof client.clearRevokedInvites === 'function') {
+                client.clearRevokedInvites(interaction.guild.id);
+            }
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_REVOKED_INVITES,
+                notice: 'Cleared revoked invite history for this server.'
+            }));
+            return true;
+        }
 
         if (interaction.customId === MANAGE_AUTOMOD_CREATE_ID) {
             const draft = createDefaultAutomodDraft(interaction.user.id);
