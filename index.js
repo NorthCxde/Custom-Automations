@@ -2909,17 +2909,7 @@ client.resolveMemberJoinSource = async (member) => {
     return { type: 'unknown', invite: null, vanityCode: guild.vanityURLCode || null };
 };
 
-client.logInviteJoin = async (member, source, stats) => {
-    if (!member?.guild) return;
-    const channelId = client.getInviteLogChannelId(member.guild.id);
-    if (!channelId) return;
-
-    let channel = member.guild.channels.cache.get(channelId);
-    if (!channel) {
-        channel = await member.guild.channels.fetch(channelId).catch(() => null);
-    }
-    if (!channel || !channel.isTextBased()) return;
-
+client.buildInviteLogPayload = (member, source, stats) => {
     const createdTs = Number(member.user.createdTimestamp || Date.now());
     const joinedTs = Number(member.joinedTimestamp || Date.now());
     const staffEmoji = '<:Staff:1518753622618407062>';
@@ -3004,7 +2994,7 @@ client.logInviteJoin = async (member, source, stats) => {
         components.push(new ActionRowBuilder().addComponents(revokeButton));
     }
 
-    await channel.send({
+    return {
         embeds: [embed],
         components,
         allowedMentions: {
@@ -3013,7 +3003,22 @@ client.logInviteJoin = async (member, source, stats) => {
             roles: [],
             repliedUser: false
         }
-    });
+    };
+};
+
+client.logInviteJoin = async (member, source, stats) => {
+    if (!member?.guild) return null;
+    const channelId = client.getInviteLogChannelId(member.guild.id);
+    if (!channelId) return null;
+
+    let channel = member.guild.channels.cache.get(channelId);
+    if (!channel) {
+        channel = await member.guild.channels.fetch(channelId).catch(() => null);
+    }
+    if (!channel || !channel.isTextBased()) return null;
+
+    const payload = client.buildInviteLogPayload(member, source, stats);
+    return await channel.send(payload);
 };
 
 client.getPublicRoleIds = (guildId) => {
@@ -3372,7 +3377,22 @@ client.on('guildMemberAdd', async (member) => {
 
     try {
         const source = await client.resolveMemberJoinSource(member);
-        await client.logInviteJoin(member, source, stats);
+        const sentMessage = await client.logInviteJoin(member, source, stats);
+
+        if (source.type === 'unknown' && sentMessage) {
+            const retryTimer = setTimeout(async () => {
+                try {
+                    const refreshedSource = await client.resolveMemberJoinSource(member);
+                    if (!refreshedSource || refreshedSource.type === 'unknown') return;
+
+                    const payload = client.buildInviteLogPayload(member, refreshedSource, stats);
+                    await sentMessage.edit(payload).catch(() => null);
+                } catch {
+                    // Best-effort refinement; keep original unknown log if resolution still fails.
+                }
+            }, 8000);
+            if (typeof retryTimer.unref === 'function') retryTimer.unref();
+        }
     } catch (err) {
         console.error(`Failed to resolve/log invite source for new member ${member.user.id}:`, err);
         try {
