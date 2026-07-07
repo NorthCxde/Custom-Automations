@@ -2811,7 +2811,10 @@ client.logInviteJoin = async (member, source, stats) => {
     const createdTs = Number(member.user.createdTimestamp || Date.now());
     const joinedTs = Number(member.joinedTimestamp || Date.now());
     const staffEmoji = '<:Staff:1518753622618407062>';
-    const wrap = (value) => `\`${String(value || '').replace(/`/g, "'")}\``;
+    const wrap = (value) => {
+        const normalized = value === undefined || value === null ? '' : String(value);
+        return `\`${normalized.replace(/`/g, "'")}\``;
+    };
     const formatAbsolute = (timestamp) => new Date(timestamp).toLocaleString('en-US', {
         month: 'long',
         day: 'numeric',
