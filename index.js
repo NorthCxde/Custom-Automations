@@ -2833,6 +2833,7 @@ client.logInviteJoin = async (member, source, stats) => {
         const years = Math.floor(months / 12);
         return `${years} year${years === 1 ? '' : 's'} ago`;
     };
+    const fieldLine = (label, value) => `**${label}:** ${wrap(value)}`;
 
     let title = 'Invite Tracked (Unknown Invite)';
     let color = 0xF23F43;
@@ -2858,18 +2859,18 @@ client.logInviteJoin = async (member, source, stats) => {
     const lines = [
         description,
         '',
-        `**User ID:** ${wrap(member.id)}`,
-        `**Username:** ${wrap(member.user.username)}`,
+        fieldLine('User ID', member.id),
+        fieldLine('Username', member.user.username),
         `**Account Created:** ${wrap(formatRelative(createdTs))} | ${wrap(formatAbsolute(createdTs))}`,
         `**Joined Server:** ${wrap(formatRelative(joinedTs))} | ${wrap(formatAbsolute(joinedTs))}`,
-        `**Times Joined:** ${wrap(Number(stats?.joins || 0))}`,
-        `**Times Left:** ${wrap(Number(stats?.leaves || 0))}`
+        fieldLine('Times Joined', Number(stats?.joins || 0)),
+        fieldLine('Times Left', Number(stats?.leaves || 0))
     ];
 
     if (source.type === 'user_invite' && source.invite?.code) {
         lines.push('');
-        lines.push(`**Invite:** ${wrap(source.invite.code)}`);
-        lines.push(`**Uses:** ${wrap(Number(source.invite.uses || 0))}`);
+        lines.push(fieldLine('Invite', source.invite.code));
+        lines.push(fieldLine('Uses', Number(source.invite.uses || 0)));
     }
 
     const embed = new EmbedBuilder()
