@@ -187,6 +187,8 @@ const entryRolesFile = path.join(dataPath, "entryroles.json");
 const infractionsFile = path.join(dataPath, "infractions.json");
 const manualLogsChannelsFile = path.join(dataPath, "manualLogsChannels.json");
 const publicPermsFile = path.join(dataPath, "publicperms.json");
+const inviteLogsFile = path.join(dataPath, "invitelogs.json");
+const inviteMemberStatsFile = path.join(dataPath, "inviteMemberStats.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -218,6 +220,10 @@ client.infractionRules = new Map();
 client.modStatsOverrides = new Map();
 client.manualLogsChannels = new Map();
 client.publicAllowedRoles = new Map();
+client.inviteLogChannels = new Map();
+client.inviteMemberStats = new Map();
+client.inviteCacheByGuild = new Map();
+client.vanityUsesByGuild = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.banStickerId = '1480253710969082108';
@@ -2597,6 +2603,270 @@ client.savePublicPermissions = () => {
     fs.writeFileSync(publicPermsFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
+client.loadInviteLogChannels = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(inviteLogsFile)) fs.writeFileSync(inviteLogsFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(inviteLogsFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read invite logs file:', err);
+    }
+
+    client.inviteLogChannels.clear();
+    for (const [guildId, channelId] of Object.entries(parsed)) {
+        if (typeof channelId === 'string' && channelId.trim()) {
+            client.inviteLogChannels.set(guildId, channelId.trim());
+        }
+    }
+};
+
+client.saveInviteLogChannels = () => {
+    const out = {};
+    for (const [guildId, channelId] of client.inviteLogChannels.entries()) {
+        out[guildId] = channelId;
+    }
+    fs.writeFileSync(inviteLogsFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getInviteLogChannelId = (guildId) => {
+    return client.inviteLogChannels.get(guildId) || null;
+};
+
+client.setInviteLogChannelId = (guildId, channelId) => {
+    if (!guildId) return null;
+    if (!channelId) {
+        client.inviteLogChannels.delete(guildId);
+    } else {
+        client.inviteLogChannels.set(guildId, String(channelId));
+    }
+    client.saveInviteLogChannels();
+    return client.getInviteLogChannelId(guildId);
+};
+
+client.loadInviteMemberStats = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(inviteMemberStatsFile)) fs.writeFileSync(inviteMemberStatsFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(inviteMemberStatsFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read invite member stats file:', err);
+    }
+
+    client.inviteMemberStats.clear();
+    for (const [guildId, users] of Object.entries(parsed)) {
+        const guildMap = new Map();
+        if (users && typeof users === 'object') {
+            for (const [userId, stats] of Object.entries(users)) {
+                const joins = Math.max(0, Number(stats?.joins || 0) || 0);
+                const leaves = Math.max(0, Number(stats?.leaves || 0) || 0);
+                guildMap.set(String(userId), { joins, leaves });
+            }
+        }
+        client.inviteMemberStats.set(String(guildId), guildMap);
+    }
+};
+
+client.saveInviteMemberStats = () => {
+    const out = {};
+    for (const [guildId, users] of client.inviteMemberStats.entries()) {
+        out[guildId] = {};
+        for (const [userId, stats] of users.entries()) {
+            out[guildId][userId] = {
+                joins: Math.max(0, Number(stats?.joins || 0) || 0),
+                leaves: Math.max(0, Number(stats?.leaves || 0) || 0)
+            };
+        }
+    }
+    fs.writeFileSync(inviteMemberStatsFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getInviteMemberStats = (guildId, userId) => {
+    const guildMap = client.inviteMemberStats.get(String(guildId));
+    if (!guildMap) return { joins: 0, leaves: 0 };
+    return guildMap.get(String(userId)) || { joins: 0, leaves: 0 };
+};
+
+client.incrementInviteMemberJoins = (guildId, userId) => {
+    const gId = String(guildId);
+    const uId = String(userId);
+    const guildMap = client.inviteMemberStats.get(gId) || new Map();
+    const current = guildMap.get(uId) || { joins: 0, leaves: 0 };
+    const next = { joins: Number(current.joins || 0) + 1, leaves: Number(current.leaves || 0) };
+    guildMap.set(uId, next);
+    client.inviteMemberStats.set(gId, guildMap);
+    client.saveInviteMemberStats();
+    return next;
+};
+
+client.incrementInviteMemberLeaves = (guildId, userId) => {
+    const gId = String(guildId);
+    const uId = String(userId);
+    const guildMap = client.inviteMemberStats.get(gId) || new Map();
+    const current = guildMap.get(uId) || { joins: 0, leaves: 0 };
+    const next = { joins: Number(current.joins || 0), leaves: Number(current.leaves || 0) + 1 };
+    guildMap.set(uId, next);
+    client.inviteMemberStats.set(gId, guildMap);
+    client.saveInviteMemberStats();
+    return next;
+};
+
+client.refreshInviteCacheForGuild = async (guild) => {
+    if (!guild) return;
+    let inviteMap = new Map();
+    try {
+        const invites = await guild.invites.fetch();
+        inviteMap = new Map(
+            invites.map(invite => [
+                invite.code,
+                {
+                    code: invite.code,
+                    uses: Number(invite.uses || 0),
+                    inviterId: invite.inviterId || null,
+                    inviterTag: invite.inviter?.tag || null
+                }
+            ])
+        );
+    } catch (err) {
+        // Skip noisy errors for guilds where invite fetch is restricted.
+    }
+    client.inviteCacheByGuild.set(guild.id, inviteMap);
+
+    if (guild.features?.includes('VANITY_URL')) {
+        try {
+            const vanity = await guild.fetchVanityData();
+            client.vanityUsesByGuild.set(guild.id, Number(vanity?.uses || 0));
+        } catch {
+            // Ignore vanity fetch errors and keep prior value.
+        }
+    }
+};
+
+client.bootstrapInviteCaches = async () => {
+    for (const guild of client.guilds.cache.values()) {
+        await client.refreshInviteCacheForGuild(guild);
+    }
+};
+
+client.resolveMemberJoinSource = async (member) => {
+    const guild = member.guild;
+    const guildId = guild.id;
+
+    const previousInvites = client.inviteCacheByGuild.get(guildId) || new Map();
+    const previousVanityUses = Number(client.vanityUsesByGuild.get(guildId) || 0);
+
+    await client.refreshInviteCacheForGuild(guild);
+
+    const currentInvites = client.inviteCacheByGuild.get(guildId) || new Map();
+    const currentVanityUses = Number(client.vanityUsesByGuild.get(guildId) || 0);
+
+    if (member.user.bot) {
+        return { type: 'bot', invite: null, vanityCode: guild.vanityURLCode || null };
+    }
+
+    if (currentVanityUses > previousVanityUses) {
+        return {
+            type: 'vanity',
+            invite: null,
+            vanityCode: guild.vanityURLCode || null
+        };
+    }
+
+    let matchedInvite = null;
+    for (const [code, current] of currentInvites.entries()) {
+        const previousUses = Number(previousInvites.get(code)?.uses || 0);
+        const currentUses = Number(current?.uses || 0);
+        if (currentUses > previousUses) {
+            matchedInvite = {
+                code,
+                uses: currentUses,
+                inviterId: current?.inviterId || null,
+                inviterTag: current?.inviterTag || null
+            };
+            break;
+        }
+    }
+
+    if (matchedInvite) {
+        return { type: 'user_invite', invite: matchedInvite, vanityCode: guild.vanityURLCode || null };
+    }
+
+    return { type: 'unknown', invite: null, vanityCode: guild.vanityURLCode || null };
+};
+
+client.logInviteJoin = async (member, source, stats) => {
+    if (!member?.guild) return;
+    const channelId = client.getInviteLogChannelId(member.guild.id);
+    if (!channelId) return;
+
+    let channel = member.guild.channels.cache.get(channelId);
+    if (!channel) {
+        channel = await member.guild.channels.fetch(channelId).catch(() => null);
+    }
+    if (!channel || !channel.isTextBased()) return;
+
+    const createdUnix = Math.floor(member.user.createdTimestamp / 1000);
+    const joinedUnix = Math.floor((member.joinedTimestamp || Date.now()) / 1000);
+
+    let title = 'Invite Tracked (Unknown Invite)';
+    let color = 0xF23F43;
+    let description = `I can not figure out how <@${member.id}> joined the server.`;
+
+    if (source.type === 'vanity') {
+        title = 'Invite Tracked (Vanity Invite)';
+        color = 0x57F287;
+        const vanityCode = source.vanityCode ? `/${source.vanityCode}` : '/vanity';
+        description = `<@${member.id}> joined using a vanity invite. (${vanityCode})`;
+    } else if (source.type === 'user_invite') {
+        title = 'Invite Tracked (User Invite)';
+        color = 0x57F287;
+        const inviterText = source.invite?.inviterId ? `<@${source.invite.inviterId}>` : 'an unknown inviter';
+        const uses = Number(source.invite?.uses || 0);
+        description = `<@${member.id}> has been invited by ${inviterText} and has now ${uses} invites.`;
+    } else if (source.type === 'bot') {
+        title = 'Invite Tracked (Bot Invite)';
+        color = 0x1F2328;
+        description = `<@${member.id}> joined using OAuth.`;
+    }
+
+    const lines = [
+        description,
+        '',
+        `**User ID:** ${member.id}`,
+        `**Username:** ${member.user.username}`,
+        `**Account Created:** <t:${createdUnix}:R> | <t:${createdUnix}:F>`,
+        `**Joined Server:** <t:${joinedUnix}:R> | <t:${joinedUnix}:F>`,
+        `**Times Joined:** ${Number(stats?.joins || 0)}`,
+        `**Times Left:** ${Number(stats?.leaves || 0)}`
+    ];
+
+    if (source.type === 'user_invite' && source.invite?.code) {
+        lines.push('');
+        lines.push(`**Invite:** ${source.invite.code}`);
+        lines.push(`**Uses:** ${Number(source.invite.uses || 0)}`);
+    }
+
+    const embed = new EmbedBuilder()
+        .setColor(color)
+        .setTitle(source.type === 'unknown' ? `⚠️ ${title}` : `🛠️ ${title}`)
+        .setDescription(lines.join('\n'))
+        .setThumbnail(member.user.displayAvatarURL({ extension: 'png', size: 256 }))
+        .setTimestamp();
+
+    await channel.send({
+        embeds: [embed],
+        allowedMentions: {
+            parse: [],
+            users: [member.id, source.invite?.inviterId].filter(Boolean),
+            roles: [],
+            repliedUser: false
+        }
+    });
+};
+
 client.getPublicRoleIds = (guildId) => {
     if (!client.publicAllowedRoles.has(guildId)) return null;
     return client.publicAllowedRoles.get(guildId);
@@ -2762,6 +3032,8 @@ client.loadEntryRoles();
 client.loadInfractionRules();
 client.loadManualLogsChannels();
 client.loadPublicPermissions();
+client.loadInviteLogChannels();
+client.loadInviteMemberStats();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -2929,6 +3201,7 @@ client.on('clientReady', async () => {
     client.scheduleBloxlinkCacheRefresh();
     client.scheduleGiveawaysOnStartup();
     client.scheduleRemindersOnStartup();
+    client.bootstrapInviteCaches();
 });
 
 client.on('guildBanAdd', async (ban) => {
@@ -2945,6 +3218,20 @@ client.on('guildBanAdd', async (ban) => {
 });
 
 client.on('guildMemberAdd', async (member) => {
+    const stats = client.incrementInviteMemberJoins(member.guild.id, member.user.id);
+
+    try {
+        const source = await client.resolveMemberJoinSource(member);
+        await client.logInviteJoin(member, source, stats);
+    } catch (err) {
+        console.error(`Failed to resolve/log invite source for new member ${member.user.id}:`, err);
+        try {
+            await client.logInviteJoin(member, { type: 'unknown', invite: null, vanityCode: member.guild.vanityURLCode || null }, stats);
+        } catch (fallbackErr) {
+            console.error(`Failed to write fallback unknown invite log for member ${member.user.id}:`, fallbackErr);
+        }
+    }
+
     try {
         if (client.getLinkedRobloxId) {
             await client.getLinkedRobloxId(member.guild.id, member.user.id);
@@ -2952,6 +3239,45 @@ client.on('guildMemberAdd', async (member) => {
     } catch (err) {
         console.error(`Failed to refresh Bloxlink cache for new member ${member.user.id}:`, err);
     }
+});
+
+client.on('guildMemberRemove', async (member) => {
+    try {
+        client.incrementInviteMemberLeaves(member.guild.id, member.user.id);
+    } catch (err) {
+        console.error(`Failed to update invite leave stats for ${member.user.id}:`, err);
+    }
+});
+
+client.on('guildCreate', async (guild) => {
+    try {
+        await client.refreshInviteCacheForGuild(guild);
+    } catch (err) {
+        console.error(`Failed to initialize invite cache for guild ${guild.id}:`, err);
+    }
+});
+
+client.on('inviteCreate', async (invite) => {
+    const guildId = invite.guild?.id;
+    if (!guildId) return;
+
+    const existing = client.inviteCacheByGuild.get(guildId) || new Map();
+    existing.set(invite.code, {
+        code: invite.code,
+        uses: Number(invite.uses || 0),
+        inviterId: invite.inviterId || null,
+        inviterTag: invite.inviter?.tag || null
+    });
+    client.inviteCacheByGuild.set(guildId, existing);
+});
+
+client.on('inviteDelete', async (invite) => {
+    const guildId = invite.guild?.id;
+    if (!guildId) return;
+
+    const existing = client.inviteCacheByGuild.get(guildId);
+    if (!existing) return;
+    existing.delete(invite.code);
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -2971,7 +3297,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
-        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms') {
+        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms' || interaction.commandName === 'setinvitelogs') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
             }
