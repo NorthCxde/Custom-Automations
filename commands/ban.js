@@ -308,7 +308,7 @@ module.exports = {
             files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
         });
 
-        if (client.logManualModerationAction) {
+        if (client.logManualModerationAction && evidenceFiles.length > 0) {
             const manualEmbed = new EmbedBuilder()
                 .setColor(0x000000)
                 .setTitle('Manual Ban Log')

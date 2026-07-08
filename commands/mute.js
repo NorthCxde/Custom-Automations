@@ -684,7 +684,7 @@ module.exports = {
                         )
                         .setTimestamp();
 
-                    if (client.logManualModerationAction) {
+                    if (client.logManualModerationAction && evidenceFiles.length > 0) {
                         try {
                             await client.logManualModerationAction(message.guild, {
                                 category: 'mute',
@@ -701,7 +701,7 @@ module.exports = {
                     }
 
                     // Direct send to configured manual mute channel to keep prefix flow deterministic.
-                    if (client.getManualLogsChannels) {
+                    if (client.getManualLogsChannels && evidenceFiles.length > 0) {
                         try {
                             const manualConfig = client.getManualLogsChannels(message.guild.id);
                             const manualMuteChannelId = manualConfig?.muteChannelId || null;
@@ -1003,7 +1003,7 @@ module.exports = {
             files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
         });
 
-        if (client.logManualModerationAction) {
+        if (client.logManualModerationAction && evidenceFiles.length > 0) {
             const manualEmbed = new EmbedBuilder()
                 .setColor(0x000000)
                 .setTitle('Manual Mute Log')
@@ -1119,7 +1119,8 @@ module.exports = {
             await sendMuteStatusCard(client, statusChannel, cardText, true);
         }
 
-        if (client.logManualModerationAction && (action === 'mute' || action === 'ban' || action === 'temp_ban')) {
+        const decisionEvidenceFiles = Array.isArray(decision.evidenceFiles) ? decision.evidenceFiles : [];
+        if (client.logManualModerationAction && decisionEvidenceFiles.length > 0 && (action === 'mute' || action === 'ban' || action === 'temp_ban')) {
             const manualEmbed = new EmbedBuilder()
                 .setColor(0x000000)
                 .setTitle(action === 'mute' ? 'Manual Mute Log' : 'Manual Ban Log')
@@ -1136,9 +1137,7 @@ module.exports = {
             await client.logManualModerationAction(interaction.guild, {
                 category: action === 'mute' ? 'mute' : 'ban',
                 embeds: [manualEmbed],
-                files: Array.isArray(decision.evidenceFiles)
-                    ? decision.evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
-                    : []
+                files: decisionEvidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
             });
         }
 
@@ -1210,7 +1209,8 @@ module.exports = {
             await sendMuteStatusCard(client, statusChannel, cardText, true);
         }
 
-        if (client.logManualModerationAction && (action === 'mute' || action === 'ban' || action === 'temp_ban')) {
+        const modalDecisionEvidenceFiles = Array.isArray(decision.evidenceFiles) ? decision.evidenceFiles : [];
+        if (client.logManualModerationAction && modalDecisionEvidenceFiles.length > 0 && (action === 'mute' || action === 'ban' || action === 'temp_ban')) {
             const manualEmbed = new EmbedBuilder()
                 .setColor(0x000000)
                 .setTitle(action === 'mute' ? 'Manual Mute Log' : 'Manual Ban Log')
@@ -1227,9 +1227,7 @@ module.exports = {
             await client.logManualModerationAction(interaction.guild, {
                 category: action === 'mute' ? 'mute' : 'ban',
                 embeds: [manualEmbed],
-                files: Array.isArray(decision.evidenceFiles)
-                    ? decision.evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
-                    : []
+                files: modalDecisionEvidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
             });
         }
 
