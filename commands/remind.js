@@ -133,11 +133,15 @@ function buildActionRow(reminderId) {
 }
 
 function buildSetEmbed(reminder) {
+    const mediaValue = reminder.media?.url ? `[${reminder.media.name || 'attachment'}](${reminder.media.url})` : 'None';
     return new EmbedBuilder()
         .setColor(0x57F287)
         .setTitle('1 Reminder Set')
         .setDescription(`Reminder for <@${reminder.userId}> set for <t:${Math.floor(reminder.nextAt / 1000)}:R>`)
-        .addFields({ name: 'Content', value: reminder.content, inline: false })
+        .addFields(
+            { name: 'Content', value: reminder.content, inline: false },
+            { name: 'Media', value: mediaValue, inline: false }
+        )
         .setTimestamp(new Date(reminder.createdAt));
 }
 
@@ -274,6 +278,12 @@ module.exports = {
                 .setDescription('Set a timezone override for this reminder only')
                 .setRequired(false)
                 .setAutocomplete(true)
+        )
+        .addAttachmentOption(option =>
+            option
+                .setName('media')
+                .setDescription('Optional image/file to include when the reminder triggers')
+                .setRequired(false)
         ),
 
     async executeInteraction({ client, interaction }) {
@@ -284,6 +294,7 @@ module.exports = {
         const expiresRaw = sanitizeText(interaction.options.getString('expires'), 120);
         const timezone = sanitizeText(interaction.options.getString('timezone'), 80);
         const tts = Boolean(interaction.options.getBoolean('tts'));
+        const media = interaction.options.getAttachment('media');
 
         if (!content) {
             return interaction.reply({ content: 'Reminder content is required.', ephemeral: true });
@@ -355,6 +366,14 @@ module.exports = {
                 canceledAt: null,
                 completedAt: null
             };
+
+            if (media?.url) {
+                reminder.media = {
+                    url: String(media.url),
+                    name: String(media.name || 'media'),
+                    contentType: String(media.contentType || '')
+                };
+            }
 
             client.upsertReminder(reminder);
             client.scheduleReminder(reminder.id);

@@ -1630,7 +1630,14 @@ client.loadReminders = () => {
             confirmationMessageId: entry.confirmationMessageId ? String(entry.confirmationMessageId) : null,
             lastTriggeredAt: Number(entry.lastTriggeredAt || 0) || null,
             canceledAt: Number(entry.canceledAt || 0) || null,
-            completedAt: Number(entry.completedAt || 0) || null
+            completedAt: Number(entry.completedAt || 0) || null,
+            media: entry.media && typeof entry.media === 'object'
+                ? {
+                    url: String(entry.media.url || '').trim(),
+                    name: String(entry.media.name || 'media').trim(),
+                    contentType: String(entry.media.contentType || '').trim()
+                }
+                : null
         };
 
         if (!reminder.id || !reminder.userId || !reminder.content || !reminder.targetKind || !reminder.targetId || !Number.isFinite(reminder.nextAt) || reminder.nextAt <= 0) {
@@ -1708,12 +1715,19 @@ client.deliverReminder = async (reminderId) => {
     const now = Date.now();
 
     let delivered = false;
+    const reminderFiles = reminder.media?.url
+        ? [{
+            attachment: reminder.media.url,
+            name: reminder.media.name || 'media'
+        }]
+        : [];
     try {
         if (reminder.targetKind === 'user') {
             const user = await client.users.fetch(reminder.targetId).catch(() => null);
             if (user) {
                 await user.send({
                     content: String(reminder.content || ''),
+                    files: reminderFiles,
                     tts: Boolean(reminder.tts),
                     allowedMentions: {
                         parse: [],
@@ -1729,6 +1743,7 @@ client.deliverReminder = async (reminderId) => {
             if (channel && channel.isTextBased()) {
                 await channel.send({
                     content: String(reminder.content || ''),
+                    files: reminderFiles,
                     tts: Boolean(reminder.tts),
                     allowedMentions: {
                         parse: [],
