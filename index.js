@@ -1706,17 +1706,6 @@ client.deliverReminder = async (reminderId) => {
     if (!reminder || reminder.status !== 'active') return;
 
     const now = Date.now();
-    const unix = Math.floor(now / 1000);
-    const embed = new EmbedBuilder()
-        .setColor(0x57F287)
-        .setTitle('Reminder')
-        .setDescription(reminder.content)
-        .addFields(
-            { name: 'For', value: `<@${reminder.userId}>`, inline: true },
-            { name: 'Set', value: `<t:${Math.floor(Number(reminder.createdAt || now) / 1000)}:R>`, inline: true },
-            { name: 'Triggered', value: `<t:${unix}:F>`, inline: false }
-        )
-        .setTimestamp(new Date(now));
 
     let delivered = false;
     try {
@@ -1724,12 +1713,11 @@ client.deliverReminder = async (reminderId) => {
             const user = await client.users.fetch(reminder.targetId).catch(() => null);
             if (user) {
                 await user.send({
-                    content: `<@${reminder.userId}>`,
-                    embeds: [embed],
+                    content: String(reminder.content || ''),
                     tts: Boolean(reminder.tts),
                     allowedMentions: {
                         parse: [],
-                        users: [reminder.userId],
+                        users: [],
                         roles: [],
                         repliedUser: false
                     }
@@ -1740,12 +1728,11 @@ client.deliverReminder = async (reminderId) => {
             const channel = await client.channels.fetch(reminder.targetId).catch(() => null);
             if (channel && channel.isTextBased()) {
                 await channel.send({
-                    content: `<@${reminder.userId}>`,
-                    embeds: [embed],
+                    content: String(reminder.content || ''),
                     tts: Boolean(reminder.tts),
                     allowedMentions: {
                         parse: [],
-                        users: [reminder.userId],
+                        users: [],
                         roles: [],
                         repliedUser: false
                     }
