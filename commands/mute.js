@@ -700,31 +700,7 @@ module.exports = {
                         }
                     }
 
-                    // Direct send to configured manual mute channel to keep prefix flow deterministic.
-                    if (client.getManualLogsChannels && evidenceFiles.length > 0) {
-                        try {
-                            const manualConfig = client.getManualLogsChannels(message.guild.id);
-                            const manualMuteChannelId = manualConfig?.muteChannelId || null;
-                            if (manualMuteChannelId) {
-                                const manualChannel = message.guild.channels.cache.get(manualMuteChannelId)
-                                    || await message.guild.channels.fetch(manualMuteChannelId).catch(() => null);
-                                if (manualChannel && manualChannel.isTextBased()) {
-                                    await manualChannel.send({
-                                        embeds: [manualEmbed],
-                                        files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name })),
-                                        allowedMentions: {
-                                            parse: [],
-                                            users: [],
-                                            roles: [],
-                                            repliedUser: false
-                                        }
-                                    });
-                                }
-                            }
-                        } catch (err) {
-                            console.error('Failed to send direct prefix manual mute log fallback:', err);
-                        }
-                    }
+                    // Manual logging is handled by client.logManualModerationAction; avoid direct duplicate sends.
                 }
             }
 
