@@ -1,12 +1,11 @@
-const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
     name: 'gdelete',
     description: 'End a giveaway and delete its message.',
     data: new SlashCommandBuilder()
         .setName('gdelete')
-        .setDescription('Delete giveaway (ends it and removes giveaway message)')
-        .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
+        .setDescription('Delete a giveaway by ID.')
         .addStringOption(option =>
             option.setName('giveaway_id')
                 .setDescription('Giveaway ID or giveaway message ID to delete')

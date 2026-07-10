@@ -1,12 +1,11 @@
-const { SlashCommandBuilder, PermissionsBitField, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 
 module.exports = {
     name: 'gcreate',
     description: 'Create a giveaway using a modal form.',
     data: new SlashCommandBuilder()
         .setName('gcreate')
-        .setDescription('Create a giveaway using a modal form.')
-        .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild),
+        .setDescription('Create a giveaway using a modal form.'),
     async executeInteraction({ interaction }) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });

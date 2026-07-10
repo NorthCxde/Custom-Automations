@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
     name: 'gend',
@@ -6,7 +6,6 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('gend')
         .setDescription('end a giveaway')
-        .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
         .addStringOption(option =>
             option.setName('giveaway_id')
                 .setDescription('Giveaway ID or giveaway message ID to end')
