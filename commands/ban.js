@@ -4,7 +4,8 @@ function formatProofLinks(files = []) {
     const links = (files || [])
         .map(file => {
             const url = String(file?.url || file?.attachment || '').trim();
-            const name = String(file?.name || 'attachment').trim() || 'attachment';
+            const rawName = String(file?.name || 'attachment').trim() || 'attachment';
+            const name = rawName.startsWith('SPOILER_') ? rawName : `SPOILER_${rawName}`;
             return url ? `[${name}](${url})` : null;
         })
         .filter(Boolean);
@@ -25,6 +26,15 @@ function formatProofLinks(files = []) {
     }
 
     return kept.join('\n');
+}
+
+function toSpoilerFiles(files = []) {
+    return (files || []).map(file => {
+        const url = String(file?.url || file?.attachment || '').trim();
+        const rawName = String(file?.name || 'attachment').trim() || 'attachment';
+        const name = rawName.startsWith('SPOILER_') ? rawName : `SPOILER_${rawName}`;
+        return { attachment: url, name };
+    });
 }
 
 async function sendBanStatusCard(client, channel, text) {
@@ -352,7 +362,7 @@ module.exports = {
             await client.logManualModerationAction(interaction.guild, {
                 category: 'ban',
                 embeds: [manualEmbed],
-                files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+                files: toSpoilerFiles(evidenceFiles)
             });
         }
 

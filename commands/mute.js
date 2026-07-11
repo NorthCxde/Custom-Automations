@@ -21,7 +21,8 @@ function formatProofLinks(files = []) {
     const links = (files || [])
         .map(file => {
             const url = String(file?.url || file?.attachment || '').trim();
-            const name = String(file?.name || 'attachment').trim() || 'attachment';
+            const rawName = String(file?.name || 'attachment').trim() || 'attachment';
+            const name = rawName.startsWith('SPOILER_') ? rawName : `SPOILER_${rawName}`;
             return url ? `[${name}](${url})` : null;
         })
         .filter(Boolean);
@@ -42,6 +43,19 @@ function formatProofLinks(files = []) {
     }
 
     return kept.join('\n');
+}
+
+function toSpoilerFiles(files = []) {
+    return (files || []).map(file => {
+        const url = String(file?.url || file?.attachment || '').trim();
+        const rawName = String(file?.name || 'attachment').trim() || 'attachment';
+        const name = rawName.startsWith('SPOILER_') ? rawName : `SPOILER_${rawName}`;
+        return {
+            attachment: url,
+            name,
+            ...(file?.contentType ? { contentType: file.contentType } : {})
+        };
+    });
 }
 
 const INFRACTION_RULES = {
@@ -717,11 +731,7 @@ module.exports = {
                             await client.logManualModerationAction(message.guild, {
                                 category: 'mute',
                                 embeds: [manualEmbed],
-                                files: evidenceFiles.map(file => ({
-                                    attachment: file.url,
-                                    name: file.name,
-                                    contentType: file.contentType || null
-                                }))
+                                files: toSpoilerFiles(evidenceFiles)
                             });
                         } catch (err) {
                             console.error('Failed to send prefix manual mute log:', err);
@@ -1025,7 +1035,7 @@ module.exports = {
             await client.logManualModerationAction(interaction.guild, {
                 category: 'mute',
                 embeds: [manualEmbed],
-                files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+                files: toSpoilerFiles(evidenceFiles)
             });
         }
 
@@ -1143,7 +1153,7 @@ module.exports = {
             await client.logManualModerationAction(interaction.guild, {
                 category: action === 'mute' ? 'mute' : 'ban',
                 embeds: [manualEmbed],
-                files: decisionEvidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+                files: toSpoilerFiles(decisionEvidenceFiles)
             });
         }
 
@@ -1234,7 +1244,7 @@ module.exports = {
             await client.logManualModerationAction(interaction.guild, {
                 category: action === 'mute' ? 'mute' : 'ban',
                 embeds: [manualEmbed],
-                files: modalDecisionEvidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
+                files: toSpoilerFiles(modalDecisionEvidenceFiles)
             });
         }
 
