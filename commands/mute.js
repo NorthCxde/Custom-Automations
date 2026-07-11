@@ -778,7 +778,7 @@ module.exports = {
             const failures = results.filter(result => !result.success);
             const infractionLevelLines = results
                 .filter(result => result.success && inferredRule && Number.isInteger(result.infractionCount))
-                .map(result => `<@${result.targetId}> -> Level ${result.infractionCount}`);
+                .map(result => `Level ${result.infractionCount}`);
             const infractionLevelValue = infractionLevelLines.length ? infractionLevelLines.join('\n').slice(0, 1024) : 'N/A';
             const detectedRuleValue = inferredRule?.ruleLabel ? `\`${inferredRule.ruleLabel}\`` : 'None';
             const detectedPhraseValue = inferredRule
