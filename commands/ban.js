@@ -1,9 +1,16 @@
 ﻿const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 function formatProofLinks(files = []) {
+    const sanitizeProofUrl = (value) => {
+        const url = String(value || '').trim();
+        if (!url) return '';
+        const questionIndex = url.indexOf('?');
+        return questionIndex === -1 ? url : url.slice(0, questionIndex);
+    };
+
     const links = (files || [])
         .map(file => {
-            const url = String(file?.url || file?.attachment || '').trim();
+            const url = sanitizeProofUrl(file?.url || file?.attachment);
             const rawName = String(file?.name || 'attachment').trim() || 'attachment';
             const name = rawName.startsWith('SPOILER_') ? rawName : `SPOILER_${rawName}`;
             return url ? `[${name}](${url})` : null;
@@ -25,7 +32,9 @@ function formatProofLinks(files = []) {
         kept.push(`...and ${links.length - kept.length} more`);
     }
 
-    return kept.join('\n');
+    const result = kept.join('\n').trim();
+    if (!result) return 'None';
+    return result.length > 1024 ? `${result.slice(0, 1021)}...` : result;
 }
 
 function toSpoilerFiles(files = []) {
