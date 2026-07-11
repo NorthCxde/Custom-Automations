@@ -780,8 +780,9 @@ module.exports = {
                 .filter(result => result.success && inferredRule && Number.isInteger(result.infractionCount))
                 .map(result => `<@${result.targetId}> -> Level ${result.infractionCount}`);
             const infractionLevelValue = infractionLevelLines.length ? infractionLevelLines.join('\n').slice(0, 1024) : 'N/A';
-            const detectedRuleValue = inferredRule
-                ? `${inferredRule.ruleLabel}\nDetected: \`${inferredRule.detectedKeyword || reason}\``
+            const detectedRuleValue = inferredRule?.ruleLabel ? `\`${inferredRule.ruleLabel}\`` : 'None';
+            const detectedPhraseValue = inferredRule
+                ? `\`${inferredRule.detectedKeyword || reason}\``
                 : reason;
 
             if (success.length > 0) {
@@ -800,10 +801,10 @@ module.exports = {
                             { name: 'User(s)', value: successIds.map(id => `<@${id}>`).join(', '), inline: true },
                             { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
                             { name: 'Duration', value: duration, inline: true },
-                            { name: 'Rule', value: inferredRule?.ruleLabel || 'None', inline: true },
+                            { name: 'Detected Rule', value: detectedRuleValue, inline: true },
                             { name: 'Infraction Level', value: infractionLevelValue, inline: true },
                             { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
-                            { name: inferredRule ? 'Detected Rule' : 'Reason', value: detectedRuleValue.slice(0, 1024), inline: false },
+                            { name: inferredRule ? 'Detected Phrase' : 'Reason', value: detectedPhraseValue.slice(0, 1024), inline: false },
                             { name: 'Target IDs', value: successIds.join(', '), inline: false }
                         )
                         .setTimestamp();
@@ -832,9 +833,9 @@ module.exports = {
                             { name: 'Duration', value: duration, inline: true },
                             { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                             { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false },
-                            { name: 'Rule', value: inferredRule?.ruleLabel || 'None', inline: true },
+                            { name: 'Detected Rule', value: detectedRuleValue, inline: true },
                             { name: 'Infraction Level', value: infractionLevelValue, inline: true },
-                            { name: inferredRule ? 'Detected Rule' : 'Reason', value: detectedRuleValue.slice(0, 1024), inline: false },
+                            { name: inferredRule ? 'Detected Phrase' : 'Reason', value: detectedPhraseValue.slice(0, 1024), inline: false },
                             { name: 'Outcome', value: `${success.length} muted, ${failures.length} failed`, inline: false }
                         )
                         .setTimestamp();
