@@ -179,6 +179,7 @@ const bloxlinkFile = path.join(dataPath, "bloxlink.json");
 const bloxlinkHistoryFile = path.join(dataPath, "bloxlinkHistory.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
+const hideCommandStateFile = path.join(dataPath, "hidecommand-state.json");
 const autorespondersFile = path.join(dataPath, "autoresponders.json");
 const automodFile = path.join(dataPath, "automod.json");
 const giveawaysFile = path.join(dataPath, "giveaways.json");
@@ -228,6 +229,7 @@ client.vanityUsesByGuild = new Map();
 client.recentDeletedInvitesByGuild = new Map();
 client.revokedInvites = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
+client.hideCommandState = new Map(); // per-guild toggle for deleting moderation prefix command messages
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.banStickerId = '1480253710969082108';
 client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
@@ -640,6 +642,52 @@ client.savePrefixCommandState = () => {
         fs.mkdirSync(dataPath, { recursive: true });
     }
     fs.writeFileSync(prefixStateFile, JSON.stringify({ enabled: Boolean(client.prefixCommandsEnabled) }, null, 2), 'utf8');
+};
+
+client.loadHideCommandState = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    if (!fs.existsSync(hideCommandStateFile)) {
+        fs.writeFileSync(hideCommandStateFile, '{}', 'utf8');
+    }
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(hideCommandStateFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read hidecommand state file:', err);
+    }
+
+    client.hideCommandState.clear();
+    for (const [guildId, enabled] of Object.entries(parsed)) {
+        client.hideCommandState.set(guildId, Boolean(enabled));
+    }
+};
+
+client.saveHideCommandState = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+
+    const out = {};
+    for (const [guildId, enabled] of client.hideCommandState.entries()) {
+        out[guildId] = Boolean(enabled);
+    }
+
+    fs.writeFileSync(hideCommandStateFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getHideCommandState = (guildId) => {
+    if (!guildId) return false;
+    return Boolean(client.hideCommandState.get(guildId));
+};
+
+client.setHideCommandState = (guildId, enabled) => {
+    if (!guildId) return false;
+    client.hideCommandState.set(guildId, Boolean(enabled));
+    client.saveHideCommandState();
+    return Boolean(enabled);
 };
 
 client.loadAutoresponders = () => {
@@ -3184,6 +3232,7 @@ client.loadBloxlink();
 client.loadBloxlinkHistory();
 client.loadBoostChannels();
 client.loadPrefixCommandState();
+client.loadHideCommandState();
 client.loadAutoresponders();
 client.loadAutomodRules();
 client.loadGiveaways();
@@ -5245,6 +5294,10 @@ client.on('messageCreate', async (message) => {
     const command = client.commands.get(commandName);
     if (!command) return;
 
+    const moderationPrefixCommands = new Set(['mute', 'ban', 'unmute', 'unban', 'purge', 'banevaders']);
+    const shouldHideModerationCommand = client.getHideCommandState(message.guild.id)
+        && moderationPrefixCommands.has(commandName);
+
     const hardcodedPrefixCommands = new Set(['dm', 'enablecommands', 'synccommands', 'autoresponder', 'manage']);
     if (hardcodedPrefixCommands.has(commandName) && !HARD_CODED_ADMINS.includes(message.author.id)) {
         return message.reply('Only the bot admins can use this command.');
@@ -5259,6 +5312,10 @@ client.on('messageCreate', async (message) => {
     } catch (err) {
         console.error(err);
         message.reply('There was an error executing that command.');
+    }
+
+    if (shouldHideModerationCommand && message.deletable) {
+        await message.delete().catch(() => null);
     }
 });
 
