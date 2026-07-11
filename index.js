@@ -229,7 +229,7 @@ client.vanityUsesByGuild = new Map();
 client.recentDeletedInvitesByGuild = new Map();
 client.revokedInvites = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
-client.hideCommandState = new Map(); // per-guild toggle for deleting moderation prefix command messages
+client.hideCommandState = new Map(); // per-guild set of userIds for deleting their moderation prefix command messages
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.banStickerId = '1480253710969082108';
 client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
@@ -660,8 +660,12 @@ client.loadHideCommandState = () => {
     }
 
     client.hideCommandState.clear();
-    for (const [guildId, enabled] of Object.entries(parsed)) {
-        client.hideCommandState.set(guildId, Boolean(enabled));
+    for (const [guildId, value] of Object.entries(parsed)) {
+        const userIds = Array.isArray(value)
+            ? value
+            : (value && typeof value === 'object' && Array.isArray(value.userIds) ? value.userIds : []);
+        const sanitized = [...new Set(userIds.map(String).filter(id => /^\d{17,20}$/.test(id)))];
+        client.hideCommandState.set(guildId, new Set(sanitized));
     }
 };
 
@@ -671,21 +675,31 @@ client.saveHideCommandState = () => {
     }
 
     const out = {};
-    for (const [guildId, enabled] of client.hideCommandState.entries()) {
-        out[guildId] = Boolean(enabled);
+    for (const [guildId, userSet] of client.hideCommandState.entries()) {
+        out[guildId] = [...(userSet || new Set())];
     }
 
     fs.writeFileSync(hideCommandStateFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
-client.getHideCommandState = (guildId) => {
-    if (!guildId) return false;
-    return Boolean(client.hideCommandState.get(guildId));
+client.getHideCommandState = (guildId, userId) => {
+    if (!guildId || !userId) return false;
+    const guildSet = client.hideCommandState.get(guildId);
+    if (!guildSet) return false;
+    return guildSet.has(String(userId));
 };
 
-client.setHideCommandState = (guildId, enabled) => {
-    if (!guildId) return false;
-    client.hideCommandState.set(guildId, Boolean(enabled));
+client.setHideCommandState = (guildId, userId, enabled) => {
+    if (!guildId || !userId) return false;
+
+    const guildSet = client.hideCommandState.get(guildId) || new Set();
+    if (enabled) {
+        guildSet.add(String(userId));
+    } else {
+        guildSet.delete(String(userId));
+    }
+
+    client.hideCommandState.set(guildId, guildSet);
     client.saveHideCommandState();
     return Boolean(enabled);
 };
@@ -2348,6 +2362,33 @@ client.removeModLogCase = (guildId, caseNumber, userId = null) => {
     return removedLog;
 };
 
+client.resetAllInfractionProgress = (guildId) => {
+    const logs = client.modLogs.get(guildId) || [];
+    let resetCount = 0;
+
+    for (const log of logs) {
+        const hadInfractionData = Object.prototype.hasOwnProperty.call(log, 'infractionRule')
+            || Object.prototype.hasOwnProperty.call(log, 'infractionRuleLabel')
+            || Object.prototype.hasOwnProperty.call(log, 'infractionCount');
+        if (!hadInfractionData) continue;
+
+        delete log.infractionRule;
+        delete log.infractionRuleLabel;
+        delete log.infractionCount;
+        resetCount += 1;
+    }
+
+    if (resetCount > 0) {
+        client.modLogs.set(guildId, logs);
+        client.saveModLogs();
+    }
+
+    return {
+        resetCount,
+        totalCases: logs.length
+    };
+};
+
 client.getAllowedRoleIds = (guildId) => {
     if (!client.allowedRoles.has(guildId)) return null;
     return client.allowedRoles.get(guildId);
@@ -3536,7 +3577,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
-        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms' || interaction.commandName === 'setinvitelogs') {
+        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms' || interaction.commandName === 'setinvitelogs' || interaction.commandName === 'infractions') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
             }
@@ -5295,7 +5336,7 @@ client.on('messageCreate', async (message) => {
     if (!command) return;
 
     const moderationPrefixCommands = new Set(['mute', 'ban', 'unmute', 'unban', 'purge', 'banevaders']);
-    const shouldHideModerationCommand = client.getHideCommandState(message.guild.id)
+    const shouldHideModerationCommand = client.getHideCommandState(message.guild.id, message.author.id)
         && moderationPrefixCommands.has(commandName);
 
     const hardcodedPrefixCommands = new Set(['dm', 'enablecommands', 'synccommands', 'autoresponder', 'manage']);
