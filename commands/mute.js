@@ -705,16 +705,37 @@ module.exports = {
                     }
 
                     let infractionCount = null;
+                    let appliedDuration = duration;
+                    let appliedDurationMs = durationMs;
                     if (inferredRule) {
                         const priorRuleMutes = getRuleMuteCount(client, message.guild.id, targetId, inferredRule.ruleKey);
                         infractionCount = priorRuleMutes + 1;
+
+                        const escalationStep = getEscalationStep(guildRules, inferredRule.ruleKey, priorRuleMutes);
+                        if (!escalationStep) {
+                            return { targetId, success: false, reason: 'Escalation step could not be determined.' };
+                        }
+
+                        if (escalationStep.type === 'moderator_decision') {
+                            return { targetId, success: false, reason: 'Escalation requires moderator decision.' };
+                        }
+
+                        if (escalationStep.type !== 'timeout' || !escalationStep.duration) {
+                            return { targetId, success: false, reason: `Escalation requires ${formatEscalationAction(escalationStep)} instead of timeout.` };
+                        }
+
+                        appliedDuration = escalationStep.duration;
+                        appliedDurationMs = parseDuration(appliedDuration);
+                        if (!appliedDurationMs) {
+                            return { targetId, success: false, reason: `Invalid configured duration for ${inferredRule.ruleLabel}.` };
+                        }
                     }
 
                     const effectiveReason = inferredRule
                         ? `[Rule: ${inferredRule.ruleLabel}] [Infraction ${infractionCount}] ${reason}`
                         : reason;
 
-                    await member.timeout(durationMs, effectiveReason);
+                    await member.timeout(appliedDurationMs, effectiveReason);
 
                     if (client.sendModerationDm) {
                         try {
@@ -722,7 +743,7 @@ module.exports = {
                                 user: member.user,
                                 guildName: message.guild.name,
                                 action: 'mute',
-                                duration,
+                                duration: appliedDuration,
                                 reason: effectiveReason
                             });
                         } catch (err) {
@@ -746,7 +767,7 @@ module.exports = {
                                 moderatorId: message.author.id,
                                 moderatorTag: message.author.tag,
                                 reason: effectiveReason,
-                                duration,
+                                duration: appliedDuration,
                                 infractionRule: inferredRule?.ruleKey || null,
                                 infractionRuleLabel: inferredRule?.ruleLabel || null,
                                 infractionCount,
@@ -760,6 +781,7 @@ module.exports = {
                         targetId,
                         success: true,
                         username: member.user.username,
+                        appliedDuration,
                         infractionCount,
                         ruleLabel: inferredRule?.ruleLabel || null
                     };
@@ -776,6 +798,15 @@ module.exports = {
             const success = results.filter(result => result.success).map(result => `<@${result.targetId}>`);
             const successIds = results.filter(result => result.success).map(result => result.targetId);
             const failures = results.filter(result => !result.success);
+            const appliedDurations = [...new Set(
+                results
+                    .filter(result => result.success)
+                    .map(result => String(result.appliedDuration || duration))
+                    .filter(Boolean)
+            )];
+            const durationValue = inferredRule
+                ? (appliedDurations.length === 1 ? `${appliedDurations[0]} (auto)` : 'Varies (by infraction level)')
+                : duration;
             const infractionLevelLines = results
                 .filter(result => result.success && inferredRule && Number.isInteger(result.infractionCount))
                 .map(result => `Level ${result.infractionCount}`);
@@ -800,7 +831,7 @@ module.exports = {
                         .addFields(
                             { name: 'User(s)', value: successIds.map(id => `<@${id}>`).join(', '), inline: true },
                             { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
-                            { name: 'Duration', value: duration, inline: true },
+                            { name: 'Duration', value: durationValue, inline: true },
                             { name: 'Detected Rule', value: detectedRuleValue, inline: true },
                             { name: 'Infraction Level', value: infractionLevelValue, inline: true },
                             { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
@@ -830,7 +861,7 @@ module.exports = {
                         .addFields(
                             { name: 'User(s)', value: successIds.map(id => `<@${id}>`).join(', '), inline: true },
                             { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
-                            { name: 'Duration', value: duration, inline: true },
+                            { name: 'Duration', value: durationValue, inline: true },
                             { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                             { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false },
                             { name: 'Detected Rule', value: detectedRuleValue, inline: true },
