@@ -33,7 +33,7 @@ function toSpoilerFiles(files = []) {
         const url = String(file?.url || file?.attachment || '').trim();
         const rawName = String(file?.name || 'attachment').trim() || 'attachment';
         const name = rawName.startsWith('SPOILER_') ? rawName : `SPOILER_${rawName}`;
-        return { attachment: url, name };
+        return { attachment: url, name, spoiler: true };
     });
 }
 

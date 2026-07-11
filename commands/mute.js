@@ -53,6 +53,7 @@ function toSpoilerFiles(files = []) {
         return {
             attachment: url,
             name,
+            spoiler: true,
             ...(file?.contentType ? { contentType: file.contentType } : {})
         };
     });
