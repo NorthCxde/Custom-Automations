@@ -2,10 +2,10 @@ const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
     name: 'hidecommand',
-    description: 'Enable or disable deleting moderation prefix command messages after use.',
+    description: 'Enable or disable deleting your own moderation prefix command messages after use.',
     data: new SlashCommandBuilder()
         .setName('hidecommand')
-        .setDescription('Enable or disable deleting moderation prefix command messages after use.')
+        .setDescription('Enable or disable deleting your own moderation prefix command messages after use.')
         .addStringOption(option =>
             option
                 .setName('action')
@@ -25,13 +25,13 @@ module.exports = {
         const enabled = action === 'enable';
 
         if (typeof client.setHideCommandState === 'function') {
-            client.setHideCommandState(interaction.guild.id, enabled);
+            client.setHideCommandState(interaction.guild.id, interaction.user.id, enabled);
         }
 
         await interaction.reply({
             content: enabled
-                ? 'Moderation prefix command messages will now be deleted after use.'
-                : 'Moderation prefix command messages will no longer be deleted after use.',
+                ? 'Your moderation prefix command messages will now be deleted after use.'
+                : 'Your moderation prefix command messages will no longer be deleted after use.',
             ephemeral: true
         });
     }
