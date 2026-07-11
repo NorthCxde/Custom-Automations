@@ -17,6 +17,18 @@ const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 const MAX_TIMER_DELAY_MS = 2147483647;
 const tempBanTimers = new Map();
 
+function formatProofLinks(files = []) {
+    const links = (files || [])
+        .map(file => {
+            const url = String(file?.url || file?.attachment || '').trim();
+            const name = String(file?.name || 'attachment').trim() || 'attachment';
+            return url ? `[${name}](${url})` : null;
+        })
+        .filter(Boolean);
+
+    return links.length ? links.join('\n') : 'None';
+}
+
 const INFRACTION_RULES = {
     spam: {
         label: 'Spam',
@@ -679,6 +691,7 @@ module.exports = {
                             { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
                             { name: 'Duration', value: duration, inline: true },
                             { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
+                            { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false },
                             { name: 'Reason', value: reason, inline: false },
                             { name: 'Outcome', value: `${success.length} muted, ${failures.length} failed`, inline: false }
                         )
@@ -987,6 +1000,7 @@ module.exports = {
                     { name: 'User(s)', value: mentions || 'None', inline: true },
                     { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
                     { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
+                    { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false },
                     { name: 'Rule', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
                     { name: 'Reason', value: baseReason || 'No reason provided', inline: false },
                     { name: 'Outcome', value: `${successCount} muted, ${decisionCount} needs decision, ${failCount} failed`, inline: false }
@@ -1105,6 +1119,7 @@ module.exports = {
                     { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
                     { name: 'Action', value: action === 'temp_ban' ? `temp ban (${applied.durationRaw || 'unspecified'})` : action, inline: true },
                     { name: 'Rule', value: decision.ruleLabel || 'Unknown Rule', inline: true },
+                    { name: 'Proofs', value: formatProofLinks(decisionEvidenceFiles), inline: false },
                     { name: 'Reason', value: decision.baseReason || 'No reason provided', inline: false },
                     { name: 'Outcome', value: `${successCount} succeeded, ${failCount} failed`, inline: false }
                 )
@@ -1195,6 +1210,7 @@ module.exports = {
                     { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
                     { name: 'Action', value: action === 'temp_ban' ? `temp ban (${durationRaw})` : action, inline: true },
                     { name: 'Rule', value: decision.ruleLabel || 'Unknown Rule', inline: true },
+                    { name: 'Proofs', value: formatProofLinks(modalDecisionEvidenceFiles), inline: false },
                     { name: 'Reason', value: decision.baseReason || 'No reason provided', inline: false },
                     { name: 'Outcome', value: `${successCount} succeeded, ${failCount} failed`, inline: false }
                 )

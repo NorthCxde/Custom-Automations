@@ -1,5 +1,17 @@
 ﻿const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
+function formatProofLinks(files = []) {
+    const links = (files || [])
+        .map(file => {
+            const url = String(file?.url || file?.attachment || '').trim();
+            const name = String(file?.name || 'attachment').trim() || 'attachment';
+            return url ? `[${name}](${url})` : null;
+        })
+        .filter(Boolean);
+
+    return links.length ? links.join('\n') : 'None';
+}
+
 async function sendBanStatusCard(client, channel, text) {
     if (!channel || !text) return;
 
@@ -316,6 +328,7 @@ module.exports = {
                     { name: 'User(s)', value: mentions || 'None', inline: true },
                     { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
                     { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
+                    { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false },
                     { name: 'Reason', value: reason || 'No reason provided', inline: false },
                     { name: 'Outcome', value: `${successCount} succeeded, ${failCount} failed`, inline: false }
                 )
