@@ -9,7 +9,22 @@ function formatProofLinks(files = []) {
         })
         .filter(Boolean);
 
-    return links.length ? links.join('\n') : 'None';
+    if (!links.length) return 'None';
+
+    const kept = [];
+    let totalLength = 0;
+    for (const link of links) {
+        const nextLength = totalLength + (kept.length ? 1 : 0) + link.length;
+        if (nextLength > 1000) break;
+        kept.push(link);
+        totalLength = nextLength;
+    }
+
+    if (kept.length < links.length) {
+        kept.push(`...and ${links.length - kept.length} more`);
+    }
+
+    return kept.join('\n');
 }
 
 async function sendBanStatusCard(client, channel, text) {
