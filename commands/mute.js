@@ -302,18 +302,40 @@ function inferInfractionRuleFromReason(reason, rules) {
 
     const entries = Object.entries(rules || {});
     for (const [ruleKey, ruleData] of entries) {
-        const candidates = new Set([
-            normalizeReasonText(ruleData?.label || ''),
-            normalizeReasonText(String(ruleKey || '').replace(/_/g, ' ')),
-            ...(RULE_REASON_KEYWORDS[ruleKey] || []).map(normalizeReasonText)
-        ]);
+        const primaryKeywords = (RULE_REASON_KEYWORDS[ruleKey] || [])
+            .map(keyword => ({
+                display: String(keyword || '').trim(),
+                normalized: normalizeReasonText(keyword)
+            }))
+            .filter(item => item.normalized && item.normalized.length >= 3);
 
-        for (const candidate of candidates) {
-            if (!candidate || candidate.length < 3) continue;
-            if (normalizedReason.includes(candidate)) {
+        for (const keyword of primaryKeywords) {
+            if (normalizedReason.includes(keyword.normalized)) {
                 return {
                     ruleKey,
-                    ruleLabel: ruleData?.label || ruleKey
+                    ruleLabel: ruleData?.label || ruleKey,
+                    detectedKeyword: keyword.display || keyword.normalized
+                };
+            }
+        }
+
+        const fallbackCandidates = [
+            {
+                display: String(ruleData?.label || '').trim(),
+                normalized: normalizeReasonText(ruleData?.label || '')
+            },
+            {
+                display: String(ruleKey || '').replace(/_/g, ' ').trim(),
+                normalized: normalizeReasonText(String(ruleKey || '').replace(/_/g, ' '))
+            }
+        ].filter(item => item.normalized && item.normalized.length >= 3);
+
+        for (const candidate of fallbackCandidates) {
+            if (normalizedReason.includes(candidate.normalized)) {
+                return {
+                    ruleKey,
+                    ruleLabel: ruleData?.label || ruleKey,
+                    detectedKeyword: candidate.display || candidate.normalized
                 };
             }
         }
@@ -754,6 +776,13 @@ module.exports = {
             const success = results.filter(result => result.success).map(result => `<@${result.targetId}>`);
             const successIds = results.filter(result => result.success).map(result => result.targetId);
             const failures = results.filter(result => !result.success);
+            const infractionLevelLines = results
+                .filter(result => result.success && inferredRule && Number.isInteger(result.infractionCount))
+                .map(result => `<@${result.targetId}> -> Level ${result.infractionCount}`);
+            const infractionLevelValue = infractionLevelLines.length ? infractionLevelLines.join('\n').slice(0, 1024) : 'N/A';
+            const detectedRuleValue = inferredRule
+                ? `${inferredRule.ruleLabel}\nDetected: \`${inferredRule.detectedKeyword || reason}\``
+                : reason;
 
             if (success.length > 0) {
                 const firstSuccess = results.find(result => result.success);
@@ -772,8 +801,9 @@ module.exports = {
                             { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
                             { name: 'Duration', value: duration, inline: true },
                             { name: 'Rule', value: inferredRule?.ruleLabel || 'None', inline: true },
+                            { name: 'Infraction Level', value: infractionLevelValue, inline: true },
                             { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
-                            { name: 'Reason', value: reason, inline: false },
+                            { name: inferredRule ? 'Detected Rule' : 'Reason', value: detectedRuleValue.slice(0, 1024), inline: false },
                             { name: 'Target IDs', value: successIds.join(', '), inline: false }
                         )
                         .setTimestamp();
@@ -803,7 +833,8 @@ module.exports = {
                             { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                             { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false },
                             { name: 'Rule', value: inferredRule?.ruleLabel || 'None', inline: true },
-                            { name: 'Reason', value: reason, inline: false },
+                            { name: 'Infraction Level', value: infractionLevelValue, inline: true },
+                            { name: inferredRule ? 'Detected Rule' : 'Reason', value: detectedRuleValue.slice(0, 1024), inline: false },
                             { name: 'Outcome', value: `${success.length} muted, ${failures.length} failed`, inline: false }
                         )
                         .setTimestamp();
