@@ -564,7 +564,7 @@ module.exports = {
         const evidenceFiles = (message.attachments
             ? Array.from(message.attachments.values())
             : [])
-            .slice(0, 4);
+            .slice(0, 10);
 
         try {
             if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
