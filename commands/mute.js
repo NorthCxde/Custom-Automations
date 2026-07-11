@@ -264,6 +264,55 @@ function getEscalationStep(rules, ruleKey, previousCount) {
     return rule.steps[index];
 }
 
+const RULE_REASON_KEYWORDS = {
+    spam: ['spam', 'flood', 'spamming', 'flooding'],
+    off_topic: ['off topic'],
+    spam_pinging_owners: ['spam pinging owners', 'spam pinging owner'],
+    blacklisted_words_bypass: ['blacklisted', 'bypass', 'bypassing blacklisted word'],
+    nsfw_explicit_messages: ['nsfw', '18+'],
+    direct_slurs: ['slur', 'slurs'],
+    harassment_disrespect: ['harassment', 'disrespect', 'toxicity'],
+    instigation: ['instigating', 'instigation', 'ragebaiting', 'ragebait'],
+    promotion: ['promo', 'promotion', 'advertisement'],
+    controversial_topics: ['controversial'],
+    roblox_tos_violation: ['roblox tos'],
+    troll_tickets: ['troll ticket']
+};
+
+function normalizeReasonText(text) {
+    return String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function inferInfractionRuleFromReason(reason, rules) {
+    const normalizedReason = normalizeReasonText(reason);
+    if (!normalizedReason) return null;
+
+    const entries = Object.entries(rules || {});
+    for (const [ruleKey, ruleData] of entries) {
+        const candidates = new Set([
+            normalizeReasonText(ruleData?.label || ''),
+            normalizeReasonText(String(ruleKey || '').replace(/_/g, ' ')),
+            ...(RULE_REASON_KEYWORDS[ruleKey] || []).map(normalizeReasonText)
+        ]);
+
+        for (const candidate of candidates) {
+            if (!candidate || candidate.length < 3) continue;
+            if (normalizedReason.includes(candidate)) {
+                return {
+                    ruleKey,
+                    ruleLabel: ruleData?.label || ruleKey
+                };
+            }
+        }
+    }
+
+    return null;
+}
+
 function parseDuration(duration) {
     const match = duration.match(/^(\d+)([smhdy])$/i);
     if (!match) return null;
@@ -591,6 +640,8 @@ module.exports = {
         }
 
         const reason = args.slice(durationIndex + 1).join(' ') || 'No reason provided';
+        const guildRules = client.getInfractionRules ? client.getInfractionRules(message.guild.id) : INFRACTION_RULES;
+        const inferredRule = inferInfractionRuleFromReason(reason, guildRules);
         const evidenceFiles = (message.attachments
             ? Array.from(message.attachments.values())
             : [])
@@ -622,7 +673,17 @@ module.exports = {
                         return { targetId, success: false, reason: `${member.user.username} is already muted.` };
                     }
 
-                    await member.timeout(durationMs, reason);
+                    let infractionCount = null;
+                    if (inferredRule) {
+                        const priorRuleMutes = getRuleMuteCount(client, message.guild.id, targetId, inferredRule.ruleKey);
+                        infractionCount = priorRuleMutes + 1;
+                    }
+
+                    const effectiveReason = inferredRule
+                        ? `[Rule: ${inferredRule.ruleLabel}] [Infraction ${infractionCount}] ${reason}`
+                        : reason;
+
+                    await member.timeout(durationMs, effectiveReason);
 
                     if (client.sendModerationDm) {
                         try {
@@ -631,7 +692,7 @@ module.exports = {
                                 guildName: message.guild.name,
                                 action: 'mute',
                                 duration,
-                                reason
+                                reason: effectiveReason
                             });
                         } catch (err) {
                             console.error('Failed to send mute DM:', err);
@@ -653,15 +714,24 @@ module.exports = {
                                 robloxId,
                                 moderatorId: message.author.id,
                                 moderatorTag: message.author.tag,
-                                reason,
+                                reason: effectiveReason,
                                 duration,
+                                infractionRule: inferredRule?.ruleKey || null,
+                                infractionRuleLabel: inferredRule?.ruleLabel || null,
+                                infractionCount,
                                 timestamp: new Date().toISOString()
                             });
                         } catch (err) {
                             console.error('Failed to write mute modlog:', err);
                         }
                     }
-                    return { targetId, success: true, username: member.user.username };
+                    return {
+                        targetId,
+                        success: true,
+                        username: member.user.username,
+                        infractionCount,
+                        ruleLabel: inferredRule?.ruleLabel || null
+                    };
                 } catch (error) {
                     console.error(error);
                     let reason = error?.message || 'Unknown error';
@@ -692,6 +762,7 @@ module.exports = {
                             { name: 'User(s)', value: successIds.map(id => `<@${id}>`).join(', '), inline: true },
                             { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
                             { name: 'Duration', value: duration, inline: true },
+                            { name: 'Rule', value: inferredRule?.ruleLabel || 'None', inline: true },
                             { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                             { name: 'Reason', value: reason, inline: false },
                             { name: 'Target IDs', value: successIds.join(', '), inline: false }
@@ -722,6 +793,7 @@ module.exports = {
                             { name: 'Duration', value: duration, inline: true },
                             { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                             { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false },
+                            { name: 'Rule', value: inferredRule?.ruleLabel || 'None', inline: true },
                             { name: 'Reason', value: reason, inline: false },
                             { name: 'Outcome', value: `${success.length} muted, ${failures.length} failed`, inline: false }
                         )
