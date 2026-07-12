@@ -3573,7 +3573,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
-        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms' || interaction.commandName === 'setinvitelogs' || interaction.commandName === 'infractions') {
+        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms' || interaction.commandName === 'setinvitelogs' || interaction.commandName === 'infractions' || interaction.commandName === 'unban') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
             }
@@ -5329,7 +5329,7 @@ client.on('messageCreate', async (message) => {
     const shouldHideModerationCommand = client.getHideCommandState(message.guild.id, message.author.id)
         && moderationPrefixCommands.has(commandName);
 
-    const hardcodedPrefixCommands = new Set(['dm', 'enablecommands', 'synccommands', 'autoresponder', 'manage']);
+    const hardcodedPrefixCommands = new Set(['dm', 'enablecommands', 'synccommands', 'autoresponder', 'manage', 'unban']);
     if (hardcodedPrefixCommands.has(commandName) && !HARD_CODED_ADMINS.includes(message.author.id)) {
         return message.reply('Only the bot admins can use this command.');
     }
