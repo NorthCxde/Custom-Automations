@@ -1,5 +1,54 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
+function parseMentionOrId(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const mention = raw.match(/^<@!?(\d{17,20})>$/);
+    if (mention) return mention[1];
+    if (/^\d{17,20}$/.test(raw)) return raw;
+    return null;
+}
+
+function buildModlogsPayload(logs, user) {
+    const displayLogs = logs.slice(0, 10);
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle(user ? 'User Moderation Logs' : 'All Moderation Logs')
+        .setDescription(`Showing ${displayLogs.length} of ${logs.length} records`)
+        .setTimestamp();
+
+    for (const entry of displayLogs) {
+        const lines = [];
+        lines.push(`Type: ${entry.action}`);
+        lines.push(`User: <@${entry.userId}>`);
+        if (entry.duration) lines.push(`Length: ${entry.duration}`);
+        if (entry.count) lines.push(`Count: ${entry.count}`);
+        if (entry.channelId) lines.push(`Channel: <#${entry.channelId}>`);
+        if (entry.reason) lines.push(`Reason: ${entry.reason}`);
+        lines.push(`Moderator: <@${entry.moderatorId}>`);
+        lines.push(`Date: ${new Date(entry.timestamp).toLocaleString()}`);
+
+        embed.addFields({
+            name: `Case ${entry.caseNumber ?? entry.caseId ?? 'N/A'}`,
+            value: lines.join('\n'),
+            inline: false
+        });
+    }
+
+    if (logs.length > displayLogs.length) {
+        embed.addFields({ name: 'More logs', value: `Use /modlogs to view the first ${displayLogs.length} records.`, inline: false });
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('modlogs_remove_button')
+            .setLabel('Remove Log')
+            .setStyle(ButtonStyle.Danger)
+    );
+
+    return { embeds: [embed], components: [row] };
+}
+
 module.exports = {
     name: 'modlogs',
     description: 'Show moderation history for a user, or all guild logs if no user is selected.',
@@ -10,6 +59,31 @@ module.exports = {
             option.setName('user')
                 .setDescription('The user whose moderation history you want to view')
                 .setRequired(false)),
+    async execute({ client, message, args }) {
+        if (!message.guild) return null;
+
+        let user = null;
+        if (args[0]) {
+            const parsedId = parseMentionOrId(args[0]);
+            if (!parsedId) {
+                return message.reply('Please provide a valid user mention or ID.');
+            }
+            user = await client.users.fetch(parsedId).catch(() => null);
+            if (!user) {
+                return message.reply('Could not find that user.');
+            }
+        }
+
+        const logs = client.getModLogs(message.guild.id, user?.id);
+        if (!logs || logs.length === 0) {
+            if (user) {
+                return message.reply(`No moderation history found for ${user.tag}.`);
+            }
+            return message.reply('No moderation logs are available for this server.');
+        }
+
+        return message.reply(buildModlogsPayload(logs, user));
+    },
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -25,42 +99,6 @@ module.exports = {
             return interaction.reply({ content: 'No moderation logs are available for this server.', ephemeral: true });
         }
 
-        const displayLogs = logs.slice(0, 10);
-        const embed = new EmbedBuilder()
-            .setColor(0x000000)
-            .setTitle(user ? 'User Moderation Logs' : 'All Moderation Logs')
-            .setDescription(`Showing ${displayLogs.length} of ${logs.length} records`)
-            .setTimestamp();
-
-        for (const entry of displayLogs) {
-            const lines = [];
-            lines.push(`Type: ${entry.action}`);
-            lines.push(`User: <@${entry.userId}>`);
-            if (entry.duration) lines.push(`Length: ${entry.duration}`);
-            if (entry.count) lines.push(`Count: ${entry.count}`);
-            if (entry.channelId) lines.push(`Channel: <#${entry.channelId}>`);
-            if (entry.reason) lines.push(`Reason: ${entry.reason}`);
-            lines.push(`Moderator: <@${entry.moderatorId}>`);
-            lines.push(`Date: ${new Date(entry.timestamp).toLocaleString()}`);
-
-            embed.addFields({
-                name: `Case ${entry.caseNumber ?? entry.caseId ?? 'N/A'}`,
-                value: lines.join('\n'),
-                inline: false
-            });
-        }
-
-        if (logs.length > displayLogs.length) {
-            embed.addFields({ name: 'More logs', value: `Use /modlogs to view the first ${displayLogs.length} records.`, inline: false });
-        }
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('modlogs_remove_button')
-                .setLabel('Remove Log')
-                .setStyle(ButtonStyle.Danger)
-        );
-
-        return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+        return interaction.reply({ ...buildModlogsPayload(logs, user), ephemeral: true });
     }
 };
