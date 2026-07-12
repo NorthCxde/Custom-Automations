@@ -459,17 +459,6 @@ client.scheduleHardcodedAdminsSync = () => {
             console.error('Failed to sync hardcoded admins from Trello:', err.message || err);
             client.applyHardcodedAdmins([]);
         }
-
-        try {
-            console.log('Starting moderator level perms Trello sync...');
-            const permsResult = await client.refreshModeratorLevelPermsFromTrello();
-            if (permsResult.enabled) {
-                console.log(`Moderator level perms sync complete: total=${permsResult.total}, static=${permsResult.staticCount || 0}, configured=${permsResult.configuredPermCount || 0}, trello=${permsResult.trelloCount || 0}, created=${permsResult.createdCards || 0}, list=${permsResult.listName || 'unknown'}`);
-            }
-        } catch (err) {
-            console.error('Failed to sync moderator level perms from Trello:', err.message || err);
-            client.applyModeratorLevelPermRoleNames([]);
-        }
     };
 
     sync().catch(() => null);
@@ -4915,12 +4904,6 @@ client.on('interactionCreate', async (interaction) => {
 
     const selectedRoleNames = selectedRoleIds
         .map(id => interaction.guild.roles.cache.get(id)?.name || `Unknown Role (${id})`);
-
-    try {
-        await client.ensureModeratorPermCardsByRoleNames(selectedRoleNames);
-    } catch (err) {
-        console.error('Failed to seed moderator level perm Trello cards from /perms update:', err);
-    }
 
     const roleList = selectedRoleIds.length
         ? selectedRoleIds.map(id => `<@&${id}>`).join(', ')
