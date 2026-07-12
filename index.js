@@ -234,7 +234,7 @@ client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for pre
 client.banStickerId = '1480253710969082108';
 client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
 client.trelloModeratorLevelPermRoleNames = new Set(STATIC_MODERATOR_LEVEL_PERM_ROLE_NAMES.map(name => String(name).toLowerCase()));
-client.publicCommandNames = new Set(['profile']);
+client.publicCommandNames = new Set(['profile', 'avatar']);
 
 client.applyHardcodedAdmins = (ids = []) => {
     const merged = [...new Set([...STATIC_HARD_CODED_ADMINS.map(String), ...ids.map(String)])];
@@ -1898,6 +1898,13 @@ client.loadCommands = () => {
             const cmd = require(filePath);
             if (cmd && cmd.name && typeof cmd.execute === 'function') {
                 client.commands.set(cmd.name, cmd);
+                if (Array.isArray(cmd.aliases)) {
+                    for (const alias of cmd.aliases) {
+                        const aliasName = String(alias || '').trim().toLowerCase();
+                        if (!aliasName) continue;
+                        client.commands.set(aliasName, cmd);
+                    }
+                }
             }
 
             const registrationDefs = [cmd?.data, cmd?.contextData].filter(Boolean);
@@ -5344,8 +5351,14 @@ client.on('messageCreate', async (message) => {
         return message.reply('Only the bot admins can use this command.');
     }
 
-    if (commandName !== 'perms' && !client.isMemberAllowed(message.member)) {
-        return;
+    if (commandName !== 'perms') {
+        if (command.public) {
+            if (!client.isPublicMemberAllowed(message.member)) {
+                return;
+            }
+        } else if (!client.isMemberAllowed(message.member)) {
+            return;
+        }
     }
 
     try {
