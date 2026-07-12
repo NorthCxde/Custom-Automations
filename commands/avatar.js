@@ -15,12 +15,13 @@ function extractUserId(value) {
     return null;
 }
 
-function buildAvatarPayload(user) {
-    const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 4096 });
+function buildAvatarPayload(user, member = null) {
+    const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 4096, forceStatic: true });
+    const title = member?.displayName || user.globalName || user.username;
 
     const embed = new EmbedBuilder()
         .setColor(0x2f3136)
-        .setTitle(user.username)
+        .setTitle(title)
         .setImage(avatarUrl);
 
     const button = new ButtonBuilder()
@@ -63,7 +64,9 @@ module.exports = {
             return message.reply('Please provide a valid user mention or user ID.');
         }
 
-        return message.reply(buildAvatarPayload(targetUser));
+        const member = await message.guild.members.fetch(targetUser.id).catch(() => null);
+
+        return message.reply(buildAvatarPayload(targetUser, member));
     },
     async executeInteraction({ interaction }) {
         if (!interaction.guild) {
@@ -71,6 +74,7 @@ module.exports = {
         }
 
         const targetUser = interaction.options.getUser('user') || interaction.user;
-        return interaction.reply(buildAvatarPayload(targetUser));
+        const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+        return interaction.reply(buildAvatarPayload(targetUser, member));
     }
 };
