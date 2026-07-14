@@ -41,10 +41,10 @@ async function fetchRobloxAvatarUrl(userId) {
 }
 
 module.exports = {
-    name: 'info',
+    name: 'search',
     description: 'Retrieve Bloxlink and Discord/Roblox linked information for a user',
     data: new SlashCommandBuilder()
-        .setName('info')
+        .setName('search')
         .setDescription('Retrieve Bloxlink and Discord/Roblox linked information for a user')
         .addUserOption(option =>
             option.setName('discord_user')
