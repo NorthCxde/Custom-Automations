@@ -191,6 +191,7 @@ const publicPermsFile = path.join(dataPath, "publicperms.json");
 const inviteLogsFile = path.join(dataPath, "invitelogs.json");
 const inviteMemberStatsFile = path.join(dataPath, "inviteMemberStats.json");
 const revokedInvitesFile = path.join(dataPath, "revokedInvites.json");
+const securityFile = path.join(dataPath, "security.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -228,6 +229,7 @@ client.inviteCacheByGuild = new Map();
 client.vanityUsesByGuild = new Map();
 client.recentDeletedInvitesByGuild = new Map();
 client.revokedInvites = new Map();
+client.securitySettings = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.hideCommandState = new Map(); // per-guild set of userIds for deleting their moderation prefix command messages
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
@@ -691,6 +693,170 @@ client.setHideCommandState = (guildId, userId, enabled) => {
     client.hideCommandState.set(guildId, guildSet);
     client.saveHideCommandState();
     return Boolean(enabled);
+};
+
+client.loadSecuritySettings = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    if (!fs.existsSync(securityFile)) {
+        fs.writeFileSync(securityFile, '{}', 'utf8');
+    }
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(securityFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read security settings file:', err);
+    }
+
+    client.securitySettings.clear();
+    for (const [guildId, value] of Object.entries(parsed)) {
+        client.securitySettings.set(guildId, client.sanitizeSecuritySettings(value));
+    }
+};
+
+client.saveSecuritySettings = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+
+    const out = {};
+    for (const [guildId, settings] of client.securitySettings.entries()) {
+        out[guildId] = client.sanitizeSecuritySettings(settings);
+    }
+
+    fs.writeFileSync(securityFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.sanitizeSecuritySettings = (settings = {}) => {
+    const accountAge = settings && typeof settings === 'object' && settings.accountAge && typeof settings.accountAge === 'object'
+        ? settings.accountAge
+        : {};
+
+    return {
+        accountAge: {
+            enabled: accountAge.enabled !== false,
+            minAgeDays: Math.max(0, Number.isFinite(Number(accountAge.minAgeDays)) ? Number(accountAge.minAgeDays) : 7),
+            whitelistedUserIds: [...new Set((Array.isArray(accountAge.whitelistedUserIds) ? accountAge.whitelistedUserIds : [])
+                .map(String)
+                .filter(id => /^\d{17,20}$/.test(id)))]
+        }
+    };
+};
+
+client.getSecuritySettings = (guildId) => {
+    if (!guildId) return client.sanitizeSecuritySettings();
+    if (!client.securitySettings.has(guildId)) {
+        client.securitySettings.set(guildId, client.sanitizeSecuritySettings());
+    }
+    return client.securitySettings.get(guildId);
+};
+
+client.updateSecuritySettings = (guildId, updates = {}) => {
+    if (!guildId) return client.sanitizeSecuritySettings();
+    const existing = client.getSecuritySettings(guildId);
+    const next = client.sanitizeSecuritySettings({
+        ...existing,
+        ...updates,
+        accountAge: {
+            ...(existing.accountAge || {}),
+            ...((updates && typeof updates === 'object' && updates.accountAge) ? updates.accountAge : {})
+        }
+    });
+    client.securitySettings.set(guildId, next);
+    client.saveSecuritySettings();
+    return next;
+};
+
+client.isAccountAgeWhitelisted = (guildId, userId) => {
+    const settings = client.getSecuritySettings(guildId);
+    return settings.accountAge.whitelistedUserIds.includes(String(userId));
+};
+
+client.buildAccountAgeKickLogPayload = (member, source, stats, settings) => {
+    const createdTs = Number(member.user.createdTimestamp || Date.now());
+    const joinedTs = Number(member.joinedTimestamp || Date.now());
+    const staffEmoji = '<:Staff:1518753622618407062>';
+    const wrap = (value) => {
+        const normalized = value === undefined || value === null ? '' : String(value);
+        return `\`${normalized.replace(/`/g, "'")}\``;
+    };
+    const formatAbsolute = (timestamp) => new Date(timestamp).toLocaleString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+    const formatRelative = (timestamp) => {
+        const diffMs = Math.max(0, Date.now() - Number(timestamp || Date.now()));
+        const minutes = Math.floor(diffMs / 60_000);
+        if (minutes < 1) return 'just now';
+        if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+        const days = Math.floor(hours / 24);
+        if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+        const months = Math.floor(days / 30);
+        if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`;
+        const years = Math.floor(months / 12);
+        return `${years} year${years === 1 ? '' : 's'} ago`;
+    };
+    const fieldLine = (label, value) => `**${label}:** ${wrap(value)}`;
+    const sourceLabel = source?.type === 'vanity'
+        ? 'vanity invite'
+        : source?.type === 'user_invite'
+            ? 'user invite'
+            : source?.type === 'bot'
+                ? 'oauth'
+                : source?.type === 'unknown'
+                    ? 'unknown invite'
+                    : 'possible discovery/external';
+
+    const lines = [
+        `<@${member.id}> was automatically ${wrap('kicked')} because the account age is below the minimum allowed threshold.`,
+        '',
+        fieldLine('User ID', member.id),
+        fieldLine('Username', member.user.username),
+        `**Account Created:** ${wrap(formatRelative(createdTs))} | ${wrap(formatAbsolute(createdTs))}`,
+        `**Joined Server:** ${wrap(formatRelative(joinedTs))} | ${wrap(formatAbsolute(joinedTs))}`,
+        fieldLine('Minimum Account Age', `${settings.accountAge.minAgeDays} day(s)`),
+        fieldLine('Join Source', sourceLabel),
+        fieldLine('Times Joined', Number(stats?.joins || 0)),
+        fieldLine('Times Left', Number(stats?.leaves || 0))
+    ];
+
+    const embed = new EmbedBuilder()
+        .setColor(0xF23F43)
+        .setTitle(`${staffEmoji} Security Triggered (Account Age)`)
+        .setDescription(lines.join('\n'))
+        .setThumbnail(member.user.displayAvatarURL({ extension: 'png', size: 256 }))
+        .setTimestamp();
+
+    return {
+        embeds: [embed],
+        allowedMentions: {
+            parse: [],
+            users: [member.id],
+            roles: [],
+            repliedUser: false
+        }
+    };
+};
+
+client.logSecurityAccountAgeKick = async (member, source, stats, settings) => {
+    if (!member?.guild) return null;
+    const channelId = client.getInviteLogChannelId(member.guild.id);
+    if (!channelId) return null;
+
+    let channel = member.guild.channels.cache.get(channelId);
+    if (!channel) {
+        channel = await member.guild.channels.fetch(channelId).catch(() => null);
+    }
+    if (!channel || !channel.isTextBased()) return null;
+
+    return await channel.send(client.buildAccountAgeKickLogPayload(member, source, stats, settings)).catch(() => null);
 };
 
 client.loadAutoresponders = () => {
@@ -3281,6 +3447,7 @@ client.loadPublicPermissions();
 client.loadInviteLogChannels();
 client.loadInviteMemberStats();
 client.loadRevokedInvites();
+client.loadSecuritySettings();
 
 client.refreshGuildBloxlinkCache = async (guild) => {
     if (!guild) return;
@@ -3466,12 +3633,13 @@ client.on('guildBanAdd', async (ban) => {
 
 client.on('guildMemberAdd', async (member) => {
     const stats = client.incrementInviteMemberJoins(member.guild.id, member.user.id);
+    let resolvedJoinSource = null;
 
     try {
-        const source = await client.resolveMemberJoinSource(member);
-        const sentMessage = await client.logInviteJoin(member, source, stats);
+        resolvedJoinSource = await client.resolveMemberJoinSource(member);
+        const sentMessage = await client.logInviteJoin(member, resolvedJoinSource, stats);
 
-        if ((source.type === 'unknown' || source.type === 'possible_external') && sentMessage) {
+        if ((resolvedJoinSource.type === 'unknown' || resolvedJoinSource.type === 'possible_external') && sentMessage) {
             const retryTimer = setTimeout(async () => {
                 try {
                     const refreshedSource = await client.resolveMemberJoinSource(member);
@@ -3492,6 +3660,34 @@ client.on('guildMemberAdd', async (member) => {
         } catch (fallbackErr) {
             console.error(`Failed to write fallback unknown invite log for member ${member.user.id}:`, fallbackErr);
         }
+        resolvedJoinSource = { type: 'unknown', invite: null, vanityCode: member.guild.vanityURLCode || null };
+    }
+
+    try {
+        const securitySettings = client.getSecuritySettings(member.guild.id);
+        const minAgeDays = Math.max(0, Number(securitySettings.accountAge.minAgeDays || 0));
+        const minAgeMs = minAgeDays * 24 * 60 * 60 * 1000;
+        const accountAgeMs = Date.now() - Number(member.user.createdTimestamp || Date.now());
+        const isWhitelisted = client.isAccountAgeWhitelisted(member.guild.id, member.user.id);
+
+        if (securitySettings.accountAge.enabled && !isWhitelisted && minAgeMs > 0 && accountAgeMs < minAgeMs) {
+            if (!member.kickable) {
+                console.warn(`Could not enforce account age security for ${member.user.id} in guild ${member.guild.id}: member is not kickable.`);
+            } else {
+                await member.kick(`Account age below configured minimum (${minAgeDays} day(s))`);
+
+                await client.logSecurityAccountAgeKick(
+                    member,
+                    resolvedJoinSource || { type: 'unknown', invite: null, vanityCode: member.guild.vanityURLCode || null },
+                    stats,
+                    securitySettings
+                );
+
+                return;
+            }
+        }
+    } catch (err) {
+        console.error(`Failed to enforce account age security for new member ${member.user.id}:`, err);
     }
 
     try {

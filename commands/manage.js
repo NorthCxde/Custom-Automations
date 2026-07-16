@@ -41,10 +41,19 @@ const MANAGE_PANEL_USER_INFRACTIONS = 'user_infractions';
 const MANAGE_PANEL_MODSTATS = 'modstats';
 const MANAGE_PANEL_AUTOMOD = 'automod';
 const MANAGE_PANEL_REVOKED_INVITES = 'revoked_invites';
+const MANAGE_PANEL_SECURITY = 'security';
 
 const MANAGE_REVOKED_INVITE_SELECT_ID = 'manage_revoked_invite_select';
 const MANAGE_REVOKED_INVITE_REMOVE_PREFIX = 'manage_revoked_invite_remove:';
 const MANAGE_REVOKED_INVITES_CLEAR_ID = 'manage_revoked_invites_clear';
+
+const MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID = 'manage_security_toggle_account_age';
+const MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID = 'manage_security_edit_account_age';
+const MANAGE_SECURITY_EDIT_WHITELIST_ID = 'manage_security_edit_whitelist';
+const MANAGE_SECURITY_CLEAR_WHITELIST_ID = 'manage_security_clear_whitelist';
+const MANAGE_SECURITY_MODAL_PREFIX = 'manage_security_modal:';
+const MODAL_SECURITY_ACCOUNT_AGE_DAYS_INPUT_ID = 'account_age_days';
+const MODAL_SECURITY_WHITELIST_INPUT_ID = 'whitelist_ids';
 
 const MANAGE_AUTOMOD_RULE_SELECT_ID = 'manage_automod_rule_select';
 const MANAGE_AUTOMOD_CREATE_ID = 'manage_automod_create';
@@ -139,9 +148,77 @@ function buildPanelSelectRow(selectedPanel) {
                     value: MANAGE_PANEL_REVOKED_INVITES,
                     description: 'Review and manage revoked invite history',
                     default: selectedPanel === MANAGE_PANEL_REVOKED_INVITES
+                },
+                {
+                    label: 'Security',
+                    value: MANAGE_PANEL_SECURITY,
+                    description: 'Configure join security rules',
+                    default: selectedPanel === MANAGE_PANEL_SECURITY
                 }
             ])
     );
+}
+
+function parseSecurityUserIds(text) {
+    return [...new Set(
+        String(text || '')
+            .split(/[\s,\n]+/)
+            .map(part => part.trim())
+            .map(part => {
+                const mention = part.match(/^<@!?(\d{17,20})>$/);
+                return mention ? mention[1] : part;
+            })
+            .filter(part => /^\d{17,20}$/.test(part))
+    )];
+}
+
+function buildSecurityManagePayload(client, guildId, notice) {
+    const settings = typeof client.getSecuritySettings === 'function'
+        ? client.getSecuritySettings(guildId)
+        : { accountAge: { enabled: true, minAgeDays: 7, whitelistedUserIds: [] } };
+
+    const whitelist = Array.isArray(settings.accountAge.whitelistedUserIds)
+        ? settings.accountAge.whitelistedUserIds
+        : [];
+
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Manage Panel - Security')
+        .setDescription('Configure join security rules for this server. More security sections can be added here later.')
+        .addFields(
+            { name: 'Section', value: 'Account Age', inline: false },
+            { name: 'Enabled', value: settings.accountAge.enabled ? 'Yes' : 'No', inline: true },
+            { name: 'Minimum Account Age', value: `${settings.accountAge.minAgeDays} day(s)`, inline: true },
+            { name: 'Whitelisted IDs', value: whitelist.length ? whitelist.map(id => `\`${id}\``).join(', ').slice(0, 1024) : 'None', inline: false },
+            { name: 'Behavior', value: 'Accounts younger than the configured age are automatically kicked and logged in the invite tracker channel.', inline: false }
+        )
+        .setTimestamp();
+
+    return {
+        content: notice || null,
+        embeds: [embed],
+        components: [
+            buildPanelSelectRow(MANAGE_PANEL_SECURITY),
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID)
+                    .setLabel(settings.accountAge.enabled ? 'Disable Account Age' : 'Enable Account Age')
+                    .setStyle(settings.accountAge.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID)
+                    .setLabel('Edit Account Age')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_SECURITY_EDIT_WHITELIST_ID)
+                    .setLabel('Edit Whitelist')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_SECURITY_CLEAR_WHITELIST_ID)
+                    .setLabel('Clear Whitelist')
+                    .setStyle(ButtonStyle.Secondary)
+            )
+        ]
+    };
 }
 
 function formatStep(step, index) {
@@ -1227,6 +1304,10 @@ function buildManagePayload(client, guildId, options = {}) {
         return buildRevokedInvitesPayload(client, guildId, selectedRevokedInviteId, notice);
     }
 
+    if (panel === MANAGE_PANEL_SECURITY) {
+        return buildSecurityManagePayload(client, guildId, notice);
+    }
+
     return buildRuleManagePayload(client, guildId, selectedRuleKey);
 }
 
@@ -1391,6 +1472,11 @@ module.exports = {
                 return true;
             }
 
+            if (panel === MANAGE_PANEL_SECURITY) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_SECURITY }));
+                return true;
+            }
+
             const firstRule = RULE_CHOICES[0]?.value;
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_RULES,
@@ -1457,7 +1543,11 @@ module.exports = {
             && !interaction.customId.startsWith(MANAGE_MODSTATS_RESET_USER_PREFIX)
             && interaction.customId !== MANAGE_MODSTATS_RESET_ALL_ID
             && !interaction.customId.startsWith(MANAGE_REVOKED_INVITE_REMOVE_PREFIX)
-            && interaction.customId !== MANAGE_REVOKED_INVITES_CLEAR_ID) {
+            && interaction.customId !== MANAGE_REVOKED_INVITES_CLEAR_ID
+            && interaction.customId !== MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID
+            && interaction.customId !== MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID
+            && interaction.customId !== MANAGE_SECURITY_EDIT_WHITELIST_ID
+            && interaction.customId !== MANAGE_SECURITY_CLEAR_WHITELIST_ID) {
             return false;
         }
 
@@ -1472,6 +1562,74 @@ module.exports = {
             if (!client.automodDrafts) client.automodDrafts = new Map();
             client.automodDrafts.set(automodDraftKey, draft);
         };
+
+        if (interaction.customId === MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            client.updateSecuritySettings(interaction.guild.id, {
+                accountAge: {
+                    ...settings.accountAge,
+                    enabled: !settings.accountAge.enabled
+                }
+            });
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_SECURITY,
+                notice: `Account Age security ${settings.accountAge.enabled ? 'disabled' : 'enabled'}.`
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const modal = new ModalBuilder()
+                .setCustomId(`${MANAGE_SECURITY_MODAL_PREFIX}account_age`)
+                .setTitle('Security - Account Age');
+
+            const input = new TextInputBuilder()
+                .setCustomId(MODAL_SECURITY_ACCOUNT_AGE_DAYS_INPUT_ID)
+                .setLabel('Minimum account age in days')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setValue(String(settings.accountAge.minAgeDays || 7));
+
+            modal.addComponents(new ActionRowBuilder().addComponents(input));
+            await interaction.showModal(modal);
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_SECURITY_EDIT_WHITELIST_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const modal = new ModalBuilder()
+                .setCustomId(`${MANAGE_SECURITY_MODAL_PREFIX}whitelist`)
+                .setTitle('Security - Whitelist IDs');
+
+            const input = new TextInputBuilder()
+                .setCustomId(MODAL_SECURITY_WHITELIST_INPUT_ID)
+                .setLabel('Whitelisted user IDs (comma or newline separated)')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(false)
+                .setValue((settings.accountAge.whitelistedUserIds || []).join('\n').slice(0, 4000));
+
+            modal.addComponents(new ActionRowBuilder().addComponents(input));
+            await interaction.showModal(modal);
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_SECURITY_CLEAR_WHITELIST_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            client.updateSecuritySettings(interaction.guild.id, {
+                accountAge: {
+                    ...settings.accountAge,
+                    whitelistedUserIds: []
+                }
+            });
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_SECURITY,
+                notice: 'Cleared account age whitelist.'
+            }));
+            return true;
+        }
 
         if (interaction.customId.startsWith(MANAGE_REVOKED_INVITE_REMOVE_PREFIX)) {
             const entryId = interaction.customId.slice(MANAGE_REVOKED_INVITE_REMOVE_PREFIX.length);
@@ -2097,10 +2255,62 @@ module.exports = {
         if (!interaction.customId.startsWith(MANAGE_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_MODSTATS_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_AUTOMOD_MODAL_PREFIX)
-            && !interaction.customId.startsWith(MANAGE_AUTOMOD_CUSTOM_MODAL_PREFIX)) return false;
+            && !interaction.customId.startsWith(MANAGE_AUTOMOD_CUSTOM_MODAL_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_SECURITY_MODAL_PREFIX)) return false;
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
             return true;
+        }
+
+        if (interaction.customId.startsWith(MANAGE_SECURITY_MODAL_PREFIX)) {
+            const modalType = interaction.customId.slice(MANAGE_SECURITY_MODAL_PREFIX.length);
+            const settings = client.getSecuritySettings(interaction.guild.id);
+
+            if (modalType === 'account_age') {
+                const rawDays = interaction.fields.getTextInputValue(MODAL_SECURITY_ACCOUNT_AGE_DAYS_INPUT_ID).trim();
+                const minAgeDays = Number(rawDays);
+                if (!Number.isInteger(minAgeDays) || minAgeDays < 0 || minAgeDays > 3650) {
+                    await interaction.reply({ content: 'Please provide a whole number of days between 0 and 3650.', ephemeral: true });
+                    return true;
+                }
+
+                client.updateSecuritySettings(interaction.guild.id, {
+                    accountAge: {
+                        ...settings.accountAge,
+                        minAgeDays
+                    }
+                });
+
+                await interaction.reply({
+                    ...buildManagePayload(client, interaction.guild.id, {
+                        panel: MANAGE_PANEL_SECURITY,
+                        notice: `Updated minimum account age to ${minAgeDays} day(s).`
+                    }),
+                    ephemeral: true
+                });
+                return true;
+            }
+
+            if (modalType === 'whitelist') {
+                const rawWhitelist = interaction.fields.getTextInputValue(MODAL_SECURITY_WHITELIST_INPUT_ID).trim();
+                const whitelistedUserIds = parseSecurityUserIds(rawWhitelist);
+
+                client.updateSecuritySettings(interaction.guild.id, {
+                    accountAge: {
+                        ...settings.accountAge,
+                        whitelistedUserIds
+                    }
+                });
+
+                await interaction.reply({
+                    ...buildManagePayload(client, interaction.guild.id, {
+                        panel: MANAGE_PANEL_SECURITY,
+                        notice: `Updated whitelist with ${whitelistedUserIds.length} user ID(s).`
+                    }),
+                    ephemeral: true
+                });
+                return true;
+            }
         }
 
         if (interaction.customId.startsWith(MANAGE_AUTOMOD_CUSTOM_MODAL_PREFIX)) {
