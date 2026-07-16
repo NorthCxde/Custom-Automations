@@ -1622,7 +1622,7 @@ module.exports = {
 
             const input = new TextInputBuilder()
                 .setCustomId(MODAL_SECURITY_WHITELIST_INPUT_ID)
-                .setLabel('Whitelisted user IDs (comma or newline separated)')
+                .setLabel('Whitelisted user IDs (comma/newline)')
                 .setStyle(TextInputStyle.Paragraph)
                 .setRequired(false)
                 .setValue((settings.accountAge.whitelistedUserIds || []).join('\n').slice(0, 4000));

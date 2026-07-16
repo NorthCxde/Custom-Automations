@@ -3256,7 +3256,7 @@ client.buildInviteLogPayload = (member, source, stats) => {
         components,
         allowedMentions: {
             parse: [],
-            users: [member.id, source.invite?.inviterId].filter(Boolean),
+            users: [...new Set([member.id, source.invite?.inviterId].filter(Boolean))],
             roles: [],
             repliedUser: false
         }
