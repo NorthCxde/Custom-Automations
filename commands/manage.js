@@ -221,6 +221,11 @@ function buildSecurityManagePayload(client, guildId, notice) {
     };
 }
 
+function hasSecurityBackend(client) {
+    return typeof client.getSecuritySettings === 'function'
+        && typeof client.updateSecuritySettings === 'function';
+}
+
 function formatStep(step, index) {
     const number = `${index + 1}.`;
     if (!step) return `${number} moderator_decision`;
@@ -1563,6 +1568,18 @@ module.exports = {
             client.automodDrafts.set(automodDraftKey, draft);
         };
 
+        if ((interaction.customId === MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID
+            || interaction.customId === MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID
+            || interaction.customId === MANAGE_SECURITY_EDIT_WHITELIST_ID
+            || interaction.customId === MANAGE_SECURITY_CLEAR_WHITELIST_ID)
+            && !hasSecurityBackend(client)) {
+            await interaction.reply({
+                content: 'Security backend is not loaded yet. Pull latest changes and restart the bot.',
+                ephemeral: true
+            });
+            return true;
+        }
+
         if (interaction.customId === MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID) {
             const settings = client.getSecuritySettings(interaction.guild.id);
             client.updateSecuritySettings(interaction.guild.id, {
@@ -2263,6 +2280,14 @@ module.exports = {
         }
 
         if (interaction.customId.startsWith(MANAGE_SECURITY_MODAL_PREFIX)) {
+            if (!hasSecurityBackend(client)) {
+                await interaction.reply({
+                    content: 'Security backend is not loaded yet. Pull latest changes and restart the bot.',
+                    ephemeral: true
+                });
+                return true;
+            }
+
             const modalType = interaction.customId.slice(MANAGE_SECURITY_MODAL_PREFIX.length);
             const settings = client.getSecuritySettings(interaction.guild.id);
 
