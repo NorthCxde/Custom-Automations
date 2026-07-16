@@ -194,8 +194,7 @@ function buildSecurityManagePayload(client, guildId, notice) {
         )
         .setTimestamp();
 
-    return {
-        content: notice || null,
+    const payload = {
         embeds: [embed],
         components: [
             buildPanelSelectRow(MANAGE_PANEL_SECURITY),
@@ -219,6 +218,12 @@ function buildSecurityManagePayload(client, guildId, notice) {
             )
         ]
     };
+
+    if (notice) {
+        payload.content = String(notice);
+    }
+
+    return payload;
 }
 
 function hasSecurityBackend(client) {
@@ -2280,60 +2285,70 @@ module.exports = {
         }
 
         if (interaction.customId.startsWith(MANAGE_SECURITY_MODAL_PREFIX)) {
-            if (!hasSecurityBackend(client)) {
-                await interaction.reply({
-                    content: 'Security backend is not loaded yet. Pull latest changes and restart the bot.',
-                    ephemeral: true
-                });
-                return true;
-            }
-
-            const modalType = interaction.customId.slice(MANAGE_SECURITY_MODAL_PREFIX.length);
-            const settings = client.getSecuritySettings(interaction.guild.id);
-
-            if (modalType === 'account_age') {
-                const rawDays = interaction.fields.getTextInputValue(MODAL_SECURITY_ACCOUNT_AGE_DAYS_INPUT_ID).trim();
-                const minAgeDays = Number(rawDays);
-                if (!Number.isInteger(minAgeDays) || minAgeDays < 0 || minAgeDays > 3650) {
-                    await interaction.reply({ content: 'Please provide a whole number of days between 0 and 3650.', ephemeral: true });
+            try {
+                if (!hasSecurityBackend(client)) {
+                    await interaction.reply({
+                        content: 'Security backend is not loaded yet. Pull latest changes and restart the bot.',
+                        ephemeral: true
+                    });
                     return true;
                 }
 
-                client.updateSecuritySettings(interaction.guild.id, {
-                    accountAge: {
-                        ...settings.accountAge,
-                        minAgeDays
+                const modalType = interaction.customId.slice(MANAGE_SECURITY_MODAL_PREFIX.length);
+                const settings = client.getSecuritySettings(interaction.guild.id);
+
+                if (modalType === 'account_age') {
+                    const rawDays = interaction.fields.getTextInputValue(MODAL_SECURITY_ACCOUNT_AGE_DAYS_INPUT_ID).trim();
+                    const minAgeDays = Number(rawDays);
+                    if (!Number.isInteger(minAgeDays) || minAgeDays < 0 || minAgeDays > 3650) {
+                        await interaction.reply({ content: 'Please provide a whole number of days between 0 and 3650.', ephemeral: true });
+                        return true;
                     }
-                });
 
-                await interaction.reply({
-                    ...buildManagePayload(client, interaction.guild.id, {
-                        panel: MANAGE_PANEL_SECURITY,
-                        notice: `Updated minimum account age to ${minAgeDays} day(s).`
-                    }),
-                    ephemeral: true
-                });
-                return true;
-            }
+                    client.updateSecuritySettings(interaction.guild.id, {
+                        accountAge: {
+                            ...settings.accountAge,
+                            minAgeDays
+                        }
+                    });
 
-            if (modalType === 'whitelist') {
-                const rawWhitelist = interaction.fields.getTextInputValue(MODAL_SECURITY_WHITELIST_INPUT_ID).trim();
-                const whitelistedUserIds = parseSecurityUserIds(rawWhitelist);
+                    await interaction.reply({
+                        ...buildManagePayload(client, interaction.guild.id, {
+                            panel: MANAGE_PANEL_SECURITY,
+                            notice: `Updated minimum account age to ${minAgeDays} day(s).`
+                        }),
+                        ephemeral: true
+                    });
+                    return true;
+                }
 
-                client.updateSecuritySettings(interaction.guild.id, {
-                    accountAge: {
-                        ...settings.accountAge,
-                        whitelistedUserIds
-                    }
-                });
+                if (modalType === 'whitelist') {
+                    const rawWhitelist = interaction.fields.getTextInputValue(MODAL_SECURITY_WHITELIST_INPUT_ID).trim();
+                    const whitelistedUserIds = parseSecurityUserIds(rawWhitelist);
 
-                await interaction.reply({
-                    ...buildManagePayload(client, interaction.guild.id, {
-                        panel: MANAGE_PANEL_SECURITY,
-                        notice: `Updated whitelist with ${whitelistedUserIds.length} user ID(s).`
-                    }),
-                    ephemeral: true
-                });
+                    client.updateSecuritySettings(interaction.guild.id, {
+                        accountAge: {
+                            ...settings.accountAge,
+                            whitelistedUserIds
+                        }
+                    });
+
+                    await interaction.reply({
+                        ...buildManagePayload(client, interaction.guild.id, {
+                            panel: MANAGE_PANEL_SECURITY,
+                            notice: `Updated whitelist with ${whitelistedUserIds.length} user ID(s).`
+                        }),
+                        ephemeral: true
+                    });
+                    return true;
+                }
+            } catch (err) {
+                console.error('[Manage Security] Modal submit failed:', err);
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp({ content: `Security modal failed: ${err.message || 'Unknown error'}`, ephemeral: true }).catch(() => null);
+                } else {
+                    await interaction.reply({ content: `Security modal failed: ${err.message || 'Unknown error'}`, ephemeral: true }).catch(() => null);
+                }
                 return true;
             }
         }
