@@ -25,6 +25,56 @@ function parseMentionOrId(value) {
     return null;
 }
 
+function truncate(text, max = 220) {
+    const value = String(text || '').trim();
+    if (!value) return 'No reason provided.';
+    return value.length > max ? `${value.slice(0, max - 3)}...` : value;
+}
+
+function getActionBadge(action) {
+    const normalized = String(action || '').trim().toLowerCase();
+    if (normalized === 'mute') return '🔇';
+    if (normalized === 'unmute') return '🔊';
+    if (normalized === 'ban') return '⛔';
+    if (normalized === 'unban') return '✅';
+    if (normalized === 'kick') return '👢';
+    if (normalized === 'warn') return '⚠️';
+    return '📌';
+}
+
+function formatDuration(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    return raw
+        .replace(/\b(\d+)h\b/gi, '$1 hour')
+        .replace(/\b(\d+)d\b/gi, '$1 day')
+        .replace(/\b(\d+)m\b/gi, '$1 minute');
+}
+
+function getTimeBlockLabel(date) {
+    const hour = date.getHours();
+    if (hour < 6) return 'Late Night (00:00-05:59)';
+    if (hour < 12) return 'Morning (06:00-11:59)';
+    if (hour < 18) return 'Afternoon (12:00-17:59)';
+    return 'Evening (18:00-23:59)';
+}
+
+function formatTimestampBlock(timestamp) {
+    const parsed = new Date(timestamp);
+    if (!Number.isFinite(parsed.getTime())) {
+        return {
+            when: 'Unknown',
+            block: 'Unknown'
+        };
+    }
+
+    const unix = Math.floor(parsed.getTime() / 1000);
+    return {
+        when: `<t:${unix}:F> • <t:${unix}:R>`,
+        block: getTimeBlockLabel(parsed)
+    };
+}
+
 function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId = null }) {
     const totalPages = Math.max(1, Math.ceil(logs.length / MODLOGS_PAGE_SIZE));
     const safePage = Math.min(Math.max(0, Number(page) || 0), totalPages - 1);
@@ -40,19 +90,26 @@ function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId
         .setTimestamp();
 
     for (const entry of displayLogs) {
+        const action = String(entry.action || 'Unknown');
+        const badge = getActionBadge(action);
+        const timestampInfo = formatTimestampBlock(entry.timestamp);
         const lines = [];
-        lines.push(`Type: ${entry.action}`);
-        lines.push(`User: <@${entry.userId}>`);
-        if (entry.duration) lines.push(`Length: ${entry.duration}`);
-        if (entry.count) lines.push(`Count: ${entry.count}`);
-        if (entry.channelId) lines.push(`Channel: <#${entry.channelId}>`);
-        if (entry.reason) lines.push(`Reason: ${entry.reason}`);
-        lines.push(`Moderator: <@${entry.moderatorId}>`);
-        lines.push(`Date: ${new Date(entry.timestamp).toLocaleString()}`);
+        lines.push(`**Type**: ${badge} ${action}`);
+        lines.push(`**User**: <@${entry.userId}>`);
+        lines.push(`**Moderator**: <@${entry.moderatorId}>`);
+        if (entry.duration) {
+            const formattedDuration = formatDuration(entry.duration);
+            lines.push(`**Length**: ${formattedDuration || entry.duration}`);
+        }
+        if (entry.count) lines.push(`**Count**: ${entry.count}`);
+        if (entry.channelId) lines.push(`**Channel**: <#${entry.channelId}>`);
+        lines.push(`**Reason**: ${truncate(entry.reason || 'No reason provided.')}`);
+        lines.push(`**Date**: ${timestampInfo.when}`);
+        lines.push(`**Time Block**: ${timestampInfo.block}`);
         lines.push(separator);
 
         embed.addFields({
-            name: `Case ${entry.caseNumber ?? entry.caseId ?? 'N/A'}`,
+            name: `Case ${entry.caseNumber ?? entry.caseId ?? 'N/A'}  —  ${badge} ${action}`,
             value: lines.join('\n'),
             inline: false
         });
