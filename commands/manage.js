@@ -18,6 +18,9 @@ const MANAGE_RULE_SELECT_ID = 'manage_infraction_rule_select';
 const MANAGE_PANEL_SELECT_ID = 'manage_panel_select';
 const MANAGE_USER_SELECT_ID = 'manage_user_infraction_user_select';
 const MANAGE_USER_CASE_SELECT_ID = 'manage_user_infraction_case_select';
+const MANAGE_USER_INFRACTIONS_RESET_PROMPT_ID = 'manage_user_infractions_reset_prompt';
+const MANAGE_USER_INFRACTIONS_RESET_CONFIRM_ID = 'manage_user_infractions_reset_confirm';
+const MANAGE_USER_INFRACTIONS_RESET_CANCEL_ID = 'manage_user_infractions_reset_cancel';
 const MANAGE_EDIT_PREFIX = 'manage_infraction_rule_edit:';
 const MANAGE_RESET_PREFIX = 'manage_infraction_rule_reset:';
 const MANAGE_REMOVE_PREFIX = 'manage_user_infraction_remove:';
@@ -362,7 +365,7 @@ function buildRuleManagePayload(client, guildId, selectedRuleKey) {
     return { embeds: [embed], components: [buildPanelSelectRow(MANAGE_PANEL_RULES), selectRow, buttonRow] };
 }
 
-function buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCaseNumber, notice) {
+function buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCaseNumber, notice, showResetConfirm = false) {
     const entries = selectedUserId ? getUserInfractionEntries(client, guildId, selectedUserId) : [];
     const selectedEntry = selectedCaseNumber
         ? entries.find(entry => String(entry.caseNumber ?? entry.caseId) === String(selectedCaseNumber))
@@ -455,6 +458,30 @@ function buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCa
                     .setCustomId(`${MANAGE_REMOVE_PREFIX}${selectedUserId}:${selectedEntry.caseNumber ?? selectedEntry.caseId}`)
                     .setLabel(`Remove Case ${selectedEntry.caseNumber ?? selectedEntry.caseId}`)
                     .setStyle(ButtonStyle.Danger)
+            )
+        );
+    }
+
+    components.push(
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(MANAGE_USER_INFRACTIONS_RESET_PROMPT_ID)
+                .setLabel('Reset Infractions')
+                .setStyle(ButtonStyle.Danger)
+        )
+    );
+
+    if (showResetConfirm) {
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_USER_INFRACTIONS_RESET_CONFIRM_ID)
+                    .setLabel('Yes, Reset')
+                    .setStyle(ButtonStyle.Danger),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_USER_INFRACTIONS_RESET_CANCEL_ID)
+                    .setLabel('No, Cancel')
+                    .setStyle(ButtonStyle.Secondary)
             )
         );
     }
@@ -1308,6 +1335,7 @@ function buildManagePayload(client, guildId, options = {}) {
         selectedRuleKey,
         selectedUserId,
         selectedCaseNumber,
+        showUserInfractionResetConfirm = false,
         selectedModstatsUserId,
         selectedAutomodRuleId,
         selectedRevokedInviteId,
@@ -1316,7 +1344,7 @@ function buildManagePayload(client, guildId, options = {}) {
     } = options;
 
     if (panel === MANAGE_PANEL_USER_INFRACTIONS) {
-        return buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCaseNumber, notice);
+        return buildUserInfractionsPayload(client, guildId, selectedUserId, selectedCaseNumber, notice, showUserInfractionResetConfirm);
     }
 
     if (panel === MANAGE_PANEL_MODSTATS) {
@@ -1553,6 +1581,9 @@ module.exports = {
         if (!interaction.customId.startsWith(MANAGE_EDIT_PREFIX)
             && !interaction.customId.startsWith(MANAGE_RESET_PREFIX)
             && !interaction.customId.startsWith(MANAGE_REMOVE_PREFIX)
+            && interaction.customId !== MANAGE_USER_INFRACTIONS_RESET_PROMPT_ID
+            && interaction.customId !== MANAGE_USER_INFRACTIONS_RESET_CONFIRM_ID
+            && interaction.customId !== MANAGE_USER_INFRACTIONS_RESET_CANCEL_ID
             && interaction.customId !== MANAGE_AUTOMOD_CREATE_ID
             && !interaction.customId.startsWith(MANAGE_AUTOMOD_EDIT_PREFIX)
             && !interaction.customId.startsWith(MANAGE_AUTOMOD_DELETE_PREFIX)
@@ -1590,6 +1621,36 @@ module.exports = {
             if (!client.automodDrafts) client.automodDrafts = new Map();
             client.automodDrafts.set(automodDraftKey, draft);
         };
+
+        if (interaction.customId === MANAGE_USER_INFRACTIONS_RESET_PROMPT_ID) {
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_USER_INFRACTIONS,
+                notice: 'Warning: This resets all recorded auto-infraction progression (server-wide) back to bottom level. Continue?',
+                showUserInfractionResetConfirm: true
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_USER_INFRACTIONS_RESET_CANCEL_ID) {
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_USER_INFRACTIONS,
+                notice: 'Infraction reset canceled.',
+                showUserInfractionResetConfirm: false
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_USER_INFRACTIONS_RESET_CONFIRM_ID) {
+            const reset = typeof client.resetAllInfractionProgress === 'function'
+                ? client.resetAllInfractionProgress(interaction.guild.id)
+                : { resetCount: 0, totalCases: 0 };
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_USER_INFRACTIONS,
+                notice: `Reset infraction progression on ${reset.resetCount} case(s) out of ${reset.totalCases} total case(s).`,
+                showUserInfractionResetConfirm: false
+            }));
+            return true;
+        }
 
         if ((interaction.customId === MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID
             || interaction.customId === MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID
