@@ -4123,6 +4123,14 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
+        if (interaction.customId.startsWith('modlogs_page:')) {
+            const modlogsCommand = client.slashCommands.get('modlogs');
+            if (modlogsCommand && typeof modlogsCommand.handleButton === 'function') {
+                const handled = await modlogsCommand.handleButton({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId.startsWith('profile-ban-user-')) {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });

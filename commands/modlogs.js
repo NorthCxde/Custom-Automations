@@ -1,5 +1,21 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
+const MODLOGS_PAGE_SIZE = 10;
+
+function parseModlogsPageCustomId(customId) {
+    const raw = String(customId || '');
+    if (!raw.startsWith('modlogs_page:')) return null;
+    const parts = raw.split(':');
+    if (parts.length < 5) return null;
+    const page = Number(parts[2]);
+    if (!Number.isInteger(page) || page < 0) return null;
+    return {
+        page,
+        targetUserId: parts[3] === 'all' ? null : parts[3],
+        ownerId: parts[4]
+    };
+}
+
 function parseMentionOrId(value) {
     const raw = String(value || '').trim();
     if (!raw) return null;
@@ -9,12 +25,18 @@ function parseMentionOrId(value) {
     return null;
 }
 
-function buildModlogsPayload(logs, user) {
-    const displayLogs = logs.slice(0, 10);
+function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId = null }) {
+    const totalPages = Math.max(1, Math.ceil(logs.length / MODLOGS_PAGE_SIZE));
+    const safePage = Math.min(Math.max(0, Number(page) || 0), totalPages - 1);
+    const start = safePage * MODLOGS_PAGE_SIZE;
+    const displayLogs = logs.slice(start, start + MODLOGS_PAGE_SIZE);
+    const separator = '────────────────────────';
     const embed = new EmbedBuilder()
         .setColor(0x000000)
-        .setTitle(user ? 'User Moderation Logs' : 'All Moderation Logs')
-        .setDescription(`Showing ${displayLogs.length} of ${logs.length} records`)
+        .setTitle(user ? `Modlogs for ${user.username}` : 'All Moderation Logs')
+        .setDescription(user
+            ? `${user.id}\n\nShowing ${displayLogs.length} of ${logs.length} records | Page ${safePage + 1}/${totalPages}`
+            : `Showing ${displayLogs.length} of ${logs.length} records | Page ${safePage + 1}/${totalPages}`)
         .setTimestamp();
 
     for (const entry of displayLogs) {
@@ -27,6 +49,7 @@ function buildModlogsPayload(logs, user) {
         if (entry.reason) lines.push(`Reason: ${entry.reason}`);
         lines.push(`Moderator: <@${entry.moderatorId}>`);
         lines.push(`Date: ${new Date(entry.timestamp).toLocaleString()}`);
+        lines.push(separator);
 
         embed.addFields({
             name: `Case ${entry.caseNumber ?? entry.caseId ?? 'N/A'}`,
@@ -35,18 +58,33 @@ function buildModlogsPayload(logs, user) {
         });
     }
 
-    if (logs.length > displayLogs.length) {
-        embed.addFields({ name: 'More logs', value: `Use /modlogs to view the first ${displayLogs.length} records.`, inline: false });
+    const components = [];
+
+    if (logs.length > MODLOGS_PAGE_SIZE) {
+        const normalizedTarget = targetUserId || user?.id || 'all';
+        const prevButton = new ButtonBuilder()
+            .setCustomId(`modlogs_page:goto:${Math.max(0, safePage - 1)}:${normalizedTarget}:${ownerId}`)
+            .setLabel('Previous Page')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(safePage <= 0);
+        const nextButton = new ButtonBuilder()
+            .setCustomId(`modlogs_page:goto:${Math.min(totalPages - 1, safePage + 1)}:${normalizedTarget}:${ownerId}`)
+            .setLabel('Next Page')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(safePage >= totalPages - 1);
+        components.push(new ActionRowBuilder().addComponents(prevButton, nextButton));
     }
 
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId('modlogs_remove_button')
-            .setLabel('Remove Log')
-            .setStyle(ButtonStyle.Danger)
+    components.push(
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('modlogs_remove_button')
+                .setLabel('Remove Log')
+                .setStyle(ButtonStyle.Danger)
+        )
     );
 
-    return { embeds: [embed], components: [row] };
+    return { embeds: [embed], components };
 }
 
 module.exports = {
@@ -82,7 +120,13 @@ module.exports = {
             return message.reply('No moderation logs are available for this server.');
         }
 
-        return message.reply(buildModlogsPayload(logs, user));
+        return message.reply(buildModlogsPayload({
+            logs,
+            user,
+            page: 0,
+            ownerId: message.author.id,
+            targetUserId: user?.id || null
+        }));
     },
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
@@ -99,6 +143,49 @@ module.exports = {
             return interaction.reply({ content: 'No moderation logs are available for this server.', ephemeral: true });
         }
 
-        return interaction.reply({ ...buildModlogsPayload(logs, user), ephemeral: true });
+        return interaction.reply({
+            ...buildModlogsPayload({
+                logs,
+                user,
+                page: 0,
+                ownerId: interaction.user.id,
+                targetUserId: user?.id || null
+            }),
+            ephemeral: true
+        });
+    },
+    async handleButton({ client, interaction }) {
+        const parsed = parseModlogsPageCustomId(interaction.customId);
+        if (!parsed) return false;
+
+        if (!interaction.guild) {
+            await interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        if (parsed.ownerId && parsed.ownerId !== '0' && parsed.ownerId !== interaction.user.id) {
+            await interaction.reply({ content: 'Only the user who opened this modlogs panel can switch pages.', ephemeral: true });
+            return true;
+        }
+
+        const logs = client.getModLogs(interaction.guild.id, parsed.targetUserId || undefined);
+        if (!logs || logs.length === 0) {
+            await interaction.reply({ content: 'No moderation logs are available for this view anymore.', ephemeral: true });
+            return true;
+        }
+
+        let targetUser = null;
+        if (parsed.targetUserId) {
+            targetUser = await client.users.fetch(parsed.targetUserId).catch(() => null);
+        }
+
+        await interaction.update(buildModlogsPayload({
+            logs,
+            user: targetUser,
+            page: parsed.page,
+            ownerId: parsed.ownerId || interaction.user.id,
+            targetUserId: parsed.targetUserId
+        }));
+        return true;
     }
 };
