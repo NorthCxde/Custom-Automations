@@ -5650,30 +5650,30 @@ client.on('messageReactionAdd', async (reaction, user) => {
                         return {
                             ts: Number(item.ts) || 0,
                             messageId: item.messageId ? String(item.messageId) : null,
-                            channelId: item.channelId ? String(item.channelId) : null
+                            channelId: item.channelId ? String(item.channelId) : null,
+                            emojiKey: item.emojiKey ? String(item.emojiKey) : null
                         };
                     }
                     return {
                         ts: Number(item) || 0,
                         messageId: null,
-                        channelId: null
+                        channelId: null,
+                        emojiKey: null
                     };
                 })
                 .filter(item => now - item.ts <= windowMs);
 
             const messageId = String(reaction.message.id || '');
             const channelId = String(reaction.message.channelId || reaction.message.channel?.id || '');
-            const existingMessageIdx = messageId
-                ? filtered.findIndex(item => item.messageId === messageId)
-                : -1;
-            if (existingMessageIdx === -1) {
-                filtered.push({ ts: now, messageId: messageId || null, channelId: channelId || null });
-            } else {
-                filtered[existingMessageIdx].ts = now;
-                if (channelId) {
-                    filtered[existingMessageIdx].channelId = channelId;
-                }
-            }
+            const emojiKey = reaction.emoji?.id
+                ? `custom:${reaction.emoji.id}`
+                : `unicode:${String(reaction.emoji?.name || '')}`;
+            filtered.push({
+                ts: now,
+                messageId: messageId || null,
+                channelId: channelId || null,
+                emojiKey: emojiKey || null
+            });
 
             client.automodReactionBuckets.set(bucketKey, filtered);
 
@@ -5686,25 +5686,36 @@ client.on('messageReactionAdd', async (reaction, user) => {
             client.automodReactionCooldowns.set(bucketKey, cooldownUntilTs);
             await tryRemoveReaction();
 
-            const trackedMessages = new Map();
+            const trackedReactions = new Map();
             for (const item of filtered) {
-                if (!item.messageId || !item.channelId) continue;
-                const key = `${item.channelId}:${item.messageId}`;
-                if (!trackedMessages.has(key)) {
-                    trackedMessages.set(key, { channelId: item.channelId, messageId: item.messageId });
+                if (!item.messageId || !item.channelId || !item.emojiKey) continue;
+                const key = `${item.channelId}:${item.messageId}:${item.emojiKey}`;
+                if (!trackedReactions.has(key)) {
+                    trackedReactions.set(key, {
+                        channelId: item.channelId,
+                        messageId: item.messageId,
+                        emojiKey: item.emojiKey
+                    });
                 }
             }
 
-            const removeUserReactionsFromMessage = async (targetMessage) => {
-                if (!targetMessage) return;
-                await Promise.all(
-                    [...targetMessage.reactions.cache.values()].map(async (entryReaction) => {
-                        await entryReaction.users.remove(user.id).catch(() => null);
-                    })
-                );
+            const removeSpecificUserReaction = async (targetMessage, targetEmojiKey) => {
+                if (!targetMessage || !targetEmojiKey) return;
+
+                let entryReaction = null;
+                if (targetEmojiKey.startsWith('custom:')) {
+                    const emojiId = targetEmojiKey.slice('custom:'.length);
+                    entryReaction = [...targetMessage.reactions.cache.values()].find(item => String(item.emoji?.id || '') === emojiId) || null;
+                } else if (targetEmojiKey.startsWith('unicode:')) {
+                    const emojiName = targetEmojiKey.slice('unicode:'.length);
+                    entryReaction = [...targetMessage.reactions.cache.values()].find(item => String(item.emoji?.name || '') === emojiName) || null;
+                }
+
+                if (!entryReaction) return;
+                await entryReaction.users.remove(user.id).catch(() => null);
             };
 
-            for (const tracked of trackedMessages.values()) {
+            for (const tracked of trackedReactions.values()) {
                 try {
                     let targetChannel = guild.channels.cache.get(tracked.channelId) || null;
                     if (!targetChannel) {
@@ -5712,7 +5723,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                     }
                     if (!targetChannel || typeof targetChannel.messages?.fetch !== 'function') continue;
                     const targetMessage = await targetChannel.messages.fetch(tracked.messageId).catch(() => null);
-                    await removeUserReactionsFromMessage(targetMessage);
+                    await removeSpecificUserReaction(targetMessage, tracked.emojiKey);
                 } catch (_) {
                     // Ignore per-message cleanup failures to avoid blocking core enforcement.
                 }
@@ -5735,7 +5746,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                         .setDescription(`Reaction removed for <@${user.id}> in <#${channel.id}> due to reaction cooldown.`)
                         .addFields(
                             { name: 'Reason', value: 'Reaction Cooldown', inline: true },
-                            { name: 'Detailed Reason', value: `${uniqueMessageCount} different messages in ${Math.round(windowMs / 1000)}s. Removed this user's reactions from tracked messages. Cooldown: ${Math.round(cooldownMs / 1000)}s.`, inline: true }
+                            { name: 'Detailed Reason', value: `${uniqueMessageCount} different messages in ${Math.round(windowMs / 1000)}s. Removed only this user's reactions added during the window. Cooldown: ${Math.round(cooldownMs / 1000)}s.`, inline: true }
                         )
                         .setFooter({ text: `ID: ${user.id}` })
                         .setTimestamp();
