@@ -262,7 +262,9 @@ function getRuleMuteCount(client, guildId, userId, ruleKey) {
     const logs = client.getModLogs(guildId, userId) || [];
     return logs.filter(entry => {
         const action = (entry.action || '').toString().toLowerCase();
-        return action === 'mute' && entry.infractionRule === ruleKey;
+        return action === 'mute'
+            && entry.infractionRule === ruleKey
+            && !entry.infractionClearedOnEarlyUnmute;
     }).length;
 }
 

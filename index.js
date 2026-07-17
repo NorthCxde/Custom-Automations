@@ -2538,6 +2538,57 @@ client.removeModLogCase = (guildId, caseNumber, userId = null) => {
     return removedLog;
 };
 
+function parseModerationDurationMs(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return null;
+
+    const compact = parseDurationMs(raw);
+    if (compact) return compact;
+
+    const wordMatch = raw.match(/^(\d+)\s*(second|seconds|minute|minutes|hour|hours|day|days)$/i);
+    if (!wordMatch) return null;
+
+    const amount = Number(wordMatch[1]);
+    const unit = String(wordMatch[2] || '').toLowerCase();
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+
+    if (unit.startsWith('second')) return amount * 1000;
+    if (unit.startsWith('minute')) return amount * 60 * 1000;
+    if (unit.startsWith('hour')) return amount * 60 * 60 * 1000;
+    if (unit.startsWith('day')) return amount * 24 * 60 * 60 * 1000;
+    return null;
+}
+
+client.markLatestInfractionMuteAsAppealed = (guildId, userId, unmutedAtMs = Date.now()) => {
+    const logs = client.modLogs.get(guildId) || [];
+    const unmutedAt = Number(unmutedAtMs || Date.now());
+
+    for (const log of logs) {
+        const action = String(log?.action || '').trim().toLowerCase();
+        if (action !== 'mute') continue;
+        if (String(log?.userId || '') !== String(userId)) continue;
+        if (!log?.infractionRule) continue;
+        if (log?.infractionClearedOnEarlyUnmute) continue;
+
+        const startTs = new Date(log.timestamp || '').getTime();
+        if (!Number.isFinite(startTs)) continue;
+
+        const durationMs = parseModerationDurationMs(log.duration);
+        if (!durationMs) continue;
+
+        const muteEndsAt = startTs + durationMs;
+        if (muteEndsAt <= unmutedAt) continue;
+
+        log.infractionClearedOnEarlyUnmute = true;
+        log.infractionClearedAt = new Date(unmutedAt).toISOString();
+        client.modLogs.set(guildId, logs);
+        client.saveModLogs();
+        return log;
+    }
+
+    return null;
+};
+
 client.resetAllInfractionProgress = (guildId) => {
     const logs = client.modLogs.get(guildId) || [];
     let resetCount = 0;
@@ -4667,6 +4718,9 @@ client.on('interactionCreate', async (interaction) => {
                                 return { user, success: false, reason: 'Member not found' };
                             }
                             await member.timeout(null, 'Unmuted via button');
+                            if (typeof client.markLatestInfractionMuteAsAppealed === 'function') {
+                                client.markLatestInfractionMuteAsAppealed(interaction.guild.id, user.id, Date.now());
+                            }
                         } else {
                             await interaction.guild.members.unban(user.id);
                         }
@@ -4876,6 +4930,9 @@ client.on('interactionCreate', async (interaction) => {
                             return { user, success: false, reason: 'Member not found' };
                         }
                         await member.timeout(null, 'Unmuted via button');
+                        if (typeof client.markLatestInfractionMuteAsAppealed === 'function') {
+                            client.markLatestInfractionMuteAsAppealed(interaction.guild.id, userId, Date.now());
+                        }
                     } else {
                         await interaction.guild.members.unban(userId);
                     }

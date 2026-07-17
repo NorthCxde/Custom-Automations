@@ -100,6 +100,9 @@ module.exports = {
                     }
 
                     await member.timeout(null, 'Removing timeout');
+                    if (typeof client.markLatestInfractionMuteAsAppealed === 'function') {
+                        client.markLatestInfractionMuteAsAppealed(message.guild.id, targetId, Date.now());
+                    }
                     let robloxId = null;
                     try {
                         if (client.getLinkedRobloxId) robloxId = await client.getLinkedRobloxId(message.guild.id, targetId);
@@ -207,6 +210,9 @@ module.exports = {
             }
 
             await member.timeout(null, 'Removing timeout');
+            if (typeof client.markLatestInfractionMuteAsAppealed === 'function') {
+                client.markLatestInfractionMuteAsAppealed(interaction.guild.id, user.id, Date.now());
+            }
             const statusChannel = interaction.channel || (interaction.channelId
                 ? await client.channels.fetch(interaction.channelId).catch(() => null)
                 : null);
