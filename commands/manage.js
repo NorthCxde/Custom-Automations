@@ -45,6 +45,7 @@ const MANAGE_PANEL_MODSTATS = 'modstats';
 const MANAGE_PANEL_AUTOMOD = 'automod';
 const MANAGE_PANEL_REVOKED_INVITES = 'revoked_invites';
 const MANAGE_PANEL_SECURITY = 'security';
+const MANAGE_PANEL_AUTORESPONDER = 'autoresponder';
 
 const MANAGE_REVOKED_INVITE_SELECT_ID = 'manage_revoked_invite_select';
 const MANAGE_REVOKED_INVITE_REMOVE_PREFIX = 'manage_revoked_invite_remove:';
@@ -57,6 +58,7 @@ const MANAGE_SECURITY_CLEAR_WHITELIST_ID = 'manage_security_clear_whitelist';
 const MANAGE_SECURITY_MODAL_PREFIX = 'manage_security_modal:';
 const MODAL_SECURITY_ACCOUNT_AGE_DAYS_INPUT_ID = 'account_age_days';
 const MODAL_SECURITY_WHITELIST_INPUT_ID = 'whitelist_ids';
+const MANAGE_AUTORESPONDER_OPEN_ID = 'manage_autoresponder_open';
 
 const MANAGE_AUTOMOD_RULE_SELECT_ID = 'manage_automod_rule_select';
 const MANAGE_AUTOMOD_CREATE_ID = 'manage_automod_create';
@@ -158,9 +160,47 @@ function buildPanelSelectRow(selectedPanel) {
                     value: MANAGE_PANEL_SECURITY,
                     description: 'Configure join security rules',
                     default: selectedPanel === MANAGE_PANEL_SECURITY
+                },
+                {
+                    label: 'Auto Responder',
+                    value: MANAGE_PANEL_AUTORESPONDER,
+                    description: 'Open autoresponder management flow',
+                    default: selectedPanel === MANAGE_PANEL_AUTORESPONDER
                 }
             ])
     );
+}
+
+function buildAutoresponderManagePayload(notice) {
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Manage Panel - Auto Responder')
+        .setDescription('Open the same autoresponder manager used by /autoresponder.')
+        .addFields({
+            name: 'Launch',
+            value: 'Press the button below to open autoresponder create/edit flow.',
+            inline: false
+        })
+        .setTimestamp();
+
+    const payload = {
+        embeds: [embed],
+        components: [
+            buildPanelSelectRow(MANAGE_PANEL_AUTORESPONDER),
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_AUTORESPONDER_OPEN_ID)
+                    .setLabel('Open Auto Responder')
+                    .setStyle(ButtonStyle.Primary)
+            )
+        ]
+    };
+
+    if (notice) {
+        payload.content = String(notice);
+    }
+
+    return payload;
 }
 
 function parseSecurityUserIds(text) {
@@ -1364,6 +1404,10 @@ function buildManagePayload(client, guildId, options = {}) {
         return buildSecurityManagePayload(client, guildId, notice);
     }
 
+    if (panel === MANAGE_PANEL_AUTORESPONDER) {
+        return buildAutoresponderManagePayload(notice);
+    }
+
     return buildRuleManagePayload(client, guildId, selectedRuleKey);
 }
 
@@ -1533,6 +1577,11 @@ module.exports = {
                 return true;
             }
 
+            if (panel === MANAGE_PANEL_AUTORESPONDER) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_AUTORESPONDER }));
+                return true;
+            }
+
             const firstRule = RULE_CHOICES[0]?.value;
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_RULES,
@@ -1606,7 +1655,8 @@ module.exports = {
             && interaction.customId !== MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID
             && interaction.customId !== MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID
             && interaction.customId !== MANAGE_SECURITY_EDIT_WHITELIST_ID
-            && interaction.customId !== MANAGE_SECURITY_CLEAR_WHITELIST_ID) {
+            && interaction.customId !== MANAGE_SECURITY_CLEAR_WHITELIST_ID
+            && interaction.customId !== MANAGE_AUTORESPONDER_OPEN_ID) {
             return false;
         }
 
@@ -1649,6 +1699,17 @@ module.exports = {
                 notice: `Reset infraction progression on ${reset.resetCount} case(s) out of ${reset.totalCases} total case(s).`,
                 showUserInfractionResetConfirm: false
             }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_AUTORESPONDER_OPEN_ID) {
+            const autoresponderCommand = client.slashCommands?.get('autoresponder');
+            if (!autoresponderCommand || typeof autoresponderCommand.executeInteraction !== 'function') {
+                await interaction.reply({ content: 'Autoresponder command is unavailable in this build.', ephemeral: true });
+                return true;
+            }
+
+            await autoresponderCommand.executeInteraction({ client, interaction });
             return true;
         }
 
