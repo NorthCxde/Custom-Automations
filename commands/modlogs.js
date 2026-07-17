@@ -41,28 +41,14 @@ function formatDuration(value) {
         .replace(/\b(\d+)m\b/gi, '$1 minute');
 }
 
-function getTimeBlockLabel(date) {
-    const hour = date.getHours();
-    if (hour < 6) return 'Late Night (00:00-05:59)';
-    if (hour < 12) return 'Morning (06:00-11:59)';
-    if (hour < 18) return 'Afternoon (12:00-17:59)';
-    return 'Evening (18:00-23:59)';
-}
-
 function formatTimestampBlock(timestamp) {
     const parsed = new Date(timestamp);
     if (!Number.isFinite(parsed.getTime())) {
-        return {
-            when: 'Unknown',
-            block: 'Unknown'
-        };
+        return 'Unknown';
     }
 
     const unix = Math.floor(parsed.getTime() / 1000);
-    return {
-        when: `<t:${unix}:F> • <t:${unix}:R>`,
-        block: getTimeBlockLabel(parsed)
-    };
+    return `<t:${unix}:F> • <t:${unix}:R>`;
 }
 
 function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId = null, canRemoveLog = false }) {
@@ -93,8 +79,7 @@ function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId
         if (entry.count) lines.push(`**Count**: ${entry.count}`);
         if (entry.channelId) lines.push(`**Channel**: <#${entry.channelId}>`);
         lines.push(`**Reason**: ${truncate(entry.reason || 'No reason provided.')}`);
-        lines.push(`**Date**: ${timestampInfo.when}`);
-        lines.push(`**Time Block**: ${timestampInfo.block}`);
+        lines.push(`**Date**: ${timestampInfo}`);
         lines.push(separator);
 
         embed.addFields({
