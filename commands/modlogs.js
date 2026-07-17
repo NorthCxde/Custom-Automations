@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const MODLOGS_PAGE_SIZE = 10;
+const MODLOGS_CASE_EMOJI = '<:Staff:1518753622618407062>';
 
 function parseModlogsPageCustomId(customId) {
     const raw = String(customId || '');
@@ -29,17 +30,6 @@ function truncate(text, max = 220) {
     const value = String(text || '').trim();
     if (!value) return 'No reason provided.';
     return value.length > max ? `${value.slice(0, max - 3)}...` : value;
-}
-
-function getActionBadge(action) {
-    const normalized = String(action || '').trim().toLowerCase();
-    if (normalized === 'mute') return '🔇';
-    if (normalized === 'unmute') return '🔊';
-    if (normalized === 'ban') return '⛔';
-    if (normalized === 'unban') return '✅';
-    if (normalized === 'kick') return '👢';
-    if (normalized === 'warn') return '⚠️';
-    return '📌';
 }
 
 function formatDuration(value) {
@@ -91,10 +81,9 @@ function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId
 
     for (const entry of displayLogs) {
         const action = String(entry.action || 'Unknown');
-        const badge = getActionBadge(action);
         const timestampInfo = formatTimestampBlock(entry.timestamp);
         const lines = [];
-        lines.push(`**Type**: ${badge} ${action}`);
+        lines.push(`**Type**: ${action}`);
         lines.push(`**User**: <@${entry.userId}>`);
         lines.push(`**Moderator**: <@${entry.moderatorId}>`);
         if (entry.duration) {
@@ -109,7 +98,7 @@ function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId
         lines.push(separator);
 
         embed.addFields({
-            name: `Case ${entry.caseNumber ?? entry.caseId ?? 'N/A'}  —  ${badge} ${action}`,
+            name: `${MODLOGS_CASE_EMOJI} Case ${entry.caseNumber ?? entry.caseId ?? 'N/A'}  —  ${action}`,
             value: lines.join('\n'),
             inline: false
         });
