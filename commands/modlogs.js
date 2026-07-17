@@ -65,7 +65,7 @@ function formatTimestampBlock(timestamp) {
     };
 }
 
-function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId = null }) {
+function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId = null, canRemoveLog = false }) {
     const totalPages = Math.max(1, Math.ceil(logs.length / MODLOGS_PAGE_SIZE));
     const safePage = Math.min(Math.max(0, Number(page) || 0), totalPages - 1);
     const start = safePage * MODLOGS_PAGE_SIZE;
@@ -121,14 +121,16 @@ function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId
         components.push(new ActionRowBuilder().addComponents(prevButton, nextButton));
     }
 
-    components.push(
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('modlogs_remove_button')
-                .setLabel('Remove Log')
-                .setStyle(ButtonStyle.Danger)
-        )
-    );
+    if (canRemoveLog) {
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('modlogs_remove_button')
+                    .setLabel('Remove Log')
+                    .setStyle(ButtonStyle.Danger)
+            )
+        );
+    }
 
     return { embeds: [embed], components };
 }
@@ -166,12 +168,15 @@ module.exports = {
             return message.reply('No moderation logs are available for this server.');
         }
 
+        const canRemoveLog = Boolean(client.hardcodedAdmins?.has(message.author.id));
+
         return message.reply(buildModlogsPayload({
             logs,
             user,
             page: 0,
             ownerId: message.author.id,
-            targetUserId: user?.id || null
+            targetUserId: user?.id || null,
+            canRemoveLog
         }));
     },
     async executeInteraction({ client, interaction }) {
@@ -181,6 +186,7 @@ module.exports = {
 
         const user = interaction.options.getUser('user');
         const logs = client.getModLogs(interaction.guild.id, user?.id);
+        const canRemoveLog = Boolean(client.hardcodedAdmins?.has(interaction.user.id));
 
         if (!logs || logs.length === 0) {
             if (user) {
@@ -195,7 +201,8 @@ module.exports = {
                 user,
                 page: 0,
                 ownerId: interaction.user.id,
-                targetUserId: user?.id || null
+                targetUserId: user?.id || null,
+                canRemoveLog
             }),
             ephemeral: true
         });
@@ -230,7 +237,8 @@ module.exports = {
             user: targetUser,
             page: parsed.page,
             ownerId: parsed.ownerId || interaction.user.id,
-            targetUserId: parsed.targetUserId
+            targetUserId: parsed.targetUserId,
+            canRemoveLog: Boolean(client.hardcodedAdmins?.has(interaction.user.id))
         }));
         return true;
     }

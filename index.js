@@ -4768,6 +4768,10 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
             }
 
+            if (!client.hardcodedAdmins?.has(interaction.user.id)) {
+                return interaction.reply({ content: 'Only hardcoded admins can remove modlog cases.', ephemeral: true });
+            }
+
             const logs = client.getModLogs(interaction.guild.id);
             if (!logs.length) {
                 return interaction.reply({ content: 'No moderation logs are available to remove.', ephemeral: true });
