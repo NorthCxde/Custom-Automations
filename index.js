@@ -7,6 +7,7 @@ const tokenSource = configToken ? 'config.json' : (envToken ? 'DISCORD_TOKEN env
 const {
     Client,
     GatewayIntentBits,
+    Partials,
     PermissionsBitField,
     ApplicationCommandPermissionType,
     ActivityType,
@@ -165,7 +166,15 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildMessageReactions,
         GatewayIntentBits.MessageContent
+    ],
+    partials: [
+        Partials.Message,
+        Partials.Channel,
+        Partials.Reaction,
+        Partials.User,
+        Partials.GuildMember
     ]
 });
 
@@ -213,6 +222,8 @@ client.automodRules = new Map();
 client.automodDrafts = new Map();
 client.automodMessageBuckets = new Map();
 client.automodMentionBuckets = new Map();
+client.automodReactionBuckets = new Map();
+client.automodReactionCooldowns = new Map();
 client.giveaways = new Map();
 client.giveawayTimers = new Map();
 client.giveawayDrafts = new Map();
@@ -596,6 +607,8 @@ client.sendModerationDm = async ({ user, userId, guildName, action, duration, re
             content = `You were muted in ${guildName} for ${duration}. | ${safeReason}`;
         } else if (action === 'ban') {
             content = `You were banned in ${guildName}. | ${safeReason}`;
+        } else if (action === 'kick') {
+            content = `You were kicked from ${guildName}. | ${safeReason}`;
         }
 
         if (!content) return false;
@@ -977,6 +990,7 @@ client.loadAutomodRules = () => {
     for (const [guildId, entries] of Object.entries(parsed)) {
         const validTypes = new Set([
             'mentions_cooldown',
+            'reaction_cooldown',
             'masked_links',
             'invite_links',
             'fast_message_spam',
@@ -3674,6 +3688,13 @@ client.on('guildMemberAdd', async (member) => {
             if (!member.kickable) {
                 console.warn(`Could not enforce account age security for ${member.user.id} in guild ${member.guild.id}: member is not kickable.`);
             } else {
+                await client.sendModerationDm({
+                    userId: member.user.id,
+                    guildName: member.guild.name,
+                    action: 'kick',
+                    reason: `Your account is too new for this server. Minimum account age is ${minAgeDays} day(s).`
+                }).catch(() => false);
+
                 await member.kick(`Account age below configured minimum (${minAgeDays} day(s))`);
 
                 await client.logSecurityAccountAgeKick(
@@ -5551,6 +5572,123 @@ client.on('messageCreate', async (message) => {
 
     if (shouldHideModerationCommand && message.deletable) {
         await message.delete().catch(() => null);
+    }
+});
+
+client.on('messageReactionAdd', async (reaction, user) => {
+    try {
+        if (reaction.partial) {
+            await reaction.fetch().catch(() => null);
+        }
+
+        if (user?.partial) {
+            await user.fetch().catch(() => null);
+        }
+
+        if (!reaction?.message?.guild || !user || user.bot) return;
+
+        const guild = reaction.message.guild;
+        const channel = reaction.message.channel;
+        if (!channel) return;
+
+        const guildAutomodRules = client.getAutomodRules(guild.id);
+        if (!guildAutomodRules.length) return;
+
+        const reactionRules = guildAutomodRules.filter(rule => String(rule?.type || '').trim().toLowerCase() === 'reaction_cooldown' && rule.enabled !== false);
+        if (!reactionRules.length) return;
+
+        let member = guild.members.cache.get(user.id) || null;
+        if (!member) {
+            member = await guild.members.fetch(user.id).catch(() => null);
+        }
+        if (!member) return;
+
+        const now = Date.now();
+
+        for (const rule of reactionRules) {
+            if (rule.ignoreAdmins && member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                continue;
+            }
+
+            const allowedChannels = Array.isArray(rule.allowedChannelIds) ? rule.allowedChannelIds : [];
+            const ignoredChannels = Array.isArray(rule.ignoredChannelIds) ? rule.ignoredChannelIds : [];
+            const allowedRoles = Array.isArray(rule.allowedRoleIds) ? rule.allowedRoleIds : [];
+            const ignoredRoles = Array.isArray(rule.ignoredRoleIds) ? rule.ignoredRoleIds : [];
+            const allowedUsers = Array.isArray(rule.allowedUserIds) ? rule.allowedUserIds : [];
+            const ignoredUsers = Array.isArray(rule.ignoredUserIds) ? rule.ignoredUserIds : [];
+            const hasAllowedIdentityFilters = allowedRoles.length > 0 || allowedUsers.length > 0;
+            const matchesAllowedRole = allowedRoles.length > 0 && member.roles.cache.some(role => allowedRoles.includes(role.id));
+            const matchesAllowedUser = allowedUsers.includes(user.id);
+
+            if (allowedChannels.length && !allowedChannels.includes(channel.id)) continue;
+            if (ignoredChannels.includes(channel.id)) continue;
+            if (ignoredRoles.length && member.roles.cache.some(role => ignoredRoles.includes(role.id))) continue;
+            if (ignoredUsers.includes(user.id)) continue;
+            if (hasAllowedIdentityFilters && !matchesAllowedRole && !matchesAllowedUser) continue;
+
+            const custom = rule.custom && typeof rule.custom === 'object' ? rule.custom : {};
+            const maxReactions = Math.max(1, Number(custom.maxReactions) || 5);
+            const windowMs = Math.max(1000, (Number(custom.windowSeconds) || 10) * 1000);
+            const cooldownMs = Math.max(1000, (Number(custom.cooldownSeconds) || 30) * 1000);
+            const bucketKey = `${guild.id}:${user.id}:${rule.id}`;
+            const cooldownUntil = Number(client.automodReactionCooldowns.get(bucketKey) || 0);
+            const logChannelId = String(rule.logChannelId || '').trim();
+
+            const tryRemoveReaction = async () => {
+                await reaction.users.remove(user.id).catch(() => null);
+            };
+
+            if (cooldownUntil > now) {
+                await tryRemoveReaction();
+                break;
+            }
+
+            const bucket = client.automodReactionBuckets.get(bucketKey) || [];
+            const filtered = bucket.filter(ts => now - ts <= windowMs);
+            filtered.push(now);
+            client.automodReactionBuckets.set(bucketKey, filtered);
+
+            if (filtered.length < maxReactions) {
+                continue;
+            }
+
+            const cooldownUntilTs = now + cooldownMs;
+            client.automodReactionCooldowns.set(bucketKey, cooldownUntilTs);
+            await tryRemoveReaction();
+
+            const customResponse = String(rule.customResponse || '').trim();
+            if (customResponse) {
+                await user.send({
+                    embeds: [new EmbedBuilder().setColor(0xED4245).setDescription(customResponse)]
+                }).catch(() => null);
+            }
+
+            if (logChannelId) {
+                const logChannel = guild.channels.cache.get(logChannelId)
+                    || await guild.channels.fetch(logChannelId).catch(() => null);
+                if (logChannel && logChannel.isTextBased()) {
+                    const automodEmbed = new EmbedBuilder()
+                        .setColor(0xED4245)
+                        .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ extension: 'png', size: 256 }) })
+                        .setDescription(`Reaction removed for <@${user.id}> in <#${channel.id}> due to reaction cooldown.`)
+                        .addFields(
+                            { name: 'Reason', value: 'Reaction Cooldown', inline: true },
+                            { name: 'Detailed Reason', value: `${filtered.length} reactions in ${Math.round(windowMs / 1000)}s. Cooldown: ${Math.round(cooldownMs / 1000)}s.`, inline: true }
+                        )
+                        .setFooter({ text: `ID: ${user.id}` })
+                        .setTimestamp();
+
+                    await logChannel.send({
+                        embeds: [automodEmbed],
+                        allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
+                    }).catch(() => null);
+                }
+            }
+
+            break;
+        }
+    } catch (err) {
+        console.error('AutoMod reaction cooldown handler failed:', err);
     }
 });
 

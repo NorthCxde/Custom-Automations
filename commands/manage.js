@@ -84,6 +84,7 @@ const MODAL_AUTOMOD_ACTION_INPUT_ID = 'action';
 const MODAL_AUTOMOD_TIMEOUT_INPUT_ID = 'timeout';
 const MODAL_AUTOMOD_CUSTOM_A_ID = 'custom_a';
 const MODAL_AUTOMOD_CUSTOM_B_ID = 'custom_b';
+const MODAL_AUTOMOD_CUSTOM_C_ID = 'custom_c';
 const MODAL_AUTOMOD_CUSTOM_RESPONSE_INPUT_ID = 'custom_response';
 
 function truncate(text, max = 100) {
@@ -680,6 +681,7 @@ function buildRevokedInvitesPayload(client, guildId, selectedEntryId, notice) {
 
 const AUTOMOD_TYPE_ORDER = [
     'mentions_cooldown',
+    'reaction_cooldown',
     'masked_links',
     'invite_links',
     'fast_message_spam',
@@ -694,6 +696,7 @@ const AUTOMOD_TYPE_ORDER = [
 
 const AUTOMOD_TYPE_LABELS = {
     mentions_cooldown: 'Mentions Cooldown',
+    reaction_cooldown: 'Reaction Cooldown',
     masked_links: 'Masked Links',
     invite_links: 'Invite Links',
     fast_message_spam: 'Fast Message Spam',
@@ -762,6 +765,8 @@ function getDefaultCustomForType(type) {
     switch (type) {
     case 'mentions_cooldown':
         return { maxMentions: 6, windowSeconds: 30 };
+    case 'reaction_cooldown':
+        return { maxReactions: 5, windowSeconds: 10, cooldownSeconds: 30 };
     case 'fast_message_spam':
         return { maxMessages: 8, windowSeconds: 5 };
     case 'anti_newline':
@@ -789,6 +794,14 @@ function sanitizeCustomByType(type, customInput) {
         return {
             maxMentions: Math.max(1, Number(custom.maxMentions) || defaults.maxMentions),
             windowSeconds: Math.max(1, Number(custom.windowSeconds) || defaults.windowSeconds)
+        };
+    }
+
+    if (type === 'reaction_cooldown') {
+        return {
+            maxReactions: Math.max(1, Number(custom.maxReactions) || defaults.maxReactions),
+            windowSeconds: Math.max(1, Number(custom.windowSeconds) || defaults.windowSeconds),
+            cooldownSeconds: Math.max(1, Number(custom.cooldownSeconds) || defaults.cooldownSeconds)
         };
     }
 
@@ -879,6 +892,7 @@ function createDefaultAutomodDraft(userId) {
 function formatAutomodCustom(type, custom = {}) {
     const value = sanitizeCustomByType(type, custom);
     if (type === 'mentions_cooldown') return `Max Mentions: ${value.maxMentions}\nWindow: ${value.windowSeconds}s`;
+    if (type === 'reaction_cooldown') return `Max Reactions: ${value.maxReactions}\nWindow: ${value.windowSeconds}s\nCooldown: ${value.cooldownSeconds}s`;
     if (type === 'fast_message_spam') return `Max Messages: ${value.maxMessages}\nWindow: ${value.windowSeconds}s`;
     if (type === 'anti_newline') return `Max Newlines: ${value.maxNewlines}`;
     if (type === 'character_count') return `Max Characters: ${value.maxCharacters}`;
@@ -901,6 +915,7 @@ function formatAutomodCustom(type, custom = {}) {
 
 function getAutomodCustomHint(type) {
     if (type === 'mentions_cooldown') return 'maxMentions=6\nwindowSeconds=30';
+    if (type === 'reaction_cooldown') return 'maxReactions=5\nwindowSeconds=10\ncooldownSeconds=30';
     if (type === 'fast_message_spam') return 'maxMessages=8\nwindowSeconds=5';
     if (type === 'anti_newline') return 'maxNewlines=7';
     if (type === 'character_count') return 'maxCharacters=350';
@@ -1258,7 +1273,9 @@ function parseAutomodCustomInput(text, draftType, currentCustom) {
 }
 
 function buildAutomodRulePayloadFromDraft(draft, fallbackUserId) {
-    const actions = normalizeAutomodActions(draft.actions, draft.action);
+    const actions = draft.type === 'reaction_cooldown'
+        ? ['delete']
+        : normalizeAutomodActions(draft.actions, draft.action);
     return {
         id: draft.id,
         name: String(draft.name || (AUTOMOD_TYPE_LABELS[draft.type] || 'Automod Rule')).trim(),
@@ -1809,6 +1826,30 @@ module.exports = {
                 modal.addComponents(
                     new ActionRowBuilder().addComponents(countInput),
                     new ActionRowBuilder().addComponents(windowInput)
+                );
+            } else if (draft.type === 'reaction_cooldown') {
+                const maxReactionsInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_A_ID)
+                    .setLabel('Max Reactions')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(String(custom.maxReactions || '5'));
+                const windowInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_B_ID)
+                    .setLabel('Window Seconds')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(String(custom.windowSeconds || '10'));
+                const cooldownInput = new TextInputBuilder()
+                    .setCustomId(MODAL_AUTOMOD_CUSTOM_C_ID)
+                    .setLabel('Cooldown Seconds')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setValue(String(custom.cooldownSeconds || '30'));
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(maxReactionsInput),
+                    new ActionRowBuilder().addComponents(windowInput),
+                    new ActionRowBuilder().addComponents(cooldownInput)
                 );
             } else if (draft.type === 'anti_newline' || draft.type === 'character_count' || draft.type === 'emoji_spam') {
                 const inputLabel = draft.type === 'anti_newline'
@@ -2374,6 +2415,12 @@ module.exports = {
             } catch (_) {
                 customResponse = '';
             }
+            let customC = '';
+            try {
+                customC = interaction.fields.getTextInputValue(MODAL_AUTOMOD_CUSTOM_C_ID).trim();
+            } catch (_) {
+                customC = '';
+            }
 
             const nextCustom = { ...(draft.custom || {}) };
             const errors = [];
@@ -2386,6 +2433,18 @@ module.exports = {
                 if (!errors.length) {
                     nextCustom.maxMentions = maxMentions.value;
                     nextCustom.windowSeconds = windowSeconds.value;
+                }
+            } else if (draft.type === 'reaction_cooldown') {
+                const maxReactions = parsePositiveIntInput(customA, 'Max Reactions', 1);
+                const windowSeconds = parsePositiveIntInput(customB, 'Window Seconds', 1);
+                const cooldownSeconds = parsePositiveIntInput(customC, 'Cooldown Seconds', 1);
+                if (maxReactions.error) errors.push(maxReactions.error);
+                if (windowSeconds.error) errors.push(windowSeconds.error);
+                if (cooldownSeconds.error) errors.push(cooldownSeconds.error);
+                if (!errors.length) {
+                    nextCustom.maxReactions = maxReactions.value;
+                    nextCustom.windowSeconds = windowSeconds.value;
+                    nextCustom.cooldownSeconds = cooldownSeconds.value;
                 }
             } else if (draft.type === 'fast_message_spam') {
                 const maxMessages = parsePositiveIntInput(customA, 'Max Messages', 2);
@@ -2485,11 +2544,13 @@ module.exports = {
                 return true;
             }
 
+            const effectiveActions = type === 'reaction_cooldown' ? ['delete'] : parsedActions;
+
             draft.name = name;
             draft.type = type;
             draft.trigger = trigger;
-            draft.actions = parsedActions;
-            draft.action = parsedActions[0];
+            draft.actions = effectiveActions;
+            draft.action = effectiveActions[0];
             draft.timeoutDuration = timeoutDuration;
             draft.custom = sanitizeCustomByType(draft.type, draft.custom);
             client.automodDrafts.set(draftKey, draft);
