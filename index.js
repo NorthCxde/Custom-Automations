@@ -5627,7 +5627,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
             if (hasAllowedIdentityFilters && !matchesAllowedRole && !matchesAllowedUser) continue;
 
             const custom = rule.custom && typeof rule.custom === 'object' ? rule.custom : {};
-            const maxReactions = Math.max(1, Number(custom.maxReactions) || 5);
+            const maxDifferentMessages = Math.max(1, Number(custom.maxDifferentMessages ?? custom.maxReactions) || 5);
             const windowMs = Math.max(1000, (Number(custom.windowSeconds) || 10) * 1000);
             const cooldownMs = Math.max(1000, (Number(custom.cooldownSeconds) || 30) * 1000);
             const bucketKey = `${guild.id}:${user.id}:${rule.id}`;
@@ -5644,11 +5644,35 @@ client.on('messageReactionAdd', async (reaction, user) => {
             }
 
             const bucket = client.automodReactionBuckets.get(bucketKey) || [];
-            const filtered = bucket.filter(ts => now - ts <= windowMs);
-            filtered.push(now);
+            const filtered = bucket
+                .map(item => {
+                    if (item && typeof item === 'object') {
+                        return {
+                            ts: Number(item.ts) || 0,
+                            messageId: item.messageId ? String(item.messageId) : null
+                        };
+                    }
+                    return {
+                        ts: Number(item) || 0,
+                        messageId: null
+                    };
+                })
+                .filter(item => now - item.ts <= windowMs);
+
+            const messageId = String(reaction.message.id || '');
+            const existingMessageIdx = messageId
+                ? filtered.findIndex(item => item.messageId === messageId)
+                : -1;
+            if (existingMessageIdx === -1) {
+                filtered.push({ ts: now, messageId: messageId || null });
+            } else {
+                filtered[existingMessageIdx].ts = now;
+            }
+
             client.automodReactionBuckets.set(bucketKey, filtered);
 
-            if (filtered.length < maxReactions) {
+            const uniqueMessageCount = new Set(filtered.map(item => item.messageId).filter(Boolean)).size;
+            if (uniqueMessageCount < maxDifferentMessages) {
                 continue;
             }
 
@@ -5673,7 +5697,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                         .setDescription(`Reaction removed for <@${user.id}> in <#${channel.id}> due to reaction cooldown.`)
                         .addFields(
                             { name: 'Reason', value: 'Reaction Cooldown', inline: true },
-                            { name: 'Detailed Reason', value: `${filtered.length} reactions in ${Math.round(windowMs / 1000)}s. Cooldown: ${Math.round(cooldownMs / 1000)}s.`, inline: true }
+                            { name: 'Detailed Reason', value: `${uniqueMessageCount} different messages in ${Math.round(windowMs / 1000)}s. Cooldown: ${Math.round(cooldownMs / 1000)}s.`, inline: true }
                         )
                         .setFooter({ text: `ID: ${user.id}` })
                         .setTimestamp();

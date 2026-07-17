@@ -766,7 +766,7 @@ function getDefaultCustomForType(type) {
     case 'mentions_cooldown':
         return { maxMentions: 6, windowSeconds: 30 };
     case 'reaction_cooldown':
-        return { maxReactions: 5, windowSeconds: 10, cooldownSeconds: 30 };
+        return { maxDifferentMessages: 5, windowSeconds: 10, cooldownSeconds: 30 };
     case 'fast_message_spam':
         return { maxMessages: 8, windowSeconds: 5 };
     case 'anti_newline':
@@ -798,8 +798,9 @@ function sanitizeCustomByType(type, customInput) {
     }
 
     if (type === 'reaction_cooldown') {
+        const maxDifferentMessagesRaw = custom.maxDifferentMessages ?? custom.maxReactions;
         return {
-            maxReactions: Math.max(1, Number(custom.maxReactions) || defaults.maxReactions),
+            maxDifferentMessages: Math.max(1, Number(maxDifferentMessagesRaw) || defaults.maxDifferentMessages),
             windowSeconds: Math.max(1, Number(custom.windowSeconds) || defaults.windowSeconds),
             cooldownSeconds: Math.max(1, Number(custom.cooldownSeconds) || defaults.cooldownSeconds)
         };
@@ -892,7 +893,7 @@ function createDefaultAutomodDraft(userId) {
 function formatAutomodCustom(type, custom = {}) {
     const value = sanitizeCustomByType(type, custom);
     if (type === 'mentions_cooldown') return `Max Mentions: ${value.maxMentions}\nWindow: ${value.windowSeconds}s`;
-    if (type === 'reaction_cooldown') return `Max Reactions: ${value.maxReactions}\nWindow: ${value.windowSeconds}s\nCooldown: ${value.cooldownSeconds}s`;
+    if (type === 'reaction_cooldown') return `Max Different Messages: ${value.maxDifferentMessages}\nWindow: ${value.windowSeconds}s\nCooldown: ${value.cooldownSeconds}s`;
     if (type === 'fast_message_spam') return `Max Messages: ${value.maxMessages}\nWindow: ${value.windowSeconds}s`;
     if (type === 'anti_newline') return `Max Newlines: ${value.maxNewlines}`;
     if (type === 'character_count') return `Max Characters: ${value.maxCharacters}`;
@@ -915,7 +916,7 @@ function formatAutomodCustom(type, custom = {}) {
 
 function getAutomodCustomHint(type) {
     if (type === 'mentions_cooldown') return 'maxMentions=6\nwindowSeconds=30';
-    if (type === 'reaction_cooldown') return 'maxReactions=5\nwindowSeconds=10\ncooldownSeconds=30';
+    if (type === 'reaction_cooldown') return 'maxDifferentMessages=5\nwindowSeconds=10\ncooldownSeconds=30';
     if (type === 'fast_message_spam') return 'maxMessages=8\nwindowSeconds=5';
     if (type === 'anti_newline') return 'maxNewlines=7';
     if (type === 'character_count') return 'maxCharacters=350';
@@ -1830,10 +1831,10 @@ module.exports = {
             } else if (draft.type === 'reaction_cooldown') {
                 const maxReactionsInput = new TextInputBuilder()
                     .setCustomId(MODAL_AUTOMOD_CUSTOM_A_ID)
-                    .setLabel('Max Reactions')
+                    .setLabel('Max Different Messages')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
-                    .setValue(String(custom.maxReactions || '5'));
+                    .setValue(String(custom.maxDifferentMessages || custom.maxReactions || '5'));
                 const windowInput = new TextInputBuilder()
                     .setCustomId(MODAL_AUTOMOD_CUSTOM_B_ID)
                     .setLabel('Window Seconds')
@@ -2435,14 +2436,14 @@ module.exports = {
                     nextCustom.windowSeconds = windowSeconds.value;
                 }
             } else if (draft.type === 'reaction_cooldown') {
-                const maxReactions = parsePositiveIntInput(customA, 'Max Reactions', 1);
+                const maxDifferentMessages = parsePositiveIntInput(customA, 'Max Different Messages', 1);
                 const windowSeconds = parsePositiveIntInput(customB, 'Window Seconds', 1);
                 const cooldownSeconds = parsePositiveIntInput(customC, 'Cooldown Seconds', 1);
-                if (maxReactions.error) errors.push(maxReactions.error);
+                if (maxDifferentMessages.error) errors.push(maxDifferentMessages.error);
                 if (windowSeconds.error) errors.push(windowSeconds.error);
                 if (cooldownSeconds.error) errors.push(cooldownSeconds.error);
                 if (!errors.length) {
-                    nextCustom.maxReactions = maxReactions.value;
+                    nextCustom.maxDifferentMessages = maxDifferentMessages.value;
                     nextCustom.windowSeconds = windowSeconds.value;
                     nextCustom.cooldownSeconds = cooldownSeconds.value;
                 }
