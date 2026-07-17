@@ -5604,6 +5604,13 @@ client.on('messageReactionAdd', async (reaction, user) => {
         if (!member) return;
 
         const now = Date.now();
+        // Only process reactions where this user created the emoji reaction on the message
+        // (count becomes 1). Clicking an already-existing emoji should be ignored.
+        const reactionCount = Number(reaction.count || 0);
+        const isNewEmojiReaction = reactionCount === 1;
+        if (!isNewEmojiReaction) {
+            return;
+        }
 
         for (const rule of reactionRules) {
             if (rule.ignoreAdmins && member.permissions.has(PermissionsBitField.Flags.Administrator)) {
