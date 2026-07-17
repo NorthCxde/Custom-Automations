@@ -5649,24 +5649,30 @@ client.on('messageReactionAdd', async (reaction, user) => {
                     if (item && typeof item === 'object') {
                         return {
                             ts: Number(item.ts) || 0,
-                            messageId: item.messageId ? String(item.messageId) : null
+                            messageId: item.messageId ? String(item.messageId) : null,
+                            channelId: item.channelId ? String(item.channelId) : null
                         };
                     }
                     return {
                         ts: Number(item) || 0,
-                        messageId: null
+                        messageId: null,
+                        channelId: null
                     };
                 })
                 .filter(item => now - item.ts <= windowMs);
 
             const messageId = String(reaction.message.id || '');
+            const channelId = String(reaction.message.channelId || reaction.message.channel?.id || '');
             const existingMessageIdx = messageId
                 ? filtered.findIndex(item => item.messageId === messageId)
                 : -1;
             if (existingMessageIdx === -1) {
-                filtered.push({ ts: now, messageId: messageId || null });
+                filtered.push({ ts: now, messageId: messageId || null, channelId: channelId || null });
             } else {
                 filtered[existingMessageIdx].ts = now;
+                if (channelId) {
+                    filtered[existingMessageIdx].channelId = channelId;
+                }
             }
 
             client.automodReactionBuckets.set(bucketKey, filtered);
@@ -5679,6 +5685,38 @@ client.on('messageReactionAdd', async (reaction, user) => {
             const cooldownUntilTs = now + cooldownMs;
             client.automodReactionCooldowns.set(bucketKey, cooldownUntilTs);
             await tryRemoveReaction();
+
+            const trackedMessages = new Map();
+            for (const item of filtered) {
+                if (!item.messageId || !item.channelId) continue;
+                const key = `${item.channelId}:${item.messageId}`;
+                if (!trackedMessages.has(key)) {
+                    trackedMessages.set(key, { channelId: item.channelId, messageId: item.messageId });
+                }
+            }
+
+            const removeUserReactionsFromMessage = async (targetMessage) => {
+                if (!targetMessage) return;
+                await Promise.all(
+                    [...targetMessage.reactions.cache.values()].map(async (entryReaction) => {
+                        await entryReaction.users.remove(user.id).catch(() => null);
+                    })
+                );
+            };
+
+            for (const tracked of trackedMessages.values()) {
+                try {
+                    let targetChannel = guild.channels.cache.get(tracked.channelId) || null;
+                    if (!targetChannel) {
+                        targetChannel = await guild.channels.fetch(tracked.channelId).catch(() => null);
+                    }
+                    if (!targetChannel || typeof targetChannel.messages?.fetch !== 'function') continue;
+                    const targetMessage = await targetChannel.messages.fetch(tracked.messageId).catch(() => null);
+                    await removeUserReactionsFromMessage(targetMessage);
+                } catch (_) {
+                    // Ignore per-message cleanup failures to avoid blocking core enforcement.
+                }
+            }
 
             const customResponse = String(rule.customResponse || '').trim();
             if (customResponse) {
@@ -5697,7 +5735,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                         .setDescription(`Reaction removed for <@${user.id}> in <#${channel.id}> due to reaction cooldown.`)
                         .addFields(
                             { name: 'Reason', value: 'Reaction Cooldown', inline: true },
-                            { name: 'Detailed Reason', value: `${uniqueMessageCount} different messages in ${Math.round(windowMs / 1000)}s. Cooldown: ${Math.round(cooldownMs / 1000)}s.`, inline: true }
+                            { name: 'Detailed Reason', value: `${uniqueMessageCount} different messages in ${Math.round(windowMs / 1000)}s. Removed this user's reactions from tracked messages. Cooldown: ${Math.round(cooldownMs / 1000)}s.`, inline: true }
                         )
                         .setFooter({ text: `ID: ${user.id}` })
                         .setTimestamp();
