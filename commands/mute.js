@@ -280,7 +280,7 @@ const RULE_REASON_KEYWORDS = {
     off_topic: ['off topic'],
     spam_pinging_owners: ['spam pinging owners', 'spam pinging owner'],
     blacklisted_words_bypass: ['blacklisted', 'bypass', 'bypassing blacklisted word'],
-    nsfw_explicit_messages: ['nsfw', '18+'],
+    nsfw_explicit_messages: ['nsfw', '18+', 'explicit', 'sexual'],
     direct_slurs: ['slur', 'slurs'],
     harassment_disrespect: ['harassment', 'disrespect', 'toxicity'],
     instigation: ['instigating', 'instigation', 'ragebaiting', 'ragebait'],
@@ -309,7 +309,7 @@ function inferInfractionRuleFromReason(reason, rules) {
                 display: String(keyword || '').trim(),
                 normalized: normalizeReasonText(keyword)
             }))
-            .filter(item => item.normalized && item.normalized.length >= 3);
+            .filter(item => item.normalized && (item.normalized.length >= 3 || /\d/.test(item.normalized)));
 
         for (const keyword of primaryKeywords) {
             if (normalizedReason.includes(keyword.normalized)) {
