@@ -58,6 +58,9 @@ const MANAGE_SECURITY_CLEAR_WHITELIST_ID = 'manage_security_clear_whitelist';
 const MANAGE_JOIN_FILTER_TOGGLE_ID = 'manage_join_filter_toggle';
 const MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID = 'manage_join_filter_edit_keywords';
 const MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID = 'manage_join_filter_clear_keywords';
+const MANAGE_SECURITY_SECTION_SELECT_ID = 'manage_security_section_select';
+const MANAGE_SECURITY_SECTION_ACCOUNT_AGE = 'account_age';
+const MANAGE_SECURITY_SECTION_JOIN_FILTER = 'join_filter';
 const MANAGE_SECURITY_MODAL_PREFIX = 'manage_security_modal:';
 const MODAL_SECURITY_ACCOUNT_AGE_DAYS_INPUT_ID = 'account_age_days';
 const MODAL_SECURITY_WHITELIST_INPUT_ID = 'whitelist_ids';
@@ -220,7 +223,7 @@ function parseSecurityUserIds(text) {
     )];
 }
 
-function buildSecurityManagePayload(client, guildId, notice) {
+function buildSecurityManagePayload(client, guildId, notice, selectedSection = MANAGE_SECURITY_SECTION_ACCOUNT_AGE) {
     const settings = typeof client.getSecuritySettings === 'function'
         ? client.getSecuritySettings(guildId)
         : {
@@ -238,28 +241,64 @@ function buildSecurityManagePayload(client, guildId, notice) {
         ? joinFilter.keywordBlacklist
         : [];
 
+    const normalizedSection = selectedSection === MANAGE_SECURITY_SECTION_JOIN_FILTER
+        ? MANAGE_SECURITY_SECTION_JOIN_FILTER
+        : MANAGE_SECURITY_SECTION_ACCOUNT_AGE;
+
     const embed = new EmbedBuilder()
         .setColor(0x000000)
         .setTitle('Manage Panel - Security')
-        .setDescription('Configure join security rules for this server. More security sections can be added here later.')
-        .addFields(
+        .setDescription('Configure join security rules for this server.')
+        .setTimestamp();
+
+    if (normalizedSection === MANAGE_SECURITY_SECTION_ACCOUNT_AGE) {
+        embed.addFields(
             { name: 'Section', value: 'Account Age', inline: false },
             { name: 'Enabled', value: settings.accountAge.enabled ? 'Yes' : 'No', inline: true },
             { name: 'Minimum Account Age', value: `${settings.accountAge.minAgeDays} day(s)`, inline: true },
             { name: 'Whitelisted IDs', value: whitelist.length ? whitelist.map(id => `\`${id}\``).join(', ').slice(0, 1024) : 'None', inline: false },
-            { name: 'Behavior', value: 'Accounts younger than the configured age are automatically kicked and logged in the invite tracker channel.', inline: false },
+            { name: 'Behavior', value: 'Accounts younger than the configured age are automatically kicked and logged in the invite tracker channel.', inline: false }
+        );
+    } else {
+        embed.addFields(
             { name: 'Section', value: 'Join Filter', inline: false },
-            { name: 'Join Filter Enabled', value: joinFilter.enabled !== false ? 'Yes' : 'No', inline: true },
+            { name: 'Enabled', value: joinFilter.enabled !== false ? 'Yes' : 'No', inline: true },
             { name: 'Blacklisted Keywords', value: keywords.length ? keywords.map(v => `\`${v}\``).join(', ').slice(0, 1024) : 'None', inline: false },
-            { name: 'Match Logic', value: 'Raw contains matching only. Example: `boat` matches `iamboatguy` but not `iambo_atguy`.', inline: false },
-            { name: 'Join Filter Action', value: 'DM first, then kick with reason: `For suspicious Discord account.`', inline: false }
-        )
-        .setTimestamp();
+            { name: 'Match Logic', value: 'Raw contains matching only.', inline: false },
+            { name: 'Action', value: 'DM first, then kick with reason: `For suspicious Discord account.`', inline: false }
+        );
+    }
+
+    const securitySectionSelectRow = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId(MANAGE_SECURITY_SECTION_SELECT_ID)
+            .setPlaceholder('Choose a security section')
+            .addOptions([
+                {
+                    label: 'Account Age',
+                    value: MANAGE_SECURITY_SECTION_ACCOUNT_AGE,
+                    description: 'Minimum account age + whitelist',
+                    default: normalizedSection === MANAGE_SECURITY_SECTION_ACCOUNT_AGE
+                },
+                {
+                    label: 'Join Filter',
+                    value: MANAGE_SECURITY_SECTION_JOIN_FILTER,
+                    description: 'Kick joins by username keyword matches',
+                    default: normalizedSection === MANAGE_SECURITY_SECTION_JOIN_FILTER
+                }
+            ])
+    );
 
     const payload = {
         embeds: [embed],
         components: [
             buildPanelSelectRow(MANAGE_PANEL_SECURITY),
+            securitySectionSelectRow
+        ]
+    };
+
+    if (normalizedSection === MANAGE_SECURITY_SECTION_ACCOUNT_AGE) {
+        payload.components.push(
             new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId(MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID)
@@ -277,7 +316,10 @@ function buildSecurityManagePayload(client, guildId, notice) {
                     .setCustomId(MANAGE_SECURITY_CLEAR_WHITELIST_ID)
                     .setLabel('Clear Whitelist')
                     .setStyle(ButtonStyle.Secondary)
-            ),
+            )
+        );
+    } else {
+        payload.components.push(
             new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId(MANAGE_JOIN_FILTER_TOGGLE_ID)
@@ -292,8 +334,8 @@ function buildSecurityManagePayload(client, guildId, notice) {
                     .setLabel('Clear Join Filter Keywords')
                     .setStyle(ButtonStyle.Secondary)
             )
-        ]
-    };
+        );
+    }
 
     if (notice) {
         payload.content = String(notice);
@@ -1421,6 +1463,7 @@ function buildManagePayload(client, guildId, options = {}) {
         selectedModstatsUserId,
         selectedAutomodRuleId,
         selectedRevokedInviteId,
+        selectedSecuritySection,
         automodDraft,
         notice
     } = options;
@@ -1443,7 +1486,7 @@ function buildManagePayload(client, guildId, options = {}) {
     }
 
     if (panel === MANAGE_PANEL_SECURITY) {
-        return buildSecurityManagePayload(client, guildId, notice);
+        return buildSecurityManagePayload(client, guildId, notice, selectedSecuritySection);
     }
 
     if (panel === MANAGE_PANEL_AUTORESPONDER) {
@@ -1473,6 +1516,7 @@ module.exports = {
     async handleStringSelect({ client, interaction }) {
         if (interaction.customId !== MANAGE_RULE_SELECT_ID
             && interaction.customId !== MANAGE_PANEL_SELECT_ID
+            && interaction.customId !== MANAGE_SECURITY_SECTION_SELECT_ID
             && interaction.customId !== MANAGE_AUTOMOD_RULE_SELECT_ID
             && interaction.customId !== MANAGE_REVOKED_INVITE_SELECT_ID
             && !interaction.customId.startsWith(`${MANAGE_USER_CASE_SELECT_ID}:`)
@@ -1632,6 +1676,17 @@ module.exports = {
             return true;
         }
 
+        if (interaction.customId === MANAGE_SECURITY_SECTION_SELECT_ID) {
+            const selectedSecuritySection = interaction.values?.[0] === MANAGE_SECURITY_SECTION_JOIN_FILTER
+                ? MANAGE_SECURITY_SECTION_JOIN_FILTER
+                : MANAGE_SECURITY_SECTION_ACCOUNT_AGE;
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection
+            }));
+            return true;
+        }
+
         if (interaction.customId === MANAGE_AUTOMOD_RULE_SELECT_ID) {
             const selectedAutomodRuleId = interaction.values?.[0] || null;
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
@@ -1784,6 +1839,7 @@ module.exports = {
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection: MANAGE_SECURITY_SECTION_ACCOUNT_AGE,
                 notice: `Account Age security ${settings.accountAge.enabled ? 'disabled' : 'enabled'}.`
             }));
             return true;
@@ -1836,6 +1892,7 @@ module.exports = {
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection: MANAGE_SECURITY_SECTION_ACCOUNT_AGE,
                 notice: 'Cleared account age whitelist.'
             }));
             return true;
@@ -1856,6 +1913,7 @@ module.exports = {
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection: MANAGE_SECURITY_SECTION_JOIN_FILTER,
                 notice: `Join Filter ${joinFilter.enabled === false ? 'enabled' : 'disabled'}.`
             }));
             return true;
@@ -1898,6 +1956,7 @@ module.exports = {
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection: MANAGE_SECURITY_SECTION_JOIN_FILTER,
                 notice: 'Cleared join filter keywords.'
             }));
             return true;
@@ -2589,6 +2648,7 @@ module.exports = {
                     await interaction.reply({
                         ...buildManagePayload(client, interaction.guild.id, {
                             panel: MANAGE_PANEL_SECURITY,
+                            selectedSecuritySection: MANAGE_SECURITY_SECTION_ACCOUNT_AGE,
                             notice: `Updated minimum account age to ${minAgeDays} day(s).`
                         }),
                         ephemeral: true
@@ -2610,6 +2670,7 @@ module.exports = {
                     await interaction.reply({
                         ...buildManagePayload(client, interaction.guild.id, {
                             panel: MANAGE_PANEL_SECURITY,
+                            selectedSecuritySection: MANAGE_SECURITY_SECTION_ACCOUNT_AGE,
                             notice: `Updated whitelist with ${whitelistedUserIds.length} user ID(s).`
                         }),
                         ephemeral: true
@@ -2634,6 +2695,7 @@ module.exports = {
                     await interaction.reply({
                         ...buildManagePayload(client, interaction.guild.id, {
                             panel: MANAGE_PANEL_SECURITY,
+                            selectedSecuritySection: MANAGE_SECURITY_SECTION_JOIN_FILTER,
                             notice: `Updated join filter with ${keywords.length} keyword(s).`
                         }),
                         ephemeral: true
