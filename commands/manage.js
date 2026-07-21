@@ -46,7 +46,6 @@ const MANAGE_PANEL_AUTOMOD = 'automod';
 const MANAGE_PANEL_REVOKED_INVITES = 'revoked_invites';
 const MANAGE_PANEL_SECURITY = 'security';
 const MANAGE_PANEL_AUTORESPONDER = 'autoresponder';
-const MANAGE_PANEL_JOIN_FILTER = 'join_filter';
 
 const MANAGE_REVOKED_INVITE_SELECT_ID = 'manage_revoked_invite_select';
 const MANAGE_REVOKED_INVITE_REMOVE_PREFIX = 'manage_revoked_invite_remove:';
@@ -171,12 +170,6 @@ function buildPanelSelectRow(selectedPanel) {
                     value: MANAGE_PANEL_AUTORESPONDER,
                     description: 'Open autoresponder management flow',
                     default: selectedPanel === MANAGE_PANEL_AUTORESPONDER
-                },
-                {
-                    label: 'Join Filter',
-                    value: MANAGE_PANEL_JOIN_FILTER,
-                    description: 'Kick new joins matching blacklisted username keywords',
-                    default: selectedPanel === MANAGE_PANEL_JOIN_FILTER
                 }
             ])
     );
@@ -230,10 +223,19 @@ function parseSecurityUserIds(text) {
 function buildSecurityManagePayload(client, guildId, notice) {
     const settings = typeof client.getSecuritySettings === 'function'
         ? client.getSecuritySettings(guildId)
-        : { accountAge: { enabled: true, minAgeDays: 7, whitelistedUserIds: [] } };
+        : {
+            accountAge: { enabled: true, minAgeDays: 7, whitelistedUserIds: [] },
+            joinFilter: { enabled: true, keywordBlacklist: [] }
+        };
 
     const whitelist = Array.isArray(settings.accountAge.whitelistedUserIds)
         ? settings.accountAge.whitelistedUserIds
+        : [];
+    const joinFilter = settings.joinFilter && typeof settings.joinFilter === 'object'
+        ? settings.joinFilter
+        : { enabled: true, keywordBlacklist: [] };
+    const keywords = Array.isArray(joinFilter.keywordBlacklist)
+        ? joinFilter.keywordBlacklist
         : [];
 
     const embed = new EmbedBuilder()
@@ -245,7 +247,12 @@ function buildSecurityManagePayload(client, guildId, notice) {
             { name: 'Enabled', value: settings.accountAge.enabled ? 'Yes' : 'No', inline: true },
             { name: 'Minimum Account Age', value: `${settings.accountAge.minAgeDays} day(s)`, inline: true },
             { name: 'Whitelisted IDs', value: whitelist.length ? whitelist.map(id => `\`${id}\``).join(', ').slice(0, 1024) : 'None', inline: false },
-            { name: 'Behavior', value: 'Accounts younger than the configured age are automatically kicked and logged in the invite tracker channel.', inline: false }
+            { name: 'Behavior', value: 'Accounts younger than the configured age are automatically kicked and logged in the invite tracker channel.', inline: false },
+            { name: 'Section', value: 'Join Filter', inline: false },
+            { name: 'Join Filter Enabled', value: joinFilter.enabled !== false ? 'Yes' : 'No', inline: true },
+            { name: 'Blacklisted Keywords', value: keywords.length ? keywords.map(v => `\`${v}\``).join(', ').slice(0, 1024) : 'None', inline: false },
+            { name: 'Match Logic', value: 'Raw contains matching only. Example: `boat` matches `iamboatguy` but not `iambo_atguy`.', inline: false },
+            { name: 'Join Filter Action', value: 'DM first, then kick with reason: `For suspicious Discord account.`', inline: false }
         )
         .setTimestamp();
 
@@ -269,6 +276,20 @@ function buildSecurityManagePayload(client, guildId, notice) {
                 new ButtonBuilder()
                     .setCustomId(MANAGE_SECURITY_CLEAR_WHITELIST_ID)
                     .setLabel('Clear Whitelist')
+                    .setStyle(ButtonStyle.Secondary)
+            ),
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_JOIN_FILTER_TOGGLE_ID)
+                    .setLabel(joinFilter.enabled !== false ? 'Disable Join Filter' : 'Enable Join Filter')
+                    .setStyle(joinFilter.enabled !== false ? ButtonStyle.Danger : ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID)
+                    .setLabel('Edit Join Filter Keywords')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID)
+                    .setLabel('Clear Join Filter Keywords')
                     .setStyle(ButtonStyle.Secondary)
             )
         ]
@@ -294,59 +315,6 @@ function parseJoinFilterKeywords(text) {
             .filter(Boolean)
             .filter(part => part.length >= 2 && part.length <= 32)
     )];
-}
-
-function buildJoinFilterManagePayload(client, guildId, notice) {
-    const settings = typeof client.getSecuritySettings === 'function'
-        ? client.getSecuritySettings(guildId)
-        : { joinFilter: { enabled: true, keywordBlacklist: [] } };
-
-    const joinFilter = settings.joinFilter && typeof settings.joinFilter === 'object'
-        ? settings.joinFilter
-        : { enabled: true, keywordBlacklist: [] };
-
-    const keywords = Array.isArray(joinFilter.keywordBlacklist)
-        ? joinFilter.keywordBlacklist
-        : [];
-
-    const embed = new EmbedBuilder()
-        .setColor(0x000000)
-        .setTitle('Manage Panel - Join Filter')
-        .setDescription('Kick suspicious new joins when their username/display name contains blacklisted keywords.')
-        .addFields(
-            { name: 'Enabled', value: joinFilter.enabled !== false ? 'Yes' : 'No', inline: true },
-            { name: 'Keywords', value: keywords.length ? keywords.map(v => `\`${v}\``).join(', ').slice(0, 1024) : 'None', inline: false },
-            { name: 'Match Logic', value: 'Contains match on raw text only. Example: `boat` matches `iamboatguy` but not `iambo_atguy`.', inline: false },
-            { name: 'Action', value: 'DM first, then kick with reason: `For suspicious Discord account.`', inline: false }
-        )
-        .setTimestamp();
-
-    const payload = {
-        embeds: [embed],
-        components: [
-            buildPanelSelectRow(MANAGE_PANEL_JOIN_FILTER),
-            new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId(MANAGE_JOIN_FILTER_TOGGLE_ID)
-                    .setLabel(joinFilter.enabled !== false ? 'Disable Join Filter' : 'Enable Join Filter')
-                    .setStyle(joinFilter.enabled !== false ? ButtonStyle.Danger : ButtonStyle.Success),
-                new ButtonBuilder()
-                    .setCustomId(MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID)
-                    .setLabel('Edit Keywords')
-                    .setStyle(ButtonStyle.Primary),
-                new ButtonBuilder()
-                    .setCustomId(MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID)
-                    .setLabel('Clear Keywords')
-                    .setStyle(ButtonStyle.Secondary)
-            )
-        ]
-    };
-
-    if (notice) {
-        payload.content = String(notice);
-    }
-
-    return payload;
 }
 
 function formatStep(step, index) {
@@ -1482,10 +1450,6 @@ function buildManagePayload(client, guildId, options = {}) {
         return buildAutoresponderManagePayload(notice);
     }
 
-    if (panel === MANAGE_PANEL_JOIN_FILTER) {
-        return buildJoinFilterManagePayload(client, guildId, notice);
-    }
-
     return buildRuleManagePayload(client, guildId, selectedRuleKey);
 }
 
@@ -1657,11 +1621,6 @@ module.exports = {
 
             if (panel === MANAGE_PANEL_AUTORESPONDER) {
                 await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_AUTORESPONDER }));
-                return true;
-            }
-
-            if (panel === MANAGE_PANEL_JOIN_FILTER) {
-                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_JOIN_FILTER }));
                 return true;
             }
 
@@ -1896,7 +1855,7 @@ module.exports = {
             });
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
-                panel: MANAGE_PANEL_JOIN_FILTER,
+                panel: MANAGE_PANEL_SECURITY,
                 notice: `Join Filter ${joinFilter.enabled === false ? 'enabled' : 'disabled'}.`
             }));
             return true;
@@ -1938,7 +1897,7 @@ module.exports = {
             });
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
-                panel: MANAGE_PANEL_JOIN_FILTER,
+                panel: MANAGE_PANEL_SECURITY,
                 notice: 'Cleared join filter keywords.'
             }));
             return true;
@@ -2674,7 +2633,7 @@ module.exports = {
 
                     await interaction.reply({
                         ...buildManagePayload(client, interaction.guild.id, {
-                            panel: MANAGE_PANEL_JOIN_FILTER,
+                            panel: MANAGE_PANEL_SECURITY,
                             notice: `Updated join filter with ${keywords.length} keyword(s).`
                         }),
                         ephemeral: true
