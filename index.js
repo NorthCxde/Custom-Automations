@@ -916,7 +916,7 @@ client.buildJoinFilterKickLogPayload = (member, source, stats, matchedKeyword) =
             { name: 'Times Left', value: `\`${Number(stats?.leaves || 0)}\``, inline: true },
             { name: 'Account Created', value: `<t:${Math.floor(createdTs / 1000)}:F>`, inline: true },
             { name: 'Joined Server', value: `<t:${Math.floor(joinedTs / 1000)}:F>`, inline: true },
-            { name: 'Action', value: '`DM sent before kick. Reason: For suspicious Discord account.`', inline: false }
+            { name: 'Action', value: 'Reason: For suspicious Discord account.', inline: false }
         )
         .setThumbnail(member.user.displayAvatarURL({ extension: 'png', size: 256 }))
         .setTimestamp();
