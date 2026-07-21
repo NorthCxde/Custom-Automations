@@ -746,6 +746,9 @@ client.sanitizeSecuritySettings = (settings = {}) => {
     const accountAge = settings && typeof settings === 'object' && settings.accountAge && typeof settings.accountAge === 'object'
         ? settings.accountAge
         : {};
+    const joinFilter = settings && typeof settings === 'object' && settings.joinFilter && typeof settings.joinFilter === 'object'
+        ? settings.joinFilter
+        : {};
 
     return {
         accountAge: {
@@ -754,6 +757,13 @@ client.sanitizeSecuritySettings = (settings = {}) => {
             whitelistedUserIds: [...new Set((Array.isArray(accountAge.whitelistedUserIds) ? accountAge.whitelistedUserIds : [])
                 .map(String)
                 .filter(id => /^\d{17,20}$/.test(id)))]
+        },
+        joinFilter: {
+            enabled: joinFilter.enabled !== false,
+            keywordBlacklist: [...new Set((Array.isArray(joinFilter.keywordBlacklist) ? joinFilter.keywordBlacklist : [])
+                .map(value => String(value || '').trim().toLowerCase())
+                .filter(Boolean)
+                .filter(value => value.length >= 2 && value.length <= 32))]
         }
     };
 };
@@ -775,6 +785,10 @@ client.updateSecuritySettings = (guildId, updates = {}) => {
         accountAge: {
             ...(existing.accountAge || {}),
             ...((updates && typeof updates === 'object' && updates.accountAge) ? updates.accountAge : {})
+        },
+        joinFilter: {
+            ...(existing.joinFilter || {}),
+            ...((updates && typeof updates === 'object' && updates.joinFilter) ? updates.joinFilter : {})
         }
     });
     client.securitySettings.set(guildId, next);
@@ -870,6 +884,66 @@ client.logSecurityAccountAgeKick = async (member, source, stats, settings) => {
     if (!channel || !channel.isTextBased()) return null;
 
     return await channel.send(client.buildAccountAgeKickLogPayload(member, source, stats, settings)).catch(() => null);
+};
+
+client.buildJoinFilterKickLogPayload = (member, source, stats, matchedKeyword) => {
+    const staffEmoji = '<:Staff:1518753622618407062>';
+    const sourceLabel = source?.type === 'vanity'
+        ? 'vanity invite'
+        : source?.type === 'user_invite'
+            ? 'user invite'
+            : source?.type === 'bot'
+                ? 'oauth'
+                : source?.type === 'unknown'
+                    ? 'unknown invite'
+                    : 'possible discovery/external';
+    const createdTs = Number(member.user.createdTimestamp || Date.now());
+    const joinedTs = Number(member.joinedTimestamp || Date.now());
+    const username = String(member.user.username || 'Unknown');
+    const displayName = String(member.displayName || username);
+
+    const embed = new EmbedBuilder()
+        .setColor(0xF23F43)
+        .setTitle(`${staffEmoji} Security Triggered (Join Filter)`)
+        .setDescription(`<@${member.id}> was automatically kicked for a suspicious Discord account username match.`)
+        .addFields(
+            { name: 'Matched Keyword', value: `\`${String(matchedKeyword || '').replace(/`/g, "'")}\``, inline: true },
+            { name: 'Username', value: `\`${username.replace(/`/g, "'")}\``, inline: true },
+            { name: 'Display Name', value: `\`${displayName.replace(/`/g, "'")}\``, inline: true },
+            { name: 'User ID', value: `\`${member.id}\``, inline: false },
+            { name: 'Join Source', value: `\`${sourceLabel}\``, inline: true },
+            { name: 'Times Joined', value: `\`${Number(stats?.joins || 0)}\``, inline: true },
+            { name: 'Times Left', value: `\`${Number(stats?.leaves || 0)}\``, inline: true },
+            { name: 'Account Created', value: `<t:${Math.floor(createdTs / 1000)}:F>`, inline: true },
+            { name: 'Joined Server', value: `<t:${Math.floor(joinedTs / 1000)}:F>`, inline: true },
+            { name: 'Action', value: '`DM sent before kick. Reason: For suspicious Discord account.`', inline: false }
+        )
+        .setThumbnail(member.user.displayAvatarURL({ extension: 'png', size: 256 }))
+        .setTimestamp();
+
+    return {
+        embeds: [embed],
+        allowedMentions: {
+            parse: [],
+            users: [member.id],
+            roles: [],
+            repliedUser: false
+        }
+    };
+};
+
+client.logSecurityJoinFilterKick = async (member, source, stats, matchedKeyword) => {
+    if (!member?.guild) return null;
+    const channelId = client.getInviteLogChannelId(member.guild.id);
+    if (!channelId) return null;
+
+    let channel = member.guild.channels.cache.get(channelId);
+    if (!channel) {
+        channel = await member.guild.channels.fetch(channelId).catch(() => null);
+    }
+    if (!channel || !channel.isTextBased()) return null;
+
+    return await channel.send(client.buildJoinFilterKickLogPayload(member, source, stats, matchedKeyword)).catch(() => null);
 };
 
 client.loadAutoresponders = () => {
@@ -3758,6 +3832,67 @@ client.on('guildMemberAdd', async (member) => {
                 return;
             }
         }
+
+        const joinFilter = securitySettings.joinFilter && typeof securitySettings.joinFilter === 'object'
+            ? securitySettings.joinFilter
+            : { enabled: true, keywordBlacklist: [] };
+        const joinKeywords = Array.isArray(joinFilter.keywordBlacklist)
+            ? joinFilter.keywordBlacklist
+            : [];
+
+        if (joinFilter.enabled !== false && joinKeywords.length > 0) {
+            const usernameLower = String(member.user.username || '').toLowerCase();
+            const displayNameLower = String(member.displayName || '').toLowerCase();
+            const globalNameLower = String(member.user.globalName || '').toLowerCase();
+
+            // Raw contains matching only. We do not strip separators, so "boat" won't match "bo_at".
+            const matchedKeyword = joinKeywords.find(keyword => {
+                const needle = String(keyword || '').toLowerCase();
+                if (!needle) return false;
+                return usernameLower.includes(needle)
+                    || displayNameLower.includes(needle)
+                    || globalNameLower.includes(needle);
+            });
+
+            if (matchedKeyword) {
+                if (!member.kickable) {
+                    console.warn(`Could not enforce join filter for ${member.user.id} in guild ${member.guild.id}: member is not kickable.`);
+                    return;
+                }
+
+                await client.sendModerationDm({
+                    userId: member.user.id,
+                    guildName: member.guild.name,
+                    action: 'kick',
+                    reason: 'For suspicious Discord account.'
+                }).catch(() => false);
+
+                await member.kick(`Join filter keyword match: ${matchedKeyword}`);
+
+                if (typeof client.addModLog === 'function') {
+                    client.addModLog(member.guild.id, {
+                        action: 'Kick',
+                        userId: member.user.id,
+                        userTag: member.user.tag,
+                        moderatorId: client.user?.id || '0',
+                        moderatorTag: client.user?.tag || 'Security',
+                        reason: `For suspicious Discord account. Matched keyword: ${matchedKeyword}`,
+                        timestamp: new Date().toISOString(),
+                        infractionRule: 'join_filter',
+                        infractionRuleLabel: 'Join Filter'
+                    });
+                }
+
+                await client.logSecurityJoinFilterKick(
+                    member,
+                    resolvedJoinSource || { type: 'unknown', invite: null, vanityCode: member.guild.vanityURLCode || null },
+                    stats,
+                    matchedKeyword
+                );
+
+                return;
+            }
+        }
     } catch (err) {
         console.error(`Failed to enforce account age security for new member ${member.user.id}:`, err);
     }
@@ -3843,15 +3978,15 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
         if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms' || interaction.commandName === 'setinvitelogs' || interaction.commandName === 'infractions' || interaction.commandName === 'unban') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
-                return interaction.reply({ content: 'Only the bot admins can use this command.', ephemeral: true });
+                return;
             }
         } else if (interaction.commandName !== 'remind') {
             if (client.publicCommandNames.has(interaction.commandName)) {
                 if (!client.isPublicMemberAllowed(interaction.member)) {
-                    return interaction.reply({ content: 'You do not have permission to use this public command. Ask an admin to configure /publicperms.', ephemeral: true });
+                    return;
                 }
             } else if (!client.isMemberAllowed(interaction.member)) {
-                return interaction.reply({ content: 'You do not have permission to use bot commands. Use /perms to configure allowed roles.', ephemeral: true });
+                return;
             }
         }
 
@@ -5619,7 +5754,7 @@ client.on('messageCreate', async (message) => {
 
     const hardcodedPrefixCommands = new Set(['dm', 'enablecommands', 'synccommands', 'autoresponder', 'manage', 'unban']);
     if (hardcodedPrefixCommands.has(commandName) && !HARD_CODED_ADMINS.includes(message.author.id)) {
-        return message.reply('Only the bot admins can use this command.');
+        return;
     }
 
     if (commandName !== 'perms') {
@@ -5822,7 +5957,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                         .setDescription(`Reaction removed for <@${user.id}> in <#${channel.id}> due to reaction cooldown.`)
                         .addFields(
                             { name: 'Reason', value: 'Reaction Cooldown', inline: true },
-                            { name: 'Detailed Reason', value: `${uniqueMessageCount} different messages in ${Math.round(windowMs / 1000)}s. Removed only this user's reactions added during the window. Cooldown: ${Math.round(cooldownMs / 1000)}s.`, inline: true }
+                            { name: 'Detailed Reason', value: `Added ${uniqueMessageCount} reactions in ${Math.round(windowMs / 1000)}s. ${Math.round(cooldownMs / 1000)} second reaction cooldown.`, inline: true }
                         )
                         .setFooter({ text: `ID: ${user.id}` })
                         .setTimestamp();

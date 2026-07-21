@@ -50,6 +50,19 @@ async function sendUnbanUsageCard(channel) {
     });
 }
 
+function buildUnbanLogEmbed({ targetId, targetTag, moderatorId, moderatorTag }) {
+    return new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Unban Action')
+        .setDescription(`Case by ${moderatorTag}`)
+        .addFields(
+            { name: 'User', value: targetTag || `<@${targetId}>`, inline: true },
+            { name: 'Moderator', value: `<@${moderatorId}>`, inline: true },
+            { name: 'Target ID', value: String(targetId), inline: false }
+        )
+        .setTimestamp();
+}
+
 module.exports = {
     name: 'unban',
     description: 'Unban a user by mention or ID',
@@ -98,7 +111,15 @@ module.exports = {
                     moderatorTag: message.author.tag,
                     timestamp: new Date().toISOString()
                 });
-                if (client.logToChannel) await client.logToChannel(message.guild, `Unban: <@${targetId}> by ${message.author.tag}`);
+                if (client.logToChannel) {
+                    const logEmbed = buildUnbanLogEmbed({
+                        targetId,
+                        targetTag: `<@${targetId}>`,
+                        moderatorId: message.author.id,
+                        moderatorTag: message.author.tag
+                    });
+                    await client.logToChannel(message.guild, { embeds: [logEmbed] });
+                }
             }
             return null;
         } catch (error) {
@@ -142,7 +163,15 @@ module.exports = {
                     moderatorTag: interaction.user.tag,
                     timestamp: new Date().toISOString()
                 });
-                if (client.logToChannel) await client.logToChannel(interaction.guild, `Unban: ${user.tag} by ${interaction.user.tag}`);
+                if (client.logToChannel) {
+                    const logEmbed = buildUnbanLogEmbed({
+                        targetId: user.id,
+                        targetTag: `<@${user.id}>`,
+                        moderatorId: interaction.user.id,
+                        moderatorTag: interaction.user.tag
+                    });
+                    await client.logToChannel(interaction.guild, { embeds: [logEmbed] });
+                }
             }
         } catch (error) {
             console.error(error);

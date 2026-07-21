@@ -46,6 +46,7 @@ const MANAGE_PANEL_AUTOMOD = 'automod';
 const MANAGE_PANEL_REVOKED_INVITES = 'revoked_invites';
 const MANAGE_PANEL_SECURITY = 'security';
 const MANAGE_PANEL_AUTORESPONDER = 'autoresponder';
+const MANAGE_PANEL_JOIN_FILTER = 'join_filter';
 
 const MANAGE_REVOKED_INVITE_SELECT_ID = 'manage_revoked_invite_select';
 const MANAGE_REVOKED_INVITE_REMOVE_PREFIX = 'manage_revoked_invite_remove:';
@@ -55,9 +56,13 @@ const MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID = 'manage_security_toggle_account_ag
 const MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID = 'manage_security_edit_account_age';
 const MANAGE_SECURITY_EDIT_WHITELIST_ID = 'manage_security_edit_whitelist';
 const MANAGE_SECURITY_CLEAR_WHITELIST_ID = 'manage_security_clear_whitelist';
+const MANAGE_JOIN_FILTER_TOGGLE_ID = 'manage_join_filter_toggle';
+const MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID = 'manage_join_filter_edit_keywords';
+const MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID = 'manage_join_filter_clear_keywords';
 const MANAGE_SECURITY_MODAL_PREFIX = 'manage_security_modal:';
 const MODAL_SECURITY_ACCOUNT_AGE_DAYS_INPUT_ID = 'account_age_days';
 const MODAL_SECURITY_WHITELIST_INPUT_ID = 'whitelist_ids';
+const MODAL_SECURITY_JOIN_FILTER_KEYWORDS_INPUT_ID = 'join_filter_keywords';
 const MANAGE_AUTORESPONDER_OPEN_ID = 'manage_autoresponder_open';
 
 const MANAGE_AUTOMOD_RULE_SELECT_ID = 'manage_automod_rule_select';
@@ -166,6 +171,12 @@ function buildPanelSelectRow(selectedPanel) {
                     value: MANAGE_PANEL_AUTORESPONDER,
                     description: 'Open autoresponder management flow',
                     default: selectedPanel === MANAGE_PANEL_AUTORESPONDER
+                },
+                {
+                    label: 'Join Filter',
+                    value: MANAGE_PANEL_JOIN_FILTER,
+                    description: 'Kick new joins matching blacklisted username keywords',
+                    default: selectedPanel === MANAGE_PANEL_JOIN_FILTER
                 }
             ])
     );
@@ -273,6 +284,69 @@ function buildSecurityManagePayload(client, guildId, notice) {
 function hasSecurityBackend(client) {
     return typeof client.getSecuritySettings === 'function'
         && typeof client.updateSecuritySettings === 'function';
+}
+
+function parseJoinFilterKeywords(text) {
+    return [...new Set(
+        String(text || '')
+            .split(/[\n,]+/)
+            .map(part => part.trim().toLowerCase())
+            .filter(Boolean)
+            .filter(part => part.length >= 2 && part.length <= 32)
+    )];
+}
+
+function buildJoinFilterManagePayload(client, guildId, notice) {
+    const settings = typeof client.getSecuritySettings === 'function'
+        ? client.getSecuritySettings(guildId)
+        : { joinFilter: { enabled: true, keywordBlacklist: [] } };
+
+    const joinFilter = settings.joinFilter && typeof settings.joinFilter === 'object'
+        ? settings.joinFilter
+        : { enabled: true, keywordBlacklist: [] };
+
+    const keywords = Array.isArray(joinFilter.keywordBlacklist)
+        ? joinFilter.keywordBlacklist
+        : [];
+
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Manage Panel - Join Filter')
+        .setDescription('Kick suspicious new joins when their username/display name contains blacklisted keywords.')
+        .addFields(
+            { name: 'Enabled', value: joinFilter.enabled !== false ? 'Yes' : 'No', inline: true },
+            { name: 'Keywords', value: keywords.length ? keywords.map(v => `\`${v}\``).join(', ').slice(0, 1024) : 'None', inline: false },
+            { name: 'Match Logic', value: 'Contains match on raw text only. Example: `boat` matches `iamboatguy` but not `iambo_atguy`.', inline: false },
+            { name: 'Action', value: 'DM first, then kick with reason: `For suspicious Discord account.`', inline: false }
+        )
+        .setTimestamp();
+
+    const payload = {
+        embeds: [embed],
+        components: [
+            buildPanelSelectRow(MANAGE_PANEL_JOIN_FILTER),
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_JOIN_FILTER_TOGGLE_ID)
+                    .setLabel(joinFilter.enabled !== false ? 'Disable Join Filter' : 'Enable Join Filter')
+                    .setStyle(joinFilter.enabled !== false ? ButtonStyle.Danger : ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID)
+                    .setLabel('Edit Keywords')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID)
+                    .setLabel('Clear Keywords')
+                    .setStyle(ButtonStyle.Secondary)
+            )
+        ]
+    };
+
+    if (notice) {
+        payload.content = String(notice);
+    }
+
+    return payload;
 }
 
 function formatStep(step, index) {
@@ -1408,6 +1482,10 @@ function buildManagePayload(client, guildId, options = {}) {
         return buildAutoresponderManagePayload(notice);
     }
 
+    if (panel === MANAGE_PANEL_JOIN_FILTER) {
+        return buildJoinFilterManagePayload(client, guildId, notice);
+    }
+
     return buildRuleManagePayload(client, guildId, selectedRuleKey);
 }
 
@@ -1582,6 +1660,11 @@ module.exports = {
                 return true;
             }
 
+            if (panel === MANAGE_PANEL_JOIN_FILTER) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_JOIN_FILTER }));
+                return true;
+            }
+
             const firstRule = RULE_CHOICES[0]?.value;
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_RULES,
@@ -1656,6 +1739,9 @@ module.exports = {
             && interaction.customId !== MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID
             && interaction.customId !== MANAGE_SECURITY_EDIT_WHITELIST_ID
             && interaction.customId !== MANAGE_SECURITY_CLEAR_WHITELIST_ID
+            && interaction.customId !== MANAGE_JOIN_FILTER_TOGGLE_ID
+            && interaction.customId !== MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID
+            && interaction.customId !== MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID
             && interaction.customId !== MANAGE_AUTORESPONDER_OPEN_ID) {
             return false;
         }
@@ -1716,7 +1802,10 @@ module.exports = {
         if ((interaction.customId === MANAGE_SECURITY_TOGGLE_ACCOUNT_AGE_ID
             || interaction.customId === MANAGE_SECURITY_EDIT_ACCOUNT_AGE_ID
             || interaction.customId === MANAGE_SECURITY_EDIT_WHITELIST_ID
-            || interaction.customId === MANAGE_SECURITY_CLEAR_WHITELIST_ID)
+            || interaction.customId === MANAGE_SECURITY_CLEAR_WHITELIST_ID
+            || interaction.customId === MANAGE_JOIN_FILTER_TOGGLE_ID
+            || interaction.customId === MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID
+            || interaction.customId === MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID)
             && !hasSecurityBackend(client)) {
             await interaction.reply({
                 content: 'Security backend is not loaded yet. Pull latest changes and restart the bot.',
@@ -1789,6 +1878,68 @@ module.exports = {
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_SECURITY,
                 notice: 'Cleared account age whitelist.'
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_JOIN_FILTER_TOGGLE_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const joinFilter = settings.joinFilter && typeof settings.joinFilter === 'object'
+                ? settings.joinFilter
+                : { enabled: true, keywordBlacklist: [] };
+
+            client.updateSecuritySettings(interaction.guild.id, {
+                joinFilter: {
+                    ...joinFilter,
+                    enabled: joinFilter.enabled === false
+                }
+            });
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_JOIN_FILTER,
+                notice: `Join Filter ${joinFilter.enabled === false ? 'enabled' : 'disabled'}.`
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const joinFilter = settings.joinFilter && typeof settings.joinFilter === 'object'
+                ? settings.joinFilter
+                : { enabled: true, keywordBlacklist: [] };
+
+            const modal = new ModalBuilder()
+                .setCustomId(`${MANAGE_SECURITY_MODAL_PREFIX}join_filter_keywords`)
+                .setTitle('Join Filter - Keywords');
+
+            const input = new TextInputBuilder()
+                .setCustomId(MODAL_SECURITY_JOIN_FILTER_KEYWORDS_INPUT_ID)
+                .setLabel('Keywords (comma/newline, 2-32 chars each)')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(false)
+                .setValue((joinFilter.keywordBlacklist || []).join('\n').slice(0, 4000));
+
+            modal.addComponents(new ActionRowBuilder().addComponents(input));
+            await interaction.showModal(modal);
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const joinFilter = settings.joinFilter && typeof settings.joinFilter === 'object'
+                ? settings.joinFilter
+                : { enabled: true, keywordBlacklist: [] };
+
+            client.updateSecuritySettings(interaction.guild.id, {
+                joinFilter: {
+                    ...joinFilter,
+                    keywordBlacklist: []
+                }
+            });
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_JOIN_FILTER,
+                notice: 'Cleared join filter keywords.'
             }));
             return true;
         }
@@ -2501,6 +2652,30 @@ module.exports = {
                         ...buildManagePayload(client, interaction.guild.id, {
                             panel: MANAGE_PANEL_SECURITY,
                             notice: `Updated whitelist with ${whitelistedUserIds.length} user ID(s).`
+                        }),
+                        ephemeral: true
+                    });
+                    return true;
+                }
+
+                if (modalType === 'join_filter_keywords') {
+                    const rawKeywords = interaction.fields.getTextInputValue(MODAL_SECURITY_JOIN_FILTER_KEYWORDS_INPUT_ID).trim();
+                    const keywords = parseJoinFilterKeywords(rawKeywords);
+                    const joinFilter = settings.joinFilter && typeof settings.joinFilter === 'object'
+                        ? settings.joinFilter
+                        : { enabled: true, keywordBlacklist: [] };
+
+                    client.updateSecuritySettings(interaction.guild.id, {
+                        joinFilter: {
+                            ...joinFilter,
+                            keywordBlacklist: keywords
+                        }
+                    });
+
+                    await interaction.reply({
+                        ...buildManagePayload(client, interaction.guild.id, {
+                            panel: MANAGE_PANEL_JOIN_FILTER,
+                            notice: `Updated join filter with ${keywords.length} keyword(s).`
                         }),
                         ephemeral: true
                     });
