@@ -68,6 +68,21 @@ const HQ_GUILD_ID_DEFAULT = '1512252919423176875';
 const HQ_PERMS_LOG_CHANNEL_ID_DEFAULT = '1517292575239704907';
 const HQ_GLOBAL_LOG_CHANNEL_ID_DEFAULT = '1517325234712219718';
 const BOOT_MARKER = 'trello-perms-sync-v3';
+const ADMIN_ONLY_COMMAND_NAMES = new Set([
+    'perms',
+    'logs',
+    'enablecommands',
+    'setboostchannel',
+    'autoresponder',
+    'synccommands',
+    'manage',
+    'manuallogschannel',
+    'publicperms',
+    'setinvitelogs',
+    'infractions',
+    'unban'
+]);
+const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
 
 function trelloRequestJson(url) {
     return new Promise((resolve, reject) => {
@@ -201,6 +216,7 @@ const inviteLogsFile = path.join(dataPath, "invitelogs.json");
 const inviteMemberStatsFile = path.join(dataPath, "inviteMemberStats.json");
 const revokedInvitesFile = path.join(dataPath, "revokedInvites.json");
 const securityFile = path.join(dataPath, "security.json");
+const commandAccessFile = path.join(dataPath, "commandAccess.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -241,13 +257,14 @@ client.vanityUsesByGuild = new Map();
 client.recentDeletedInvitesByGuild = new Map();
 client.revokedInvites = new Map();
 client.securitySettings = new Map();
+client.commandAccessLevels = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.hideCommandState = new Map(); // per-guild set of userIds for deleting their moderation prefix command messages
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.banStickerId = '1480253710969082108';
 client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
 client.trelloModeratorLevelPermRoleNames = new Set(STATIC_MODERATOR_LEVEL_PERM_ROLE_NAMES.map(name => String(name).toLowerCase()));
-client.publicCommandNames = new Set(['profile', 'avatar']);
+client.publicCommandNames = new Set(['profile', 'avatar', 'remind']);
 
 client.applyHardcodedAdmins = (ids = []) => {
     const merged = [...new Set([...STATIC_HARD_CODED_ADMINS.map(String), ...ids.map(String)])];
@@ -2162,6 +2179,10 @@ client.loadCommands = () => {
             console.error(`Failed to load command ${file}:`, err);
         }
     }
+
+    if (typeof client.rebuildPublicCommandNamesFromAccessLevels === 'function') {
+        client.rebuildPublicCommandNamesFromAccessLevels();
+    }
 };
 
 client.loadPermissions = () => {
@@ -2998,6 +3019,79 @@ client.savePublicPermissions = () => {
     fs.writeFileSync(publicPermsFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
+client.normalizeCommandAccessLevel = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'admin' || normalized === 'public') return normalized;
+    return 'moderator';
+};
+
+client.getDefaultCommandAccessLevel = (commandName) => {
+    const name = String(commandName || '').trim().toLowerCase();
+    if (!name) return 'moderator';
+    if (ADMIN_ONLY_COMMAND_NAMES.has(name)) return 'admin';
+    if (DEFAULT_PUBLIC_COMMAND_NAMES.has(name)) return 'public';
+    return 'moderator';
+};
+
+client.rebuildPublicCommandNamesFromAccessLevels = () => {
+    const next = new Set();
+    for (const commandName of client.slashCommands.keys()) {
+        if (client.getCommandAccessLevel(commandName) === 'public') {
+            next.add(String(commandName || '').trim().toLowerCase());
+        }
+    }
+    client.publicCommandNames = next;
+};
+
+client.loadCommandAccessLevels = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(commandAccessFile)) fs.writeFileSync(commandAccessFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(commandAccessFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read command access file:', err);
+    }
+
+    client.commandAccessLevels.clear();
+    for (const [commandNameRaw, levelRaw] of Object.entries(parsed || {})) {
+        const commandName = String(commandNameRaw || '').trim().toLowerCase();
+        if (!commandName) continue;
+        client.commandAccessLevels.set(commandName, client.normalizeCommandAccessLevel(levelRaw));
+    }
+
+    client.rebuildPublicCommandNamesFromAccessLevels();
+};
+
+client.saveCommandAccessLevels = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    const out = {};
+    for (const [commandName, level] of client.commandAccessLevels.entries()) {
+        out[String(commandName)] = client.normalizeCommandAccessLevel(level);
+    }
+    fs.writeFileSync(commandAccessFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getCommandAccessLevel = (commandName) => {
+    const name = String(commandName || '').trim().toLowerCase();
+    if (!name) return 'moderator';
+    if (client.commandAccessLevels.has(name)) {
+        return client.commandAccessLevels.get(name);
+    }
+    return client.getDefaultCommandAccessLevel(name);
+};
+
+client.setCommandAccessLevel = (commandName, level) => {
+    const name = String(commandName || '').trim().toLowerCase();
+    if (!name) return null;
+    const normalizedLevel = client.normalizeCommandAccessLevel(level);
+    client.commandAccessLevels.set(name, normalizedLevel);
+    client.saveCommandAccessLevels();
+    client.rebuildPublicCommandNamesFromAccessLevels();
+    return normalizedLevel;
+};
+
 client.loadInviteLogChannels = () => {
     if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
     if (!fs.existsSync(inviteLogsFile)) fs.writeFileSync(inviteLogsFile, '{}', 'utf8');
@@ -3567,6 +3661,7 @@ client.resetInfractionRule = (guildId, ruleKey) => {
 };
 
 client.loadCommands();
+client.loadCommandAccessLevels();
 client.loadPermissions();
 client.loadLogChannels();
 client.loadModLogs();
@@ -3976,18 +4071,20 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
-        if (interaction.commandName === 'perms' || interaction.commandName === 'logs' || interaction.commandName === 'enablecommands' || interaction.commandName === 'setboostchannel' || interaction.commandName === 'autoresponder' || interaction.commandName === 'synccommands' || interaction.commandName === 'manage' || interaction.commandName === 'manuallogschannel' || interaction.commandName === 'publicperms' || interaction.commandName === 'setinvitelogs' || interaction.commandName === 'infractions' || interaction.commandName === 'unban') {
+        const commandLevel = typeof client.getCommandAccessLevel === 'function'
+            ? client.getCommandAccessLevel(interaction.commandName)
+            : 'moderator';
+
+        if (commandLevel === 'admin') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return;
             }
-        } else if (interaction.commandName !== 'remind') {
-            if (client.publicCommandNames.has(interaction.commandName)) {
-                if (!client.isPublicMemberAllowed(interaction.member)) {
-                    return;
-                }
-            } else if (!client.isMemberAllowed(interaction.member)) {
+        } else if (commandLevel === 'public') {
+            if (!client.isPublicMemberAllowed(interaction.member)) {
                 return;
             }
+        } else if (!client.isMemberAllowed(interaction.member)) {
+            return;
         }
 
         const command = client.slashCommands.get(interaction.commandName);
@@ -5752,17 +5849,20 @@ client.on('messageCreate', async (message) => {
     const shouldHideModerationCommand = client.getHideCommandState(message.guild.id, message.author.id)
         && moderationPrefixCommands.has(commandName);
 
-    const hardcodedPrefixCommands = new Set(['dm', 'enablecommands', 'synccommands', 'autoresponder', 'manage', 'unban']);
-    if (hardcodedPrefixCommands.has(commandName) && !HARD_CODED_ADMINS.includes(message.author.id)) {
+    const commandLevel = typeof client.getCommandAccessLevel === 'function'
+        ? client.getCommandAccessLevel(commandName)
+        : (command.public ? 'public' : 'moderator');
+
+    if (commandLevel === 'admin' && !HARD_CODED_ADMINS.includes(message.author.id)) {
         return;
     }
 
-    if (commandName !== 'perms') {
-        if (command.public) {
-            if (!client.isPublicMemberAllowed(message.member)) {
-                return;
-            }
-        } else if (!client.isMemberAllowed(message.member)) {
+    if (commandLevel === 'public') {
+        if (!client.isPublicMemberAllowed(message.member)) {
+            return;
+        }
+    } else if (commandLevel === 'moderator') {
+        if (!client.isMemberAllowed(message.member)) {
             return;
         }
     }

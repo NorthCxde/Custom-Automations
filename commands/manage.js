@@ -47,6 +47,8 @@ const MANAGE_PANEL_REVOKED_INVITES = 'revoked_invites';
 const MANAGE_PANEL_SECURITY = 'security';
 const MANAGE_PANEL_AUTORESPONDER = 'autoresponder';
 const MANAGE_PANEL_PERMS = 'perms';
+const MANAGE_PERMS_COMMAND_SELECT_ID = 'manage_perms_command_select';
+const MANAGE_PERMS_LEVEL_SELECT_PREFIX = 'manage_perms_level_select:';
 
 const ADMIN_SLASH_COMMAND_NAMES = new Set([
     'perms',
@@ -237,16 +239,35 @@ function formatRoleSummary(guild, roleSet, emptySetLabel) {
     return text.length > 1024 ? `${text.slice(0, 1021)}...` : text;
 }
 
-function buildPermsManagePayload(client, guild, notice) {
-    const slashNames = [...new Set(Array.from(client.slashCommands?.keys?.() || []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean))];
-    const publicNames = new Set([
-        ...Array.from(client.publicCommandNames || []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean),
-        ...ALWAYS_PUBLIC_SLASH_COMMAND_NAMES
-    ]);
+function normalizeCommandAccessLevel(level) {
+    const normalized = String(level || '').trim().toLowerCase();
+    if (normalized === 'admin' || normalized === 'public') return normalized;
+    return 'moderator';
+}
 
-    const adminCommands = slashNames.filter(name => ADMIN_SLASH_COMMAND_NAMES.has(name));
-    const publicCommands = slashNames.filter(name => publicNames.has(name) && !ADMIN_SLASH_COMMAND_NAMES.has(name));
-    const moderatorCommands = slashNames.filter(name => !ADMIN_SLASH_COMMAND_NAMES.has(name) && !publicNames.has(name));
+function buildPermsManagePayload(client, guild, notice, selectedCommandName = null) {
+    const slashNames = [...new Set(Array.from(client.slashCommands?.keys?.() || []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean))];
+
+    const getLevel = (name) => {
+        if (typeof client.getCommandAccessLevel === 'function') {
+            return normalizeCommandAccessLevel(client.getCommandAccessLevel(name));
+        }
+
+        const normalized = String(name || '').trim().toLowerCase();
+        if (ADMIN_SLASH_COMMAND_NAMES.has(normalized)) return 'admin';
+        if (ALWAYS_PUBLIC_SLASH_COMMAND_NAMES.has(normalized)) return 'public';
+        if (Array.from(client.publicCommandNames || []).map(v => String(v || '').trim().toLowerCase()).includes(normalized)) return 'public';
+        return 'moderator';
+    };
+
+    const adminCommands = slashNames.filter(name => getLevel(name) === 'admin');
+    const moderatorCommands = slashNames.filter(name => getLevel(name) === 'moderator');
+    const publicCommands = slashNames.filter(name => getLevel(name) === 'public');
+
+    const selectedCommand = slashNames.includes(String(selectedCommandName || '').trim().toLowerCase())
+        ? String(selectedCommandName).trim().toLowerCase()
+        : (slashNames[0] || null);
+    const selectedLevel = selectedCommand ? getLevel(selectedCommand) : 'moderator';
 
     const embed = new EmbedBuilder()
         .setColor(0x000000)
@@ -255,14 +276,52 @@ function buildPermsManagePayload(client, guild, notice) {
         .addFields(
             { name: 'Admin Level Commands', value: formatCommandList(adminCommands), inline: false },
             { name: 'Moderator Level Commands', value: formatCommandList(moderatorCommands), inline: false },
-            { name: 'Public Level Commands', value: formatCommandList(publicCommands), inline: false }
+            { name: 'Public Level Commands', value: formatCommandList(publicCommands), inline: false },
+            { name: 'Selected Command', value: selectedCommand ? `\`/${selectedCommand}\`` : 'None', inline: true },
+            { name: 'Selected Level', value: selectedCommand ? `\`${selectedLevel}\`` : 'N/A', inline: true }
         )
         .setTimestamp();
 
+    const commandOptions = slashNames.slice(0, 25).map(name => ({
+        label: `/${name}`.slice(0, 100),
+        value: name,
+        default: selectedCommand === name
+    }));
+
+    const levelSelectCustomId = selectedCommand
+        ? `${MANAGE_PERMS_LEVEL_SELECT_PREFIX}${selectedCommand}`
+        : `${MANAGE_PERMS_LEVEL_SELECT_PREFIX}none`;
+
     const payload = {
         embeds: [embed],
-        components: [buildPanelSelectRow(MANAGE_PANEL_PERMS)]
+        components: [
+            buildPanelSelectRow(MANAGE_PANEL_PERMS)
+        ]
     };
+
+    if (commandOptions.length) {
+        payload.components.push(
+            new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId(MANAGE_PERMS_COMMAND_SELECT_ID)
+                    .setPlaceholder('Select a slash command')
+                    .addOptions(commandOptions)
+            )
+        );
+
+        payload.components.push(
+            new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId(levelSelectCustomId)
+                    .setPlaceholder('Set permission level for selected command')
+                    .addOptions([
+                        { label: 'Admin', value: 'admin', default: selectedLevel === 'admin' },
+                        { label: 'Moderator', value: 'moderator', default: selectedLevel === 'moderator' },
+                        { label: 'Public', value: 'public', default: selectedLevel === 'public' }
+                    ])
+            )
+        );
+    }
 
     if (notice) payload.content = String(notice);
     return payload;
@@ -1554,6 +1613,7 @@ function buildManagePayload(client, guildId, options = {}) {
         selectedAutomodRuleId,
         selectedRevokedInviteId,
         selectedSecuritySection,
+        selectedPermCommand,
         automodDraft,
         notice
     } = options;
@@ -1585,7 +1645,7 @@ function buildManagePayload(client, guildId, options = {}) {
 
     if (panel === MANAGE_PANEL_PERMS) {
         const guild = client.guilds?.cache?.get(guildId) || null;
-        return buildPermsManagePayload(client, guild, notice);
+        return buildPermsManagePayload(client, guild, notice, selectedPermCommand);
     }
 
     return buildRuleManagePayload(client, guildId, selectedRuleKey);
@@ -1612,6 +1672,8 @@ module.exports = {
         if (interaction.customId !== MANAGE_RULE_SELECT_ID
             && interaction.customId !== MANAGE_PANEL_SELECT_ID
             && interaction.customId !== MANAGE_SECURITY_SECTION_SELECT_ID
+            && interaction.customId !== MANAGE_PERMS_COMMAND_SELECT_ID
+            && !interaction.customId.startsWith(MANAGE_PERMS_LEVEL_SELECT_PREFIX)
             && interaction.customId !== MANAGE_AUTOMOD_RULE_SELECT_ID
             && interaction.customId !== MANAGE_REVOKED_INVITE_SELECT_ID
             && !interaction.customId.startsWith(`${MANAGE_USER_CASE_SELECT_ID}:`)
@@ -1783,6 +1845,36 @@ module.exports = {
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_SECURITY,
                 selectedSecuritySection
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_PERMS_COMMAND_SELECT_ID) {
+            const selectedPermCommand = String(interaction.values?.[0] || '').trim().toLowerCase() || null;
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_PERMS,
+                selectedPermCommand
+            }));
+            return true;
+        }
+
+        if (interaction.customId.startsWith(MANAGE_PERMS_LEVEL_SELECT_PREFIX)) {
+            const selectedPermCommand = interaction.customId.slice(MANAGE_PERMS_LEVEL_SELECT_PREFIX.length).trim().toLowerCase();
+            const level = normalizeCommandAccessLevel(interaction.values?.[0]);
+
+            if (!selectedPermCommand || selectedPermCommand === 'none') {
+                await interaction.reply({ content: 'Select a command first.', ephemeral: true });
+                return true;
+            }
+
+            if (typeof client.setCommandAccessLevel === 'function') {
+                client.setCommandAccessLevel(selectedPermCommand, level);
+            }
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_PERMS,
+                selectedPermCommand,
+                notice: `Set /${selectedPermCommand} to ${level} level.`
             }));
             return true;
         }
