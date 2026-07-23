@@ -1876,7 +1876,7 @@ module.exports = {
             }));
 
             await interaction.followUp({
-                content: `Set /${selectedPermCommand} to ${level} level.`,
+                content: `✅ Successfully set /${selectedPermCommand} to ${level} level.`,
                 ephemeral: true
             });
             return true;
