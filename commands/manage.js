@@ -46,6 +46,23 @@ const MANAGE_PANEL_AUTOMOD = 'automod';
 const MANAGE_PANEL_REVOKED_INVITES = 'revoked_invites';
 const MANAGE_PANEL_SECURITY = 'security';
 const MANAGE_PANEL_AUTORESPONDER = 'autoresponder';
+const MANAGE_PANEL_PERMS = 'perms';
+
+const ADMIN_SLASH_COMMAND_NAMES = new Set([
+    'perms',
+    'logs',
+    'enablecommands',
+    'setboostchannel',
+    'autoresponder',
+    'synccommands',
+    'manage',
+    'manuallogschannel',
+    'publicperms',
+    'setinvitelogs',
+    'infractions',
+    'unban'
+]);
+const ALWAYS_PUBLIC_SLASH_COMMAND_NAMES = new Set(['remind']);
 
 const MANAGE_REVOKED_INVITE_SELECT_ID = 'manage_revoked_invite_select';
 const MANAGE_REVOKED_INVITE_REMOVE_PREFIX = 'manage_revoked_invite_remove:';
@@ -173,9 +190,98 @@ function buildPanelSelectRow(selectedPanel) {
                     value: MANAGE_PANEL_AUTORESPONDER,
                     description: 'Open autoresponder management flow',
                     default: selectedPanel === MANAGE_PANEL_AUTORESPONDER
+                },
+                {
+                    label: 'Perms',
+                    value: MANAGE_PANEL_PERMS,
+                    description: 'View slash command access by rank',
+                    default: selectedPanel === MANAGE_PANEL_PERMS
                 }
             ])
     );
+}
+
+function formatCommandList(commands, maxLen = 1024) {
+    const list = [...new Set((commands || []).map(name => String(name || '').trim().toLowerCase()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+    if (!list.length) return 'None';
+
+    const out = [];
+    let total = 0;
+    for (const name of list) {
+        const item = `/${name}`;
+        const next = total + (out.length ? 2 : 0) + item.length;
+        if (next > maxLen - 20) break;
+        out.push(item);
+        total = next;
+    }
+
+    if (out.length < list.length) {
+        out.push(`+${list.length - out.length} more`);
+    }
+
+    return out.join(', ');
+}
+
+function formatRoleSummary(guild, roleSet, emptySetLabel) {
+    if (roleSet === null) return 'All members';
+    if (!(roleSet instanceof Set) || roleSet.size === 0) return emptySetLabel;
+
+    const names = [];
+    for (const roleId of roleSet) {
+        const role = guild?.roles?.cache?.get(roleId);
+        names.push(role ? role.name : `Unknown Role (${roleId})`);
+    }
+
+    const text = names.join(', ');
+    return text.length > 1024 ? `${text.slice(0, 1021)}...` : text;
+}
+
+function buildPermsManagePayload(client, guild, notice) {
+    const slashNames = [...new Set(Array.from(client.slashCommands?.keys?.() || []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean))];
+    const publicNames = new Set([
+        ...Array.from(client.publicCommandNames || []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean),
+        ...ALWAYS_PUBLIC_SLASH_COMMAND_NAMES
+    ]);
+
+    const adminCommands = slashNames.filter(name => ADMIN_SLASH_COMMAND_NAMES.has(name));
+    const publicCommands = slashNames.filter(name => publicNames.has(name) && !ADMIN_SLASH_COMMAND_NAMES.has(name));
+    const moderatorCommands = slashNames.filter(name => !ADMIN_SLASH_COMMAND_NAMES.has(name) && !publicNames.has(name));
+
+    const allowedRoles = typeof client.getAllowedRoleIds === 'function'
+        ? client.getAllowedRoleIds(guild.id)
+        : null;
+    const publicRoles = typeof client.getPublicRoleIds === 'function'
+        ? client.getPublicRoleIds(guild.id)
+        : null;
+
+    const adminSummary = (client.hardcodedAdmins instanceof Set && client.hardcodedAdmins.size)
+        ? `${client.hardcodedAdmins.size} hardcoded admin(s)`
+        : 'No hardcoded admins loaded';
+    const moderatorRoleSummary = formatRoleSummary(guild, allowedRoles, 'Admins/Manage Server only (no /perms roles selected)');
+    const publicRoleSummary = formatRoleSummary(guild, publicRoles, 'Admins/Manage Server only (public roles set is empty)');
+
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Manage Panel - Perms')
+        .setDescription('View which slash commands are available by rank tier.')
+        .addFields(
+            { name: 'Admin Tier', value: adminSummary, inline: false },
+            { name: 'Admin Slash Commands', value: formatCommandList(adminCommands), inline: false },
+            { name: 'Moderator Tier (/perms)', value: moderatorRoleSummary, inline: false },
+            { name: 'Moderator Slash Commands', value: formatCommandList(moderatorCommands), inline: false },
+            { name: 'Public Tier', value: publicRoleSummary, inline: false },
+            { name: 'Public Slash Commands', value: formatCommandList(publicCommands), inline: false }
+        )
+        .setTimestamp();
+
+    const payload = {
+        embeds: [embed],
+        components: [buildPanelSelectRow(MANAGE_PANEL_PERMS)]
+    };
+
+    if (notice) payload.content = String(notice);
+    return payload;
 }
 
 function buildAutoresponderManagePayload(notice) {
@@ -1493,6 +1599,11 @@ function buildManagePayload(client, guildId, options = {}) {
         return buildAutoresponderManagePayload(notice);
     }
 
+    if (panel === MANAGE_PANEL_PERMS) {
+        const guild = client.guilds?.cache?.get(guildId) || null;
+        return buildPermsManagePayload(client, guild, notice);
+    }
+
     return buildRuleManagePayload(client, guildId, selectedRuleKey);
 }
 
@@ -1665,6 +1776,11 @@ module.exports = {
 
             if (panel === MANAGE_PANEL_AUTORESPONDER) {
                 await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_AUTORESPONDER }));
+                return true;
+            }
+
+            if (panel === MANAGE_PANEL_PERMS) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_PERMS }));
                 return true;
             }
 
