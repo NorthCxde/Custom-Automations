@@ -209,7 +209,7 @@ function formatCommandList(commands, maxLen = 1024) {
     const out = [];
     let total = 0;
     for (const name of list) {
-        const item = `/${name}`;
+        const item = `\`/${name}\``;
         const next = total + (out.length ? 2 : 0) + item.length;
         if (next > maxLen - 20) break;
         out.push(item);
@@ -248,30 +248,14 @@ function buildPermsManagePayload(client, guild, notice) {
     const publicCommands = slashNames.filter(name => publicNames.has(name) && !ADMIN_SLASH_COMMAND_NAMES.has(name));
     const moderatorCommands = slashNames.filter(name => !ADMIN_SLASH_COMMAND_NAMES.has(name) && !publicNames.has(name));
 
-    const allowedRoles = typeof client.getAllowedRoleIds === 'function'
-        ? client.getAllowedRoleIds(guild.id)
-        : null;
-    const publicRoles = typeof client.getPublicRoleIds === 'function'
-        ? client.getPublicRoleIds(guild.id)
-        : null;
-
-    const adminSummary = (client.hardcodedAdmins instanceof Set && client.hardcodedAdmins.size)
-        ? `${client.hardcodedAdmins.size} hardcoded admin(s)`
-        : 'No hardcoded admins loaded';
-    const moderatorRoleSummary = formatRoleSummary(guild, allowedRoles, 'Admins/Manage Server only (no /perms roles selected)');
-    const publicRoleSummary = formatRoleSummary(guild, publicRoles, 'Admins/Manage Server only (public roles set is empty)');
-
     const embed = new EmbedBuilder()
         .setColor(0x000000)
         .setTitle('Manage Panel - Perms')
-        .setDescription('View which slash commands are available by rank tier.')
+        .setDescription('View which slash commands are available by access level.')
         .addFields(
-            { name: 'Admin Tier', value: adminSummary, inline: false },
-            { name: 'Admin Slash Commands', value: formatCommandList(adminCommands), inline: false },
-            { name: 'Moderator Tier (/perms)', value: moderatorRoleSummary, inline: false },
-            { name: 'Moderator Slash Commands', value: formatCommandList(moderatorCommands), inline: false },
-            { name: 'Public Tier', value: publicRoleSummary, inline: false },
-            { name: 'Public Slash Commands', value: formatCommandList(publicCommands), inline: false }
+            { name: 'Admin Level Commands', value: formatCommandList(adminCommands), inline: false },
+            { name: 'Moderator Level Commands', value: formatCommandList(moderatorCommands), inline: false },
+            { name: 'Public Level Commands', value: formatCommandList(publicCommands), inline: false }
         )
         .setTimestamp();
 
