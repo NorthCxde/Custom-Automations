@@ -323,7 +323,12 @@ function buildPermsManagePayload(client, guild, notice, selectedCommandName = nu
         );
     }
 
-    if (notice) payload.content = String(notice);
+    if (notice) {
+        const noticeEmbed = new EmbedBuilder()
+            .setColor(0x57F287)
+            .setDescription(String(notice));
+        payload.embeds.push(noticeEmbed);
+    }
     return payload;
 }
 
