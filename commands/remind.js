@@ -343,6 +343,9 @@ module.exports = {
             return interaction.reply({ content: 'Could not parse `channels`. Use mentions like `#channel` or `@user`.', ephemeral: true });
         }
 
+        // Acknowledge before persistence/follow-up work so Discord does not time out.
+        await interaction.deferReply();
+
         const reminders = [];
         for (const target of targets) {
             const reminder = {
@@ -395,7 +398,7 @@ module.exports = {
 
             let message = null;
             if (idx === 0) {
-                await interaction.reply(payload);
+                await interaction.editReply(payload);
                 message = await interaction.fetchReply().catch(() => null);
             } else {
                 message = await interaction.followUp(payload).catch(() => null);

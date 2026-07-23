@@ -4071,6 +4071,16 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isChatInputCommand() || interaction.isContextMenuCommand()) {
+        const command = client.slashCommands.get(interaction.commandName);
+        if (!command) {
+            await interaction.reply({
+                content: 'That command is currently unavailable. Try running /synccommands and restart the bot.',
+                ephemeral: true
+            }).catch(() => null);
+            return;
+        }
+
+        const isDmCommand = !interaction.guildId;
         const commandLevel = typeof client.getCommandAccessLevel === 'function'
             ? client.getCommandAccessLevel(interaction.commandName)
             : 'moderator';
@@ -4079,16 +4089,15 @@ client.on('interactionCreate', async (interaction) => {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return;
             }
-        } else if (commandLevel === 'public') {
-            if (!client.isPublicMemberAllowed(interaction.member)) {
+        } else if (!isDmCommand) {
+            if (commandLevel === 'public') {
+                if (!client.isPublicMemberAllowed(interaction.member)) {
+                    return;
+                }
+            } else if (!client.isMemberAllowed(interaction.member)) {
                 return;
             }
-        } else if (!client.isMemberAllowed(interaction.member)) {
-            return;
         }
-
-        const command = client.slashCommands.get(interaction.commandName);
-        if (!command) return;
 
         try {
             await command.executeInteraction({ client, interaction });
