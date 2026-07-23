@@ -323,12 +323,6 @@ function buildPermsManagePayload(client, guild, notice, selectedCommandName = nu
         );
     }
 
-    if (notice) {
-        const noticeEmbed = new EmbedBuilder()
-            .setColor(0x57F287)
-            .setDescription(String(notice));
-        payload.embeds.push(noticeEmbed);
-    }
     return payload;
 }
 
@@ -1878,9 +1872,13 @@ module.exports = {
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_PERMS,
-                selectedPermCommand,
-                notice: `Set /${selectedPermCommand} to ${level} level.`
+                selectedPermCommand
             }));
+
+            await interaction.followUp({
+                content: `Set /${selectedPermCommand} to ${level} level.`,
+                ephemeral: true
+            });
             return true;
         }
 
