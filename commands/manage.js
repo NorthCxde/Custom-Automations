@@ -256,6 +256,35 @@ function createEmbedFromDraft(client, guildId, draft) {
     return { embed, content: String(prepared.content || content || '').trim() };
 }
 
+function resolveEmbedPlaceholdersInValue(client, guildId, value) {
+    if (typeof value === 'string') {
+        return resolveEmbedTemplateText(value, client, guildId);
+    }
+
+    if (Array.isArray(value)) {
+        return value.map(item => resolveEmbedPlaceholdersInValue(client, guildId, item));
+    }
+
+    if (value && typeof value === 'object') {
+        const out = {};
+        for (const [key, childValue] of Object.entries(value)) {
+            out[key] = resolveEmbedPlaceholdersInValue(client, guildId, childValue);
+        }
+        return out;
+    }
+
+    return value;
+}
+
+function buildResolvedEmbedPayload(client, guildId, draft) {
+    const { embed, content } = createEmbedFromDraft(client, guildId, draft);
+    const embedJson = typeof embed.toJSON === 'function' ? embed.toJSON() : embed;
+    return {
+        content: resolveEmbedTemplateText(content, client, guildId),
+        embed: resolveEmbedPlaceholdersInValue(client, guildId, embedJson)
+    };
+}
+
 function parseEmbedChannelId(raw) {
     const text = String(raw || '').trim();
     const match = text.match(/^(\d{17,20})$/);
@@ -699,7 +728,7 @@ async function syncEmbedMessage(client, interaction, draft, { testOnly = false }
         throw new Error('Unable to resolve the target channel for this embed.');
     }
 
-    const embedPayload = createEmbedFromDraft(client, interaction.guild.id, draft);
+    const embedPayload = buildResolvedEmbedPayload(client, interaction.guild.id, draft);
     const messagePayload = {
         content: embedPayload.content || undefined,
         embeds: [embedPayload.embed],
