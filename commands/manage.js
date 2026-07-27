@@ -217,10 +217,10 @@ function createEmbedFromDraft(client, guildId, draft) {
         embed.setColor(0x57F287);
     }
 
-    const title = String(draft.title || '').trim();
-    const description = String(draft.description || '').trim();
-    const content = String(draft.content || '').trim();
-    const url = String(draft.url || '').trim();
+    const title = String(prepared.title || '').trim();
+    const description = String(prepared.description || '').trim();
+    const content = String(prepared.content || '').trim();
+    const url = String(prepared.url || '').trim();
     const author = prepared.author || {};
     const footer = prepared.footer || {};
 
