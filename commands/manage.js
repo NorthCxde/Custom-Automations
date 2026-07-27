@@ -258,7 +258,7 @@ function createEmbedFromDraft(draft) {
 
 function parseEmbedChannelId(raw) {
     const text = String(raw || '').trim();
-    const match = text.match(/^<#(\d{17,20})>$/) || text.match(/^(\d{17,20})$/);
+    const match = text.match(/^(\d{17,20})$/);
     return match ? match[1] : '';
 }
 
@@ -353,13 +353,6 @@ function buildEmbedsManagePayload(client, guildId, notice, selectedEmbedId = nul
         )
     );
 
-    components.push(
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(MANAGE_EMBEDS_ADVANCED_ID).setLabel('Advanced').setStyle(ButtonStyle.Secondary).setDisabled(!activeDraft),
-            new ButtonBuilder().setCustomId(MANAGE_EMBEDS_FIELDS_ID).setLabel('Fields JSON').setStyle(ButtonStyle.Secondary).setDisabled(!activeDraft)
-        )
-    );
-
     const payload = { embeds: [embed], components };
     if (notice) payload.content = String(notice);
     return payload;
@@ -379,7 +372,7 @@ function buildEmbedMainModal(draft) {
 
     const channelInput = new TextInputBuilder()
         .setCustomId(MODAL_EMBED_CHANNEL_INPUT_ID)
-        .setLabel('Target Channel ID or Mention')
+        .setLabel('Target Channel ID')
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
         .setValue(String(draft.channelId || '').slice(0, 100));
@@ -400,7 +393,7 @@ function buildEmbedMainModal(draft) {
 
     const colorInput = new TextInputBuilder()
         .setCustomId(MODAL_EMBED_COLOR_INPUT_ID)
-        .setLabel('Color (hex like #57F287)')
+        .setLabel('Color (hex)')
         .setStyle(TextInputStyle.Short)
         .setRequired(false)
         .setValue(String(draft.color || '#57F287').slice(0, 32));
@@ -2500,9 +2493,7 @@ module.exports = {
             && interaction.customId !== MANAGE_EMBEDS_EDIT_ID
             && interaction.customId !== MANAGE_EMBEDS_SAVE_ID
             && interaction.customId !== MANAGE_EMBEDS_SEND_TEST_ID
-            && interaction.customId !== MANAGE_EMBEDS_DELETE_ID
-            && interaction.customId !== MANAGE_EMBEDS_ADVANCED_ID
-            && interaction.customId !== MANAGE_EMBEDS_FIELDS_ID) {
+            && interaction.customId !== MANAGE_EMBEDS_DELETE_ID) {
             return false;
         }
 
@@ -2585,28 +2576,6 @@ module.exports = {
             draft.guildId = interaction.guild.id;
             setEmbedDraft(interaction.guild.id, interaction.user.id, draft);
             await interaction.showModal(buildEmbedMainModal(draft));
-            return true;
-        }
-
-        if (interaction.customId === MANAGE_EMBEDS_ADVANCED_ID) {
-            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id);
-            if (!draft) {
-                await interaction.reply({ content: 'Create or edit an embed first.', ephemeral: true });
-                return true;
-            }
-
-            await interaction.showModal(buildEmbedAdvancedModal(draft));
-            return true;
-        }
-
-        if (interaction.customId === MANAGE_EMBEDS_FIELDS_ID) {
-            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id);
-            if (!draft) {
-                await interaction.reply({ content: 'Create or edit an embed first.', ephemeral: true });
-                return true;
-            }
-
-            await interaction.showModal(buildEmbedFieldsModal(draft));
             return true;
         }
 
