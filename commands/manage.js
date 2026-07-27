@@ -207,8 +207,8 @@ function createDefaultEmbedDraft(userId) {
     };
 }
 
-function createEmbedFromDraft(draft) {
-    const prepared = applyAdvancedEmbedOptions(draft);
+function createEmbedFromDraft(client, guildId, draft) {
+    const prepared = resolveEmbedDraftPlaceholders(client, guildId, draft);
     const embed = new EmbedBuilder();
     const color = String(prepared.color || '').trim();
     if (color) {
@@ -313,7 +313,7 @@ function buildEmbedsManagePayload(client, guildId, notice, selectedEmbedId = nul
         .setTimestamp();
 
     if (activeDraft) {
-        const preview = createEmbedFromDraft(activeDraft);
+        const preview = createEmbedFromDraft(client, guildId, activeDraft);
         const previewJson = typeof preview.embed.toJSON === 'function' ? preview.embed.toJSON() : {};
         embed.addFields(
             { name: 'Selected Embed', value: `**${activeDraft.name || 'Untitled Embed'}**`, inline: true },
@@ -547,6 +547,97 @@ function applyAdvancedEmbedOptions(draft) {
     return merged;
 }
 
+function parseEmbedStatPeriod(periodRaw) {
+    const value = String(periodRaw || '').trim().toLowerCase();
+    if (!value || value === 'alltime') return null;
+    const match = value.match(/^(\d+)days?$/i);
+    if (!match) return null;
+    const days = Number(match[1]);
+    return Number.isFinite(days) && days > 0 ? days : null;
+}
+
+function getModStatsCounts(client, guildId, moderatorId = null, days = null) {
+    const logs = client.modLogs?.get(guildId) || [];
+    const periodDays = Number.isFinite(days) && days > 0 ? Math.floor(days) : null;
+    const cutoff = periodDays ? Date.now() - (periodDays * 24 * 60 * 60 * 1000) : null;
+
+    const filtered = logs.filter((log) => {
+        if (moderatorId && String(log.moderatorId || '') !== String(moderatorId)) return false;
+        if (cutoff === null) return true;
+        const ts = new Date(log.timestamp).getTime();
+        return Number.isFinite(ts) && ts >= cutoff;
+    });
+
+    return {
+        mutes: filtered.filter(log => String(log.action || '').trim() === 'Mute').length,
+        bans: filtered.filter(log => ['Ban', 'Temp Ban'].includes(String(log.action || '').trim())).length,
+        kicks: filtered.filter(log => String(log.action || '').trim() === 'Kick').length,
+        warns: filtered.filter(log => String(log.action || '').trim() === 'Warn').length
+    };
+}
+
+function resolveEmbedStatToken(client, guildId, token) {
+    const raw = String(token || '').trim();
+    if (!raw) return null;
+
+    const userMatch = raw.match(/^(\d{17,20})_(bans|mutes|kicks|warns)(?:_(alltime|\d+days?))?$/i);
+    if (userMatch) {
+        const userId = userMatch[1];
+        const metric = userMatch[2].toLowerCase();
+        const days = parseEmbedStatPeriod(userMatch[3] || 'alltime');
+        const counts = getModStatsCounts(client, guildId, userId, days);
+        return String(counts[metric] ?? '0');
+    }
+
+    const genericMatch = raw.match(/^(bans|mutes|kicks|warns)(?:_(alltime|\d+days?))?$/i);
+    if (genericMatch) {
+        const metric = genericMatch[1].toLowerCase();
+        const days = parseEmbedStatPeriod(genericMatch[2] || 'alltime');
+        const counts = getModStatsCounts(client, guildId, null, days);
+        return String(counts[metric] ?? '0');
+    }
+
+    return null;
+}
+
+function resolveEmbedTemplateText(text, client, guildId) {
+    const raw = String(text || '');
+    return raw.replace(/\{(?:(\d{17,20})_)?(bans|mutes|kicks|warns)(?:_(alltime|\d+days?))?\}/gi, (match, userId, metric, period) => {
+        const token = userId ? `${userId}_${metric}${period ? `_${period}` : ''}` : `${metric}${period ? `_${period}` : ''}`;
+        const replacement = resolveEmbedStatToken(client, guildId, token);
+        return replacement === null ? match : replacement;
+    });
+}
+
+function resolveEmbedDraftPlaceholders(client, guildId, draft) {
+    const resolved = normalizeEmbedDraft(draft);
+    resolved.name = resolveEmbedTemplateText(resolved.name, client, guildId);
+    resolved.title = resolveEmbedTemplateText(resolved.title, client, guildId);
+    resolved.description = resolveEmbedTemplateText(resolved.description, client, guildId);
+    resolved.content = resolveEmbedTemplateText(resolved.content, client, guildId);
+    resolved.url = resolveEmbedTemplateText(resolved.url, client, guildId);
+    resolved.thumbnailUrl = resolveEmbedTemplateText(resolved.thumbnailUrl, client, guildId);
+    resolved.imageUrl = resolveEmbedTemplateText(resolved.imageUrl, client, guildId);
+    resolved.author = {
+        name: resolveEmbedTemplateText(resolved.author?.name || '', client, guildId),
+        url: resolveEmbedTemplateText(resolved.author?.url || '', client, guildId),
+        iconUrl: resolveEmbedTemplateText(resolved.author?.iconUrl || '', client, guildId)
+    };
+    resolved.footer = {
+        text: resolveEmbedTemplateText(resolved.footer?.text || '', client, guildId),
+        iconUrl: resolveEmbedTemplateText(resolved.footer?.iconUrl || '', client, guildId)
+    };
+    resolved.fields = (Array.isArray(resolved.fields) ? resolved.fields : []).map(field => ({
+        name: resolveEmbedTemplateText(field.name || '', client, guildId),
+        value: resolveEmbedTemplateText(field.value || '', client, guildId),
+        inline: Boolean(field.inline)
+    }));
+    resolved.extra = resolved.extra && typeof resolved.extra === 'object' && !Array.isArray(resolved.extra)
+        ? resolved.extra
+        : {};
+    return resolved;
+}
+
 function getEmbedSelectedId(guildId, userId) {
     return EMBED_SELECTIONS.get(getEmbedDraftKey(guildId, userId)) || null;
 }
@@ -608,7 +699,7 @@ async function syncEmbedMessage(client, interaction, draft, { testOnly = false }
         throw new Error('Unable to resolve the target channel for this embed.');
     }
 
-    const embedPayload = createEmbedFromDraft(draft);
+    const embedPayload = createEmbedFromDraft(client, interaction.guild.id, draft);
     const messagePayload = {
         content: embedPayload.content || undefined,
         embeds: [embedPayload.embed],
