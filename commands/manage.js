@@ -12,6 +12,8 @@ const {
     TextInputBuilder,
     TextInputStyle
 } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 const { RULE_CHOICES, parseDurationMs, normalizeInfractionStep } = require('../infractions');
 
 const MANAGE_RULE_SELECT_ID = 'manage_infraction_rule_select';
@@ -47,8 +49,32 @@ const MANAGE_PANEL_REVOKED_INVITES = 'revoked_invites';
 const MANAGE_PANEL_SECURITY = 'security';
 const MANAGE_PANEL_AUTORESPONDER = 'autoresponder';
 const MANAGE_PANEL_PERMS = 'perms';
+const MANAGE_PANEL_EMBEDS = 'embeds';
 const MANAGE_PERMS_COMMAND_SELECT_ID = 'manage_perms_command_select';
 const MANAGE_PERMS_LEVEL_SELECT_PREFIX = 'manage_perms_level_select:';
+const MANAGE_EMBEDS_SELECT_ID = 'manage_embeds_select';
+const MANAGE_EMBEDS_CREATE_ID = 'manage_embeds_create';
+const MANAGE_EMBEDS_EDIT_ID = 'manage_embeds_edit';
+const MANAGE_EMBEDS_SAVE_ID = 'manage_embeds_save';
+const MANAGE_EMBEDS_SEND_TEST_ID = 'manage_embeds_send_test';
+const MANAGE_EMBEDS_DELETE_ID = 'manage_embeds_delete';
+const MANAGE_EMBEDS_ADVANCED_ID = 'manage_embeds_advanced';
+const MANAGE_EMBEDS_FIELDS_ID = 'manage_embeds_fields';
+const MANAGE_EMBEDS_MAIN_MODAL_PREFIX = 'manage_embeds_modal:';
+const MANAGE_EMBEDS_ADVANCED_MODAL_PREFIX = 'manage_embeds_advanced_modal:';
+const MANAGE_EMBEDS_FIELDS_MODAL_PREFIX = 'manage_embeds_fields_modal:';
+const MANAGE_EMBEDS_SELECTED_PREFIX = 'manage_embeds_selected:';
+const MODAL_EMBED_NAME_INPUT_ID = 'embed_name';
+const MODAL_EMBED_CHANNEL_INPUT_ID = 'embed_channel';
+const MODAL_EMBED_TITLE_INPUT_ID = 'embed_title';
+const MODAL_EMBED_DESCRIPTION_INPUT_ID = 'embed_description';
+const MODAL_EMBED_COLOR_INPUT_ID = 'embed_color';
+const MODAL_EMBED_ADVANCED_JSON_INPUT_ID = 'embed_advanced_json';
+const MODAL_EMBED_FIELDS_JSON_INPUT_ID = 'embed_fields_json';
+
+const MANAGE_EMBEDS_FILE = path.join(__dirname, '..', 'data', 'manageEmbeds.json');
+const EMBED_DRAFTS = new Map();
+const EMBED_SELECTIONS = new Map();
 
 const ADMIN_SLASH_COMMAND_NAMES = new Set([
     'perms',
@@ -122,6 +148,495 @@ function truncate(text, max = 100) {
     const value = String(text || '').trim();
     if (!value) return 'No reason provided';
     return value.length > max ? `${value.slice(0, max - 3)}...` : value;
+}
+
+function readEmbedStore() {
+    if (!fs.existsSync(MANAGE_EMBEDS_FILE)) {
+        fs.mkdirSync(path.dirname(MANAGE_EMBEDS_FILE), { recursive: true });
+        fs.writeFileSync(MANAGE_EMBEDS_FILE, '{}', 'utf8');
+    }
+
+    try {
+        return JSON.parse(fs.readFileSync(MANAGE_EMBEDS_FILE, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read manage embeds store:', err);
+        return {};
+    }
+}
+
+function writeEmbedStore(store) {
+    fs.mkdirSync(path.dirname(MANAGE_EMBEDS_FILE), { recursive: true });
+    fs.writeFileSync(MANAGE_EMBEDS_FILE, JSON.stringify(store, null, 2), 'utf8');
+}
+
+function getEmbedGuildEntries(store, guildId) {
+    const guildStore = store?.[guildId];
+    const entries = Array.isArray(guildStore?.entries) ? guildStore.entries : [];
+    return entries.filter(entry => entry && entry.id);
+}
+
+function getEmbedDraftKey(guildId, userId) {
+    return `${guildId}:${userId}`;
+}
+
+function createDefaultEmbedDraft(userId) {
+    const now = new Date().toISOString();
+    return {
+        id: `embed_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`,
+        guildId: null,
+        userId,
+        name: 'New Embed',
+        channelId: '',
+        title: '',
+        description: '',
+        color: '#57F287',
+        content: '',
+        url: '',
+        timestamp: false,
+        author: { name: '', url: '', iconUrl: '' },
+        footer: { text: '', iconUrl: '' },
+        thumbnailUrl: '',
+        imageUrl: '',
+        fields: [],
+        extra: {},
+        createdAt: now,
+        updatedAt: now,
+        messageId: null,
+        messageChannelId: null,
+        lastSentAt: null
+    };
+}
+
+function createEmbedFromDraft(draft) {
+    const prepared = applyAdvancedEmbedOptions(draft);
+    const embed = new EmbedBuilder();
+    const color = String(prepared.color || '').trim();
+    if (color) {
+        try { embed.setColor(color); } catch (_) { embed.setColor(0x57F287); }
+    } else {
+        embed.setColor(0x57F287);
+    }
+
+    const title = String(draft.title || '').trim();
+    const description = String(draft.description || '').trim();
+    const content = String(draft.content || '').trim();
+    const url = String(draft.url || '').trim();
+    const author = prepared.author || {};
+    const footer = prepared.footer || {};
+
+    if (title) embed.setTitle(title);
+    if (description) embed.setDescription(description);
+    if (url) embed.setURL(url);
+    if (author.name || author.iconUrl || author.url) {
+        const authorData = {};
+        if (author.name) authorData.name = author.name;
+        if (author.iconUrl) authorData.iconURL = author.iconUrl;
+        if (author.url) authorData.url = author.url;
+        embed.setAuthor(authorData);
+    }
+    if (footer.text || footer.iconUrl) {
+        const footerData = {};
+        if (footer.text) footerData.text = footer.text;
+        if (footer.iconUrl) footerData.iconURL = footer.iconUrl;
+        embed.setFooter(footerData);
+    }
+    if (prepared.thumbnailUrl) embed.setThumbnail(prepared.thumbnailUrl);
+    if (prepared.imageUrl) embed.setImage(prepared.imageUrl);
+    if (prepared.timestamp) embed.setTimestamp(new Date());
+
+    for (const field of Array.isArray(prepared.fields) ? prepared.fields : []) {
+        if (!field || !field.name || !field.value) continue;
+        embed.addFields({
+            name: String(field.name).slice(0, 256),
+            value: String(field.value).slice(0, 1024),
+            inline: Boolean(field.inline)
+        });
+    }
+
+    return { embed, content: String(prepared.content || content || '').trim() };
+}
+
+function parseEmbedChannelId(raw) {
+    const text = String(raw || '').trim();
+    const match = text.match(/^<#(\d{17,20})>$/) || text.match(/^(\d{17,20})$/);
+    return match ? match[1] : '';
+}
+
+function parseEmbedFieldsJson(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return [];
+    let parsed;
+    try {
+        parsed = JSON.parse(text);
+    } catch (err) {
+        throw new Error('Fields must be valid JSON.');
+    }
+    if (!Array.isArray(parsed)) throw new Error('Fields JSON must be an array.');
+    return parsed.map((field) => ({
+        name: String(field?.name || '').trim(),
+        value: String(field?.value || '').trim(),
+        inline: Boolean(field?.inline)
+    })).filter(field => field.name && field.value);
+}
+
+function parseEmbedDraftFromInputs(draft, fields) {
+    draft.name = String(fields.name || '').trim() || draft.name || 'New Embed';
+    draft.channelId = parseEmbedChannelId(fields.channel) || draft.channelId || '';
+    draft.title = String(fields.title || '').trim();
+    draft.description = String(fields.description || '').trim();
+    draft.color = String(fields.color || '').trim() || draft.color || '#57F287';
+    return draft;
+}
+
+function buildEmbedSummaryLines(entry, selected = false) {
+    const parts = [];
+    parts.push(selected ? '▶' : '•');
+    parts.push(`**${entry.name || 'Untitled Embed'}**`);
+    parts.push(entry.channelId ? `<#${entry.channelId}>` : 'No channel');
+    parts.push(entry.messageId ? `linked: ${entry.messageId}` : 'unlinked');
+    return parts.join(' ');
+}
+
+function buildEmbedsManagePayload(client, guildId, notice, selectedEmbedId = null, draft = null) {
+    const store = readEmbedStore();
+    const entries = getEmbedGuildEntries(store, guildId);
+    const selectedEntry = entries.find(entry => entry.id === selectedEmbedId) || null;
+    const activeDraft = draft || (selectedEntry ? { ...selectedEntry } : null) || null;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Manage Panel - Embeds')
+        .setDescription('Create, edit, and keep linked embed messages updated automatically.')
+        .addFields(
+            { name: 'Saved Embeds', value: entries.length ? entries.slice(0, 8).map((entry) => buildEmbedSummaryLines(entry, entry.id === selectedEmbedId)).join('\n') : 'No embeds saved yet.', inline: false }
+        )
+        .setTimestamp();
+
+    if (activeDraft) {
+        const preview = createEmbedFromDraft(activeDraft);
+        const previewJson = typeof preview.embed.toJSON === 'function' ? preview.embed.toJSON() : {};
+        embed.addFields(
+            { name: 'Selected Embed', value: `**${activeDraft.name || 'Untitled Embed'}**`, inline: true },
+            { name: 'Channel', value: activeDraft.channelId ? `<#${activeDraft.channelId}>` : 'Not set', inline: true },
+            { name: 'Linked Message', value: activeDraft.messageId ? `[Jump to message](https://discord.com/channels/${guildId}/${activeDraft.messageChannelId || activeDraft.channelId || ''}/${activeDraft.messageId})` : 'None yet', inline: false },
+            { name: 'Preview Title', value: previewJson.title || 'None', inline: true },
+            { name: 'Preview Description', value: truncate(previewJson.description || 'None', 1024), inline: false }
+        );
+    }
+
+    const options = entries.slice(0, 25).map((entry) => ({
+        label: truncate(entry.name || 'Untitled Embed', 100),
+        value: entry.id,
+        description: truncate(entry.channelId ? `#${entry.channelId}` : 'No channel set', 100),
+        default: entry.id === selectedEmbedId
+    }));
+
+    const components = [buildPanelSelectRow(MANAGE_PANEL_EMBEDS)];
+    if (options.length) {
+        components.push(
+            new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId(MANAGE_EMBEDS_SELECT_ID)
+                    .setPlaceholder('Select an embed to edit')
+                    .addOptions(options)
+            )
+        );
+    }
+
+    components.push(
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(MANAGE_EMBEDS_CREATE_ID).setLabel('Create New').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(MANAGE_EMBEDS_EDIT_ID).setLabel('Edit Selected').setStyle(ButtonStyle.Primary).setDisabled(!selectedEntry),
+            new ButtonBuilder().setCustomId(MANAGE_EMBEDS_SEND_TEST_ID).setLabel('Send Test').setStyle(ButtonStyle.Secondary).setDisabled(!selectedEntry),
+            new ButtonBuilder().setCustomId(MANAGE_EMBEDS_SAVE_ID).setLabel('Save / Sync').setStyle(ButtonStyle.Success).setDisabled(!activeDraft),
+            new ButtonBuilder().setCustomId(MANAGE_EMBEDS_DELETE_ID).setLabel('Delete').setStyle(ButtonStyle.Danger).setDisabled(!selectedEntry)
+        )
+    );
+
+    components.push(
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(MANAGE_EMBEDS_ADVANCED_ID).setLabel('Advanced').setStyle(ButtonStyle.Secondary).setDisabled(!activeDraft),
+            new ButtonBuilder().setCustomId(MANAGE_EMBEDS_FIELDS_ID).setLabel('Fields JSON').setStyle(ButtonStyle.Secondary).setDisabled(!activeDraft)
+        )
+    );
+
+    const payload = { embeds: [embed], components };
+    if (notice) payload.content = String(notice);
+    return payload;
+}
+
+function buildEmbedMainModal(draft) {
+    const modal = new ModalBuilder()
+        .setCustomId(`${MANAGE_EMBEDS_MAIN_MODAL_PREFIX}${draft.id}`)
+        .setTitle(draft.messageId ? 'Edit Embed Message' : 'Create Embed Message');
+
+    const nameInput = new TextInputBuilder()
+        .setCustomId(MODAL_EMBED_NAME_INPUT_ID)
+        .setLabel('Embed Name')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setValue(String(draft.name || 'New Embed').slice(0, 100));
+
+    const channelInput = new TextInputBuilder()
+        .setCustomId(MODAL_EMBED_CHANNEL_INPUT_ID)
+        .setLabel('Target Channel ID or Mention')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setValue(String(draft.channelId || '').slice(0, 100));
+
+    const titleInput = new TextInputBuilder()
+        .setCustomId(MODAL_EMBED_TITLE_INPUT_ID)
+        .setLabel('Embed Title')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setValue(String(draft.title || '').slice(0, 100));
+
+    const descriptionInput = new TextInputBuilder()
+        .setCustomId(MODAL_EMBED_DESCRIPTION_INPUT_ID)
+        .setLabel('Embed Description')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setValue(String(draft.description || '').slice(0, 4000));
+
+    const colorInput = new TextInputBuilder()
+        .setCustomId(MODAL_EMBED_COLOR_INPUT_ID)
+        .setLabel('Color (hex like #57F287)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setValue(String(draft.color || '#57F287').slice(0, 32));
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(nameInput),
+        new ActionRowBuilder().addComponents(channelInput),
+        new ActionRowBuilder().addComponents(titleInput),
+        new ActionRowBuilder().addComponents(descriptionInput),
+        new ActionRowBuilder().addComponents(colorInput)
+    );
+
+    return modal;
+}
+
+function buildEmbedAdvancedModal(draft) {
+    const modal = new ModalBuilder()
+        .setCustomId(`${MANAGE_EMBEDS_ADVANCED_MODAL_PREFIX}${draft.id}`)
+        .setTitle('Embed - Advanced JSON');
+
+    const jsonInput = new TextInputBuilder()
+        .setCustomId(MODAL_EMBED_ADVANCED_JSON_INPUT_ID)
+        .setLabel('Advanced JSON (content, url, author, footer, thumbnailUrl, imageUrl, fields, timestamp)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setValue(JSON.stringify(draft.extra || {}, null, 2).slice(0, 4000));
+
+    modal.addComponents(new ActionRowBuilder().addComponents(jsonInput));
+    return modal;
+}
+
+function buildEmbedFieldsModal(draft) {
+    const modal = new ModalBuilder()
+        .setCustomId(`${MANAGE_EMBEDS_FIELDS_MODAL_PREFIX}${draft.id}`)
+        .setTitle('Embed - Fields JSON');
+
+    const fieldsInput = new TextInputBuilder()
+        .setCustomId(MODAL_EMBED_FIELDS_JSON_INPUT_ID)
+        .setLabel('Fields JSON array (name, value, inline)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setValue(JSON.stringify(draft.fields || [], null, 2).slice(0, 4000));
+
+    modal.addComponents(new ActionRowBuilder().addComponents(fieldsInput));
+    return modal;
+}
+
+function getEmbedDraftKey(guildId, userId) {
+    return `${guildId}:${userId}`;
+}
+
+function getEmbedDraft(guildId, userId) {
+    return EMBED_DRAFTS.get(getEmbedDraftKey(guildId, userId)) || null;
+}
+
+function setEmbedDraft(guildId, userId, draft) {
+    EMBED_DRAFTS.set(getEmbedDraftKey(guildId, userId), normalizeEmbedDraft(draft));
+    return draft;
+}
+
+function clearEmbedDraft(guildId, userId) {
+    EMBED_DRAFTS.delete(getEmbedDraftKey(guildId, userId));
+}
+
+function loadEmbedAdvanced(extraRaw) {
+    const raw = String(extraRaw || '').trim();
+    if (!raw) return {};
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (err) {
+        throw new Error('Advanced JSON must be valid JSON.');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Advanced JSON must be an object.');
+    }
+    return parsed;
+}
+
+function normalizeEmbedDraft(draft) {
+    const next = { ...draft };
+    next.name = String(next.name || 'New Embed').trim();
+    next.channelId = String(next.channelId || '').trim();
+    next.title = String(next.title || '').trim();
+    next.description = String(next.description || '').trim();
+    next.color = String(next.color || '#57F287').trim();
+    next.content = String(next.content || '').trim();
+    next.url = String(next.url || '').trim();
+    next.thumbnailUrl = String(next.thumbnailUrl || '').trim();
+    next.imageUrl = String(next.imageUrl || '').trim();
+    next.timestamp = Boolean(next.timestamp);
+    next.author = {
+        name: String(next.author?.name || '').trim(),
+        url: String(next.author?.url || '').trim(),
+        iconUrl: String(next.author?.iconUrl || '').trim()
+    };
+    next.footer = {
+        text: String(next.footer?.text || '').trim(),
+        iconUrl: String(next.footer?.iconUrl || '').trim()
+    };
+    next.fields = Array.isArray(next.fields)
+        ? next.fields.map(field => ({
+            name: String(field?.name || '').trim(),
+            value: String(field?.value || '').trim(),
+            inline: Boolean(field?.inline)
+        })).filter(field => field.name && field.value)
+        : [];
+    next.extra = next.extra && typeof next.extra === 'object' && !Array.isArray(next.extra) ? next.extra : {};
+    return next;
+}
+
+function applyAdvancedEmbedOptions(draft) {
+    const merged = normalizeEmbedDraft(draft);
+    const extra = merged.extra || {};
+
+    if (typeof extra.color === 'string' && String(extra.color).trim()) merged.color = String(extra.color).trim();
+    if (typeof extra.content === 'string') merged.content = String(extra.content || '').trim();
+    if (typeof extra.url === 'string') merged.url = String(extra.url || '').trim();
+    if (typeof extra.thumbnailUrl === 'string') merged.thumbnailUrl = String(extra.thumbnailUrl || '').trim();
+    if (typeof extra.imageUrl === 'string') merged.imageUrl = String(extra.imageUrl || '').trim();
+    if (typeof extra.thumbnail === 'string') merged.thumbnailUrl = String(extra.thumbnail || '').trim();
+    if (typeof extra.image === 'string') merged.imageUrl = String(extra.image || '').trim();
+    if (extra.thumbnail && typeof extra.thumbnail === 'object' && !Array.isArray(extra.thumbnail)) {
+        merged.thumbnailUrl = String(extra.thumbnail.url || extra.thumbnailUrl || '').trim();
+    }
+    if (extra.image && typeof extra.image === 'object' && !Array.isArray(extra.image)) {
+        merged.imageUrl = String(extra.image.url || extra.imageUrl || '').trim();
+    }
+    if (typeof extra.timestamp !== 'undefined') merged.timestamp = Boolean(extra.timestamp);
+    if (extra.author && typeof extra.author === 'object' && !Array.isArray(extra.author)) {
+        merged.author = {
+            name: String(extra.author.name || '').trim(),
+            url: String(extra.author.url || '').trim(),
+            iconUrl: String(extra.author.iconUrl || '').trim()
+        };
+    }
+    if (extra.footer && typeof extra.footer === 'object' && !Array.isArray(extra.footer)) {
+        merged.footer = {
+            text: String(extra.footer.text || '').trim(),
+            iconUrl: String(extra.footer.iconUrl || '').trim()
+        };
+    }
+    if (Array.isArray(extra.fields)) {
+        merged.fields = extra.fields.map(field => ({
+            name: String(field?.name || '').trim(),
+            value: String(field?.value || '').trim(),
+            inline: Boolean(field?.inline)
+        })).filter(field => field.name && field.value);
+    }
+
+    return merged;
+}
+
+function getEmbedSelectedId(guildId, userId) {
+    return EMBED_SELECTIONS.get(getEmbedDraftKey(guildId, userId)) || null;
+}
+
+function setEmbedSelectedId(guildId, userId, embedId) {
+    if (!embedId) {
+        EMBED_SELECTIONS.delete(getEmbedDraftKey(guildId, userId));
+        return null;
+    }
+
+    EMBED_SELECTIONS.set(getEmbedDraftKey(guildId, userId), embedId);
+    return embedId;
+}
+
+function readEmbedEntry(guildId, embedId) {
+    const store = readEmbedStore();
+    const entries = getEmbedGuildEntries(store, guildId);
+    return entries.find(entry => entry.id === embedId) || null;
+}
+
+function upsertEmbedEntry(guildId, entry) {
+    const store = readEmbedStore();
+    if (!store[guildId] || typeof store[guildId] !== 'object') store[guildId] = { entries: [] };
+    if (!Array.isArray(store[guildId].entries)) store[guildId].entries = [];
+
+    const normalized = normalizeEmbedDraft({ ...entry, guildId, updatedAt: new Date().toISOString() });
+    const index = store[guildId].entries.findIndex(item => item.id === normalized.id);
+    if (index === -1) {
+        store[guildId].entries.push(normalized);
+    } else {
+        store[guildId].entries[index] = { ...store[guildId].entries[index], ...normalized };
+    }
+
+    writeEmbedStore(store);
+    return normalized;
+}
+
+function removeEmbedEntry(guildId, embedId) {
+    const store = readEmbedStore();
+    const entries = getEmbedGuildEntries(store, guildId);
+    const nextEntries = entries.filter(entry => entry.id !== embedId);
+    if (!store[guildId] || typeof store[guildId] !== 'object') store[guildId] = { entries: [] };
+    store[guildId].entries = nextEntries;
+    writeEmbedStore(store);
+    return entries.length !== nextEntries.length;
+}
+
+async function resolveEmbedTargetChannel(client, interaction, draft) {
+    const channelId = String(draft.channelId || draft.messageChannelId || interaction.channelId || '').trim();
+    if (!channelId) return null;
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) return null;
+    return channel;
+}
+
+async function syncEmbedMessage(client, interaction, draft, { testOnly = false } = {}) {
+    const targetChannel = await resolveEmbedTargetChannel(client, interaction, draft);
+    if (!targetChannel) {
+        throw new Error('Unable to resolve the target channel for this embed.');
+    }
+
+    const embedPayload = createEmbedFromDraft(draft);
+    const messagePayload = {
+        content: embedPayload.content || undefined,
+        embeds: [embedPayload.embed],
+        allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
+    };
+
+    if (testOnly) {
+        const sent = await targetChannel.send(messagePayload);
+        return { channelId: targetChannel.id, messageId: sent.id, testOnly: true };
+    }
+
+    if (draft.messageId && draft.messageChannelId === targetChannel.id) {
+        const existing = await targetChannel.messages.fetch(draft.messageId).catch(() => null);
+        if (existing) {
+            await existing.edit(messagePayload);
+            return { channelId: targetChannel.id, messageId: existing.id, updated: true };
+        }
+    }
+
+    const sent = await targetChannel.send(messagePayload);
+    return { channelId: targetChannel.id, messageId: sent.id, updated: false };
 }
 
 function isInfractionEntry(entry) {
@@ -198,6 +713,12 @@ function buildPanelSelectRow(selectedPanel) {
                     value: MANAGE_PANEL_PERMS,
                     description: 'View slash command access by rank',
                     default: selectedPanel === MANAGE_PANEL_PERMS
+                },
+                {
+                    label: 'Embeds',
+                    value: MANAGE_PANEL_EMBEDS,
+                    description: 'Create and sync linked embed messages',
+                    default: selectedPanel === MANAGE_PANEL_EMBEDS
                 }
             ])
     );
@@ -1613,6 +2134,8 @@ function buildManagePayload(client, guildId, options = {}) {
         selectedRevokedInviteId,
         selectedSecuritySection,
         selectedPermCommand,
+        selectedEmbedId,
+        embedDraft,
         automodDraft,
         notice
     } = options;
@@ -1647,6 +2170,10 @@ function buildManagePayload(client, guildId, options = {}) {
         return buildPermsManagePayload(client, guild, notice, selectedPermCommand);
     }
 
+    if (panel === MANAGE_PANEL_EMBEDS) {
+        return buildEmbedsManagePayload(client, guildId, notice, selectedEmbedId || null, embedDraft || null);
+    }
+
     return buildRuleManagePayload(client, guildId, selectedRuleKey);
 }
 
@@ -1673,6 +2200,7 @@ module.exports = {
             && interaction.customId !== MANAGE_SECURITY_SECTION_SELECT_ID
             && interaction.customId !== MANAGE_PERMS_COMMAND_SELECT_ID
             && !interaction.customId.startsWith(MANAGE_PERMS_LEVEL_SELECT_PREFIX)
+            && interaction.customId !== MANAGE_EMBEDS_SELECT_ID
             && interaction.customId !== MANAGE_AUTOMOD_RULE_SELECT_ID
             && interaction.customId !== MANAGE_REVOKED_INVITE_SELECT_ID
             && !interaction.customId.startsWith(`${MANAGE_USER_CASE_SELECT_ID}:`)
@@ -1829,6 +2357,11 @@ module.exports = {
                 return true;
             }
 
+            if (panel === MANAGE_PANEL_EMBEDS) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_EMBEDS }));
+                return true;
+            }
+
             const firstRule = RULE_CHOICES[0]?.value;
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_RULES,
@@ -1853,6 +2386,17 @@ module.exports = {
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_PERMS,
                 selectedPermCommand
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_EMBEDS_SELECT_ID) {
+            const selectedEmbedId = String(interaction.values?.[0] || '').trim() || null;
+            setEmbedSelectedId(interaction.guild.id, interaction.user.id, selectedEmbedId);
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_EMBEDS,
+                selectedEmbedId,
+                embedDraft: EMBED_DRAFTS.get(getEmbedDraftKey(interaction.guild.id, interaction.user.id)) || null
             }));
             return true;
         }
@@ -1951,7 +2495,14 @@ module.exports = {
             && interaction.customId !== MANAGE_JOIN_FILTER_TOGGLE_ID
             && interaction.customId !== MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID
             && interaction.customId !== MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID
-            && interaction.customId !== MANAGE_AUTORESPONDER_OPEN_ID) {
+            && interaction.customId !== MANAGE_AUTORESPONDER_OPEN_ID
+            && interaction.customId !== MANAGE_EMBEDS_CREATE_ID
+            && interaction.customId !== MANAGE_EMBEDS_EDIT_ID
+            && interaction.customId !== MANAGE_EMBEDS_SAVE_ID
+            && interaction.customId !== MANAGE_EMBEDS_SEND_TEST_ID
+            && interaction.customId !== MANAGE_EMBEDS_DELETE_ID
+            && interaction.customId !== MANAGE_EMBEDS_ADVANCED_ID
+            && interaction.customId !== MANAGE_EMBEDS_FIELDS_ID) {
             return false;
         }
 
@@ -2005,6 +2556,113 @@ module.exports = {
             }
 
             await autoresponderCommand.executeInteraction({ client, interaction });
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_EMBEDS_CREATE_ID) {
+            const draft = createDefaultEmbedDraft(interaction.user.id);
+            draft.guildId = interaction.guild.id;
+            setEmbedDraft(interaction.guild.id, interaction.user.id, draft);
+            setEmbedSelectedId(interaction.guild.id, interaction.user.id, null);
+            await interaction.showModal(buildEmbedMainModal(draft));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_EMBEDS_EDIT_ID) {
+            const selectedEmbedId = getEmbedSelectedId(interaction.guild.id, interaction.user.id);
+            if (!selectedEmbedId) {
+                await interaction.reply({ content: 'Select an embed first.', ephemeral: true });
+                return true;
+            }
+
+            const selectedEntry = readEmbedEntry(interaction.guild.id, selectedEmbedId);
+            if (!selectedEntry) {
+                await interaction.reply({ content: 'That embed no longer exists.', ephemeral: true });
+                return true;
+            }
+
+            const draft = normalizeEmbedDraft({ ...selectedEntry });
+            draft.guildId = interaction.guild.id;
+            setEmbedDraft(interaction.guild.id, interaction.user.id, draft);
+            await interaction.showModal(buildEmbedMainModal(draft));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_EMBEDS_ADVANCED_ID) {
+            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id);
+            if (!draft) {
+                await interaction.reply({ content: 'Create or edit an embed first.', ephemeral: true });
+                return true;
+            }
+
+            await interaction.showModal(buildEmbedAdvancedModal(draft));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_EMBEDS_FIELDS_ID) {
+            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id);
+            if (!draft) {
+                await interaction.reply({ content: 'Create or edit an embed first.', ephemeral: true });
+                return true;
+            }
+
+            await interaction.showModal(buildEmbedFieldsModal(draft));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_EMBEDS_SEND_TEST_ID || interaction.customId === MANAGE_EMBEDS_SAVE_ID || interaction.customId === MANAGE_EMBEDS_DELETE_ID) {
+            const selectedEmbedId = getEmbedSelectedId(interaction.guild.id, interaction.user.id);
+            const selectedEntry = selectedEmbedId ? readEmbedEntry(interaction.guild.id, selectedEmbedId) : null;
+            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id) || (selectedEntry ? normalizeEmbedDraft({ ...selectedEntry }) : null);
+
+            if (!draft) {
+                await interaction.reply({ content: 'Create or select an embed first.', ephemeral: true });
+                return true;
+            }
+
+            if (interaction.customId === MANAGE_EMBEDS_DELETE_ID) {
+                const target = selectedEntry || draft;
+                if (target.messageId && target.messageChannelId) {
+                    const channel = await client.channels.fetch(target.messageChannelId).catch(() => null);
+                    const message = channel && channel.messages ? await channel.messages.fetch(target.messageId).catch(() => null) : null;
+                    if (message) {
+                        await message.delete().catch(() => null);
+                    }
+                }
+
+                removeEmbedEntry(interaction.guild.id, target.id);
+                if (getEmbedDraft(interaction.guild.id, interaction.user.id)?.id === target.id) {
+                    clearEmbedDraft(interaction.guild.id, interaction.user.id);
+                }
+                setEmbedSelectedId(interaction.guild.id, interaction.user.id, null);
+                await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_EMBEDS,
+                    notice: 'Deleted the selected embed.'
+                }));
+                return true;
+            }
+
+            if (interaction.customId === MANAGE_EMBEDS_SEND_TEST_ID) {
+                await syncEmbedMessage(client, interaction, draft, { testOnly: true });
+                await interaction.reply({ content: `✅ Sent a test message for **${draft.name || 'Untitled Embed'}**.`, ephemeral: true });
+                return true;
+            }
+
+            const syncResult = await syncEmbedMessage(client, interaction, draft, { testOnly: false });
+            draft.messageId = syncResult.messageId;
+            draft.messageChannelId = syncResult.channelId;
+            draft.lastSentAt = new Date().toISOString();
+            draft.guildId = interaction.guild.id;
+            upsertEmbedEntry(interaction.guild.id, draft);
+            setEmbedDraft(interaction.guild.id, interaction.user.id, draft);
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_EMBEDS,
+                selectedEmbedId: draft.id,
+                embedDraft: draft,
+                notice: syncResult.updated ? '✅ Updated the linked embed message.' : '✅ Created and linked the embed message.'
+            }));
+            setEmbedSelectedId(interaction.guild.id, interaction.user.id, draft.id);
             return true;
         }
 
@@ -2806,7 +3464,10 @@ module.exports = {
             && !interaction.customId.startsWith(MANAGE_MODSTATS_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_AUTOMOD_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_AUTOMOD_CUSTOM_MODAL_PREFIX)
-            && !interaction.customId.startsWith(MANAGE_SECURITY_MODAL_PREFIX)) return false;
+            && !interaction.customId.startsWith(MANAGE_SECURITY_MODAL_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_EMBEDS_MAIN_MODAL_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_EMBEDS_ADVANCED_MODAL_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_EMBEDS_FIELDS_MODAL_PREFIX)) return false;
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
             return true;
@@ -2906,6 +3567,89 @@ module.exports = {
                 }
                 return true;
             }
+        }
+
+        if (interaction.customId.startsWith(MANAGE_EMBEDS_MAIN_MODAL_PREFIX)) {
+            const draftId = interaction.customId.slice(MANAGE_EMBEDS_MAIN_MODAL_PREFIX.length);
+            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id) || createDefaultEmbedDraft(interaction.user.id);
+            if (draft.id !== draftId) {
+                draft.id = draftId;
+            }
+
+            draft.guildId = interaction.guild.id;
+            draft.name = interaction.fields.getTextInputValue(MODAL_EMBED_NAME_INPUT_ID).trim();
+            draft.channelId = parseEmbedChannelId(interaction.fields.getTextInputValue(MODAL_EMBED_CHANNEL_INPUT_ID));
+            draft.title = interaction.fields.getTextInputValue(MODAL_EMBED_TITLE_INPUT_ID).trim();
+            draft.description = interaction.fields.getTextInputValue(MODAL_EMBED_DESCRIPTION_INPUT_ID).trim();
+            draft.color = interaction.fields.getTextInputValue(MODAL_EMBED_COLOR_INPUT_ID).trim() || draft.color || '#57F287';
+            draft.updatedAt = new Date().toISOString();
+            setEmbedDraft(interaction.guild.id, interaction.user.id, draft);
+            setEmbedSelectedId(interaction.guild.id, interaction.user.id, draft.id);
+
+            await interaction.reply({
+                ...buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_EMBEDS,
+                    selectedEmbedId: draft.id,
+                    embedDraft: draft,
+                    notice: 'Updated embed draft fields. Press Save / Sync when ready.'
+                }),
+                ephemeral: true
+            });
+            return true;
+        }
+
+        if (interaction.customId.startsWith(MANAGE_EMBEDS_ADVANCED_MODAL_PREFIX)) {
+            const draftId = interaction.customId.slice(MANAGE_EMBEDS_ADVANCED_MODAL_PREFIX.length);
+            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id) || createDefaultEmbedDraft(interaction.user.id);
+            if (draft.id !== draftId) {
+                draft.id = draftId;
+            }
+
+            draft.extra = loadEmbedAdvanced(interaction.fields.getTextInputValue(MODAL_EMBED_ADVANCED_JSON_INPUT_ID));
+            draft.updatedAt = new Date().toISOString();
+            setEmbedDraft(interaction.guild.id, interaction.user.id, draft);
+            setEmbedSelectedId(interaction.guild.id, interaction.user.id, draft.id);
+
+            await interaction.reply({
+                ...buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_EMBEDS,
+                    selectedEmbedId: draft.id,
+                    embedDraft: draft,
+                    notice: 'Updated advanced embed JSON. Press Save / Sync when ready.'
+                }),
+                ephemeral: true
+            });
+            return true;
+        }
+
+        if (interaction.customId.startsWith(MANAGE_EMBEDS_FIELDS_MODAL_PREFIX)) {
+            const draftId = interaction.customId.slice(MANAGE_EMBEDS_FIELDS_MODAL_PREFIX.length);
+            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id) || createDefaultEmbedDraft(interaction.user.id);
+            if (draft.id !== draftId) {
+                draft.id = draftId;
+            }
+
+            try {
+                draft.fields = parseEmbedFieldsJson(interaction.fields.getTextInputValue(MODAL_EMBED_FIELDS_JSON_INPUT_ID));
+            } catch (err) {
+                await interaction.reply({ content: err.message || 'Invalid fields JSON.', ephemeral: true });
+                return true;
+            }
+
+            draft.updatedAt = new Date().toISOString();
+            setEmbedDraft(interaction.guild.id, interaction.user.id, draft);
+            setEmbedSelectedId(interaction.guild.id, interaction.user.id, draft.id);
+
+            await interaction.reply({
+                ...buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_EMBEDS,
+                    selectedEmbedId: draft.id,
+                    embedDraft: draft,
+                    notice: 'Updated embed fields JSON. Press Save / Sync when ready.'
+                }),
+                ephemeral: true
+            });
+            return true;
         }
 
         if (interaction.customId.startsWith(MANAGE_AUTOMOD_CUSTOM_MODAL_PREFIX)) {
