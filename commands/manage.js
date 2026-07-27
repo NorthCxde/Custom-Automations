@@ -306,7 +306,7 @@ function buildEmbedsManagePayload(client, guildId, notice, selectedEmbedId = nul
     const embed = new EmbedBuilder()
         .setColor(0x000000)
         .setTitle('Manage Panel - Embeds')
-        .setDescription('Create, edit, and keep linked embed messages updated automatically.')
+        .setDescription('Create and manage embed messages.')
         .addFields(
             { name: 'Saved Embeds', value: entries.length ? entries.slice(0, 8).map((entry) => buildEmbedSummaryLines(entry, entry.id === selectedEmbedId)).join('\n') : 'No embeds saved yet.', inline: false }
         )
