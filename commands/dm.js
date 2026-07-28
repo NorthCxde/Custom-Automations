@@ -1,39 +1,47 @@
+const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+
 module.exports = {
     name: 'dm',
-    description: 'Send a DM to a server member by mention or ID.',
-    async execute({ client, message, args }) {
-        if (!message.guild) return message.reply('This command must be used in a server channel.');
-        if (!args[0] || args.length < 2) return message.reply('Usage: ?dm @user your message here');
-
-        const targetId = args[0].replace(/[<@!>]/g, '');
-        const dmText = args.slice(1).join(' ').trim();
-
-        if (!/^[0-9]{17,19}$/.test(targetId)) {
-            return message.reply('Please provide a valid user mention or user ID.');
+    description: 'Send a silent DM to a user.',
+    data: new SlashCommandBuilder()
+        .setName('dm')
+        .setDescription('Send a DM to a user silently.')
+        .addUserOption(option =>
+            option
+                .setName('user')
+                .setDescription('The user to DM')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option
+                .setName('message')
+                .setDescription('The message to send')
+                .setRequired(true)
+                .setMaxLength(2000)
+        )
+        .setDMPermission(false),
+    async executeInteraction({ interaction }) {
+        if (!interaction.guild) {
+            return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
         }
+
+        if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild)) {
+            return interaction.reply({ content: 'You need Manage Server to use this command.', ephemeral: true });
+        }
+
+        const targetUser = interaction.options.getUser('user', true);
+        const dmText = String(interaction.options.getString('message', true) || '').trim();
+
         if (!dmText) {
-            return message.reply('Please provide a message to send.');
+            return interaction.reply({ content: 'Please provide a message to send.', ephemeral: true });
         }
 
         try {
-            let targetUser = null;
-
-            try {
-                const member = await message.guild.members.fetch(targetId);
-                targetUser = member.user;
-            } catch {
-                targetUser = await client.users.fetch(targetId);
-            }
-
-            if (!targetUser) {
-                return message.reply('Could not find that user in the server.');
-            }
-
             await targetUser.send(dmText);
-            return message.channel.send(`DM sent to <@${targetId}>.`);
+            return interaction.reply({ content: `✅ DM sent to <@${targetUser.id}>.`, ephemeral: true });
         } catch (error) {
-            console.error(error);
-            return message.reply('Unable to send a DM to that user. They may have DMs disabled.');
+            console.error('Failed to send DM:', error);
+            return interaction.reply({ content: 'Unable to send a DM to that user. They may have DMs disabled.', ephemeral: true });
         }
     }
 };
