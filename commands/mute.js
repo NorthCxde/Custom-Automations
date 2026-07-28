@@ -473,7 +473,9 @@ async function applyDecisionAction({ client, guild, decision, action, durationRa
         const userId = target.id;
         const userTag = target.tag || `<@${userId}>`;
         const reasonPrefix = `[Rule: ${decision.ruleLabel || 'Unknown'}] [Infraction ${target.infractionCount || '?'}]`;
-        const reason = `${reasonPrefix} ${decision.baseReason || 'No reason provided'} | Moderator decision: ${action}${durationRaw ? ` ${durationRaw}` : ''}`;
+        const reason = decision.baseReason
+            ? `${reasonPrefix} ${decision.baseReason} | Moderator decision: ${action}${durationRaw ? ` ${durationRaw}` : ''}`
+            : `${reasonPrefix} | Moderator decision: ${action}${durationRaw ? ` ${durationRaw}` : ''}`;
 
         try {
             if (action === 'mute') {
@@ -691,6 +693,14 @@ module.exports = {
                     const member = await message.guild.members.fetch(targetId);
                     if (!member) {
                         return { targetId, success: false, reason: 'Member not found' };
+                    }
+
+                    if (typeof client.isModerationImmuneMember === 'function' && client.isModerationImmuneMember(member)) {
+                        return {
+                            targetId,
+                            success: false,
+                            reason: `${member.user.username} is immune to moderation actions.`
+                        };
                     }
 
                     if (!member.moderatable) {
@@ -930,7 +940,7 @@ module.exports = {
         const ruleKey = interaction.options.getString('rule');
         const guildRules = client.getInfractionRules ? client.getInfractionRules(interaction.guild.id) : INFRACTION_RULES;
         const ruleConfig = ruleKey ? guildRules?.[ruleKey] : null;
-        const baseReason = interaction.options.getString('reason') || 'No reason provided';
+        const baseReason = String(interaction.options.getString('reason') || '').trim();
 
         if (!ruleKey && !manualDuration) {
             return interaction.reply({ content: 'Please provide either a duration or an infraction rule.', ephemeral: true });
@@ -955,6 +965,14 @@ module.exports = {
                 const member = await interaction.guild.members.fetch(user.id);
                 if (!member) {
                     return { user, success: false, reason: 'Member not found' };
+                }
+
+                if (typeof client.isModerationImmuneMember === 'function' && client.isModerationImmuneMember(member)) {
+                    return {
+                        user,
+                        success: false,
+                        reason: `${member.user.username} is immune to moderation actions.`
+                    };
                 }
 
                 let duration = manualDuration;
@@ -1005,8 +1023,8 @@ module.exports = {
                 }
 
                 const effectiveReason = ruleConfig
-                    ? `[Rule: ${ruleConfig.label}] [Infraction ${infractionCount}] ${baseReason}`
-                    : baseReason;
+                    ? `[Rule: ${ruleConfig.label}] [Infraction ${infractionCount}]${baseReason ? ` ${baseReason}` : ''}`
+                    : (baseReason || 'No reason provided');
 
                 await client.sendModerationDm({
                     user,
@@ -1109,7 +1127,7 @@ module.exports = {
                     { name: 'Rule', value: ruleConfig?.label || 'Unknown Rule', inline: true },
                     { name: 'Requested By', value: `<@${interaction.user.id}>`, inline: true },
                     { name: 'User(s)', value: moderatorDecisionTargets.map(target => `<@${target.id}> (Infraction ${target.infractionCount})`).join('\n').slice(0, 1024), inline: false },
-                    { name: 'Reason', value: baseReason || 'No reason provided', inline: false }
+                    { name: 'Reason', value: ruleConfig ? ruleConfig.label : (baseReason || 'No reason provided'), inline: false }
                 )
                 .setTimestamp();
 
@@ -1128,7 +1146,7 @@ module.exports = {
                 { name: 'Duration', value: ruleConfig ? 'Auto (by infraction rule)' : (manualDuration || 'N/A'), inline: true },
                 { name: 'Rule', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
                 { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
-                { name: 'Reason', value: baseReason || 'No reason provided', inline: false },
+                { name: 'Reason', value: ruleConfig ? ruleConfig.label : (baseReason || 'No reason provided'), inline: false },
                 { name: 'Target IDs', value: users.map(u => u.id).join(', ') || 'None', inline: false }
             )
             .setTimestamp();
@@ -1174,7 +1192,7 @@ module.exports = {
                     { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                     { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false },
                     { name: 'Rule', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
-                    { name: 'Reason', value: baseReason || 'No reason provided', inline: false },
+                    { name: 'Reason', value: ruleConfig ? ruleConfig.label : (baseReason || 'No reason provided'), inline: false },
                     { name: 'Outcome', value: `${successCount} muted, ${decisionCount} needs decision, ${failCount} failed`, inline: false }
                 )
                 .setTimestamp();

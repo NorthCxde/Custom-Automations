@@ -174,6 +174,11 @@ module.exports = {
 
             const results = await Promise.all(uniqueTargetIds.map(async (targetId) => {
                 try {
+                    const member = await message.guild.members.fetch(targetId).catch(() => null);
+                    if (member && typeof client.isModerationImmuneMember === 'function' && client.isModerationImmuneMember(member)) {
+                        return { targetId, success: false, reason: `${member.user.username} is immune to moderation actions.` };
+                    }
+
                     await client.sendModerationDm({
                         userId: targetId,
                         guildName: message.guild.name,
@@ -261,6 +266,11 @@ module.exports = {
 
         const results = await Promise.all(users.map(async (user) => {
             try {
+                const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+                if (member && typeof client.isModerationImmuneMember === 'function' && client.isModerationImmuneMember(member)) {
+                    return { user, success: false, error: new Error(`${member.user.username} is immune to moderation actions.`) };
+                }
+
                 await client.sendModerationDm({
                     user,
                     guildName: interaction.guild.name,

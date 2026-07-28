@@ -3529,6 +3529,18 @@ client.isPublicMemberAllowed = (member) => {
     return member.roles.cache.some(role => allowed.has(role.id));
 };
 
+client.isModerationImmuneMember = (member) => {
+    if (!member || !member.guild) return false;
+
+    const hasAdminBypass = member.permissions.has(PermissionsBitField.Flags.Administrator)
+        || member.permissions.has(PermissionsBitField.Flags.ManageGuild);
+
+    const allowed = client.getAllowedRoleIds(member.guild.id);
+    if (allowed === null || allowed.size === 0) return hasAdminBypass;
+    if (hasAdminBypass) return true;
+    return member.roles.cache.some(role => allowed.has(role.id));
+};
+
 client.saveManualLogsChannels = () => {
     const out = {};
     for (const [guildId, value] of client.manualLogsChannels.entries()) {
