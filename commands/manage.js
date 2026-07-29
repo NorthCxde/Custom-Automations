@@ -1988,7 +1988,7 @@ function buildBlacklistedEmojisModal(rule = null) {
 
     const emojisInput = new TextInputBuilder()
         .setCustomId(MODAL_BLACKLISTED_EMOJIS_LIST_INPUT_ID)
-        .setLabel('Blacklisted Emojis (comma or newline separated)')
+        .setLabel('Blacklisted Emojis (comma/newline)')
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(true);
 
@@ -3449,7 +3449,7 @@ module.exports = {
 
                 const emojisInput = new TextInputBuilder()
                     .setCustomId(MODAL_AUTOMOD_TRIGGER_INPUT_ID)
-                    .setLabel('Blacklisted Emojis (comma or newline separated)')
+                    .setLabel('Blacklisted Emojis (comma/newline)')
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
