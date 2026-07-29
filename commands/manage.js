@@ -150,6 +150,10 @@ const MANAGE_BLACKLISTED_EMOJIS_CREATE_ID = 'manage_blacklisted_emojis_create';
 const MANAGE_BLACKLISTED_EMOJIS_EDIT_PREFIX = 'manage_blacklisted_emojis_edit:';
 const MANAGE_BLACKLISTED_EMOJIS_DELETE_PREFIX = 'manage_blacklisted_emojis_delete:';
 const MANAGE_BLACKLISTED_EMOJIS_MODAL_PREFIX = 'manage_blacklisted_emojis_modal:';
+const MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_PREFIX = 'manage_blacklisted_emojis_role_filters:';
+const MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_BACK_PREFIX = 'manage_blacklisted_emojis_role_filters_back:';
+const MANAGE_BLACKLISTED_EMOJIS_ALLOWED_ROLES_PREFIX = 'manage_blacklisted_emojis_allowed_roles:';
+const MANAGE_BLACKLISTED_EMOJIS_IGNORED_ROLES_PREFIX = 'manage_blacklisted_emojis_ignored_roles:';
 const MODAL_BLACKLISTED_EMOJIS_NAME_INPUT_ID = 'blacklisted_emojis_name';
 const MODAL_BLACKLISTED_EMOJIS_LIST_INPUT_ID = 'blacklisted_emojis_list';
 
@@ -813,9 +817,9 @@ function buildPanelSelectRow(selectedPanel) {
                     default: selectedPanel === MANAGE_PANEL_AUTOMOD
                 },
                 {
-                    label: 'Blacklisted Emojis',
+                    label: 'Blacklisted Reactions',
                     value: MANAGE_PANEL_BLACKLISTED_EMOJIS,
-                    description: 'Block specific reactions and track hit counts',
+                    description: 'Block specific reactions',
                     default: selectedPanel === MANAGE_PANEL_BLACKLISTED_EMOJIS
                 },
                 {
@@ -1646,7 +1650,7 @@ const AUTOMOD_TYPE_ORDER = [
 const AUTOMOD_TYPE_LABELS = {
     mentions_cooldown: 'Mentions Cooldown',
     reaction_cooldown: 'Reaction Cooldown',
-    blacklisted_emojis: 'Blacklisted Emojis',
+    blacklisted_emojis: 'Blacklisted Reactions',
     masked_links: 'Masked Links',
     invite_links: 'Invite Links',
     fast_message_spam: 'Fast Message Spam',
@@ -1718,7 +1722,7 @@ function getDefaultCustomForType(type) {
     case 'reaction_cooldown':
         return { maxDifferentMessages: 5, windowSeconds: 10, cooldownSeconds: 30 };
     case 'blacklisted_emojis':
-        return { blacklistedEmojis: [], emojiCounts: {}, totalHits: 0 };
+        return { blacklistedEmojis: [] };
     case 'fast_message_spam':
         return { maxMessages: 8, windowSeconds: 5 };
     case 'anti_newline':
@@ -1762,18 +1766,8 @@ function sanitizeCustomByType(type, customInput) {
         const blacklistedEmojis = Array.isArray(custom.blacklistedEmojis)
             ? custom.blacklistedEmojis.map(String).map(value => value.trim()).filter(Boolean)
             : [];
-        const emojiCounts = {};
-        const sourceCounts = custom.emojiCounts && typeof custom.emojiCounts === 'object' ? custom.emojiCounts : {};
-        for (const [key, value] of Object.entries(sourceCounts)) {
-            const count = Math.max(0, Number(value) || 0);
-            if (count > 0) {
-                emojiCounts[String(key)] = count;
-            }
-        }
         return {
-            blacklistedEmojis,
-            emojiCounts,
-            totalHits: Math.max(0, Number(custom.totalHits) || 0)
+            blacklistedEmojis
         };
     }
 
@@ -1878,18 +1872,8 @@ function parseBlacklistedEmojiList(text) {
         .filter(Boolean);
 }
 
-function formatBlacklistedEmojiCounts(custom) {
-    const emojiCounts = custom && typeof custom === 'object' && custom.emojiCounts && typeof custom.emojiCounts === 'object'
-        ? custom.emojiCounts
-        : {};
-    const entries = Object.entries(emojiCounts)
-        .map(([key, value]) => ({ key: String(key), count: Math.max(0, Number(value) || 0) }))
-        .filter(entry => entry.count > 0)
-        .sort((left, right) => right.count - left.count || left.key.localeCompare(right.key));
-
-    return entries.length
-        ? entries.slice(0, 10).map(entry => `${getEmojiDisplayFromKey(entry.key)} x${entry.count}`).join('\n')
-        : 'No reaction hits recorded yet.';
+function findUnsupportedEmojiShortcodes(values) {
+    return values.filter((value) => /^:[a-z0-9_+-]+:$/i.test(String(value || '').trim()));
 }
 
 function buildBlacklistedEmojisManagePayload(client, guildId, selectedRuleId = null, notice = null) {
@@ -1899,13 +1883,13 @@ function buildBlacklistedEmojisManagePayload(client, guildId, selectedRuleId = n
 
     const embed = new EmbedBuilder()
         .setColor(0x000000)
-        .setTitle('Manage Panel - Blacklisted Emojis')
-        .setDescription('Create emoji reaction blacklists. Matching reactions are removed immediately and the hit counts below are updated automatically.')
+        .setTitle('Manage Panel - Blacklisted Reactions')
+        .setDescription('Create emoji reaction blacklists. Matching reactions are removed immediately.')
         .setTimestamp();
 
     if (!rules.length) {
         embed.addFields({
-            name: 'No Blacklisted Emojis Yet',
+            name: 'No Blacklisted Reactions Yet',
             value: 'Create your first emoji blacklist rule below.',
             inline: false
         });
@@ -1915,12 +1899,11 @@ function buildBlacklistedEmojisManagePayload(client, guildId, selectedRuleId = n
             value: rules.slice(0, 10).map((rule) => {
                 const custom = sanitizeCustomByType('blacklisted_emojis', rule.custom);
                 const blacklisted = Array.isArray(custom.blacklistedEmojis) && custom.blacklistedEmojis.length
-                    ? custom.blacklistedEmojis.map(value => `${value}${custom.emojiCounts?.[normalizeEmojiKey(value)] ? ` x${custom.emojiCounts[normalizeEmojiKey(value)]}` : ''}`).join(', ')
+                    ? custom.blacklistedEmojis.join(', ')
                     : 'None';
                 return [
-                    `**${truncate(rule.name || 'Blacklisted Emojis', 64)}**`,
+                    `**${truncate(rule.name || 'Blacklisted Reactions', 64)}**`,
                     `Emojis: ${truncate(blacklisted, 220)}`,
-                    `Hits: ${Math.max(0, Number(custom.totalHits) || 0)}`,
                     `Status: ${rule.enabled === false ? 'Disabled' : 'Enabled'}`
                 ].join(' | ');
             }).join('\n\n') || 'No emoji blacklist rules found.',
@@ -1930,18 +1913,20 @@ function buildBlacklistedEmojisManagePayload(client, guildId, selectedRuleId = n
 
     if (selected) {
         const custom = sanitizeCustomByType('blacklisted_emojis', selected.custom);
+        const roleMentions = (ids) => ids.length ? ids.map(id => `<@&${id}>`).join(', ') : 'None';
         embed.addFields(
-            { name: 'Selected Rule', value: `**${selected.name || 'Blacklisted Emojis'}**`, inline: true },
+            { name: 'Selected Rule', value: `**${selected.name || 'Blacklisted Reactions'}**`, inline: true },
             { name: 'Enabled', value: selected.enabled === false ? 'No' : 'Yes', inline: true },
-            { name: 'Blacklisted Emojis', value: Array.isArray(custom.blacklistedEmojis) && custom.blacklistedEmojis.length ? custom.blacklistedEmojis.join(', ') : 'None', inline: false },
-            { name: 'Hit Counts', value: formatBlacklistedEmojiCounts(custom), inline: false }
+            { name: 'Blacklisted Reactions', value: Array.isArray(custom.blacklistedEmojis) && custom.blacklistedEmojis.length ? custom.blacklistedEmojis.join(', ') : 'None', inline: false },
+            { name: 'Allowed Roles (Whitelist)', value: roleMentions(Array.isArray(selected.allowedRoleIds) ? selected.allowedRoleIds : []), inline: false },
+            { name: 'Ignored Roles', value: roleMentions(Array.isArray(selected.ignoredRoleIds) ? selected.ignoredRoleIds : []), inline: false }
         );
     }
 
     const options = rules.slice(0, 25).map((rule) => ({
-        label: truncate(rule.name || 'Blacklisted Emojis', 100),
+        label: truncate(rule.name || 'Blacklisted Reactions', 100),
         value: rule.id,
-        description: `${Math.max(0, Number(sanitizeCustomByType('blacklisted_emojis', rule.custom).totalHits) || 0)} hit(s) | ${rule.enabled === false ? 'Disabled' : 'Enabled'}`.slice(0, 100),
+        description: `${rule.enabled === false ? 'Disabled' : 'Enabled'} rule`.slice(0, 100),
         default: rule.id === selectedRuleId
     }));
 
@@ -1961,7 +1946,8 @@ function buildBlacklistedEmojisManagePayload(client, guildId, selectedRuleId = n
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(MANAGE_BLACKLISTED_EMOJIS_CREATE_ID).setLabel('Create New').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId(selected ? `${MANAGE_BLACKLISTED_EMOJIS_EDIT_PREFIX}${selected.id}` : `${MANAGE_BLACKLISTED_EMOJIS_EDIT_PREFIX}none`).setLabel('Edit Selected').setStyle(ButtonStyle.Primary).setDisabled(!selected),
-            new ButtonBuilder().setCustomId(selected ? `${MANAGE_BLACKLISTED_EMOJIS_DELETE_PREFIX}${selected.id}` : `${MANAGE_BLACKLISTED_EMOJIS_DELETE_PREFIX}none`).setLabel('Delete Selected').setStyle(ButtonStyle.Danger).setDisabled(!selected)
+            new ButtonBuilder().setCustomId(selected ? `${MANAGE_BLACKLISTED_EMOJIS_DELETE_PREFIX}${selected.id}` : `${MANAGE_BLACKLISTED_EMOJIS_DELETE_PREFIX}none`).setLabel('Delete Selected').setStyle(ButtonStyle.Danger).setDisabled(!selected),
+            new ButtonBuilder().setCustomId(selected ? `${MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_PREFIX}${selected.id}` : `${MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_PREFIX}none`).setLabel('Role Filters').setStyle(ButtonStyle.Secondary).setDisabled(!selected)
         )
     );
 
@@ -1970,17 +1956,68 @@ function buildBlacklistedEmojisManagePayload(client, guildId, selectedRuleId = n
     return payload;
 }
 
+function buildBlacklistedEmojisRoleFiltersPayload(rule, notice = null) {
+    const allowedRoleIds = Array.isArray(rule?.allowedRoleIds) ? rule.allowedRoleIds.map(String) : [];
+    const ignoredRoleIds = Array.isArray(rule?.ignoredRoleIds) ? rule.ignoredRoleIds.map(String) : [];
+    const roleMentions = (ids) => ids.length ? ids.map(id => `<@&${id}>`).join(', ') : 'None';
+
+    const embed = new EmbedBuilder()
+        .setColor(0x000000)
+        .setTitle('Blacklisted Reactions - Role Filters')
+        .setDescription(`Configure role whitelist/ignore filters for **${truncate(rule?.name || 'Blacklisted Reactions', 80)}**.`)
+        .addFields(
+            { name: 'Allowed Roles (Whitelist)', value: roleMentions(allowedRoleIds), inline: false },
+            { name: 'Ignored Roles', value: roleMentions(ignoredRoleIds), inline: false }
+        )
+        .setTimestamp();
+
+    const allowedRolesMenu = new RoleSelectMenuBuilder()
+        .setCustomId(`${MANAGE_BLACKLISTED_EMOJIS_ALLOWED_ROLES_PREFIX}${rule.id}`)
+        .setPlaceholder('Allowed Roles')
+        .setMinValues(0)
+        .setMaxValues(25);
+    if (allowedRoleIds.length) {
+        allowedRolesMenu.setDefaultRoles(allowedRoleIds.slice(0, 25));
+    }
+
+    const ignoredRolesMenu = new RoleSelectMenuBuilder()
+        .setCustomId(`${MANAGE_BLACKLISTED_EMOJIS_IGNORED_ROLES_PREFIX}${rule.id}`)
+        .setPlaceholder('Ignored Roles')
+        .setMinValues(0)
+        .setMaxValues(25);
+    if (ignoredRoleIds.length) {
+        ignoredRolesMenu.setDefaultRoles(ignoredRoleIds.slice(0, 25));
+    }
+
+    const payload = {
+        embeds: [embed],
+        components: [
+            new ActionRowBuilder().addComponents(allowedRolesMenu),
+            new ActionRowBuilder().addComponents(ignoredRolesMenu),
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`${MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_BACK_PREFIX}${rule.id}`)
+                    .setLabel('Back')
+                    .setStyle(ButtonStyle.Secondary)
+            )
+        ]
+    };
+
+    if (notice) payload.content = String(notice);
+    return payload;
+}
+
 function buildBlacklistedEmojisModal(rule = null) {
     const modal = new ModalBuilder()
         .setCustomId(`${MANAGE_BLACKLISTED_EMOJIS_MODAL_PREFIX}${String(rule?.id || 'new')}`)
-        .setTitle(rule ? 'Edit Blacklisted Emojis' : 'Create Blacklisted Emojis');
+        .setTitle(rule ? 'Edit Blacklisted Reactions' : 'Create Blacklisted Reactions');
 
     const nameInput = new TextInputBuilder()
         .setCustomId(MODAL_BLACKLISTED_EMOJIS_NAME_INPUT_ID)
         .setLabel('Rule Name')
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
-        .setValue(String(rule?.name || 'Blacklisted Emojis').slice(0, 100));
+        .setValue(String(rule?.name || 'Blacklisted Reactions').slice(0, 100));
 
     const rawEmojiValue = Array.isArray(rule?.custom?.blacklistedEmojis)
         ? rule.custom.blacklistedEmojis.join('\n').slice(0, 4000)
@@ -1988,7 +2025,7 @@ function buildBlacklistedEmojisModal(rule = null) {
 
     const emojisInput = new TextInputBuilder()
         .setCustomId(MODAL_BLACKLISTED_EMOJIS_LIST_INPUT_ID)
-        .setLabel('Blacklisted Emojis (comma/newline)')
+        .setLabel('Blacklisted Reactions (comma/newline)')
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(true);
 
@@ -2018,13 +2055,9 @@ function formatAutomodCustom(type, custom = {}) {
     if (type === 'reaction_cooldown') return `Max Different Messages: ${value.maxDifferentMessages}\nWindow: ${value.windowSeconds}s\nCooldown: ${value.cooldownSeconds}s`;
     if (type === 'blacklisted_emojis') {
         const blocked = Array.isArray(value.blacklistedEmojis) && value.blacklistedEmojis.length
-            ? value.blacklistedEmojis.map(raw => {
-                const key = normalizeEmojiKey(raw);
-                const count = Math.max(0, Number(value.emojiCounts?.[key]) || 0);
-                return count > 0 ? `${raw} x${count}` : raw;
-            }).join(', ')
+            ? value.blacklistedEmojis.join(', ')
             : 'None';
-        return `Blocked Emojis: ${truncate(blocked, 300)}\nTotal Hits: ${Math.max(0, Number(value.totalHits) || 0)}`;
+        return `Blocked Emojis: ${truncate(blocked, 300)}`;
     }
     if (type === 'fast_message_spam') return `Max Messages: ${value.maxMessages}\nWindow: ${value.windowSeconds}s`;
     if (type === 'anti_newline') return `Max Newlines: ${value.maxNewlines}`;
@@ -2816,6 +2849,8 @@ module.exports = {
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_SAVE_ID
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_BACK_ID
             && interaction.customId !== MANAGE_BLACKLISTED_EMOJIS_CREATE_ID
+            && !interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_BACK_PREFIX)
             && !interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_EDIT_PREFIX)
             && !interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_DELETE_PREFIX)
             && !interaction.customId.startsWith(MANAGE_MODSTATS_EDIT_PREFIX)
@@ -2929,6 +2964,29 @@ module.exports = {
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_BLACKLISTED_EMOJIS,
                 notice: 'Deleted the selected emoji blacklist.'
+            }));
+            return true;
+        }
+
+        if (interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_PREFIX)) {
+            const selectedRuleId = interaction.customId.slice(MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_PREFIX.length);
+            const selectedRule = selectedRuleId && selectedRuleId !== 'none'
+                ? client.getAutomodRules(interaction.guild.id).find(rule => rule.id === selectedRuleId && String(rule?.type || '').trim().toLowerCase() === 'blacklisted_emojis')
+                : null;
+            if (!selectedRule) {
+                await interaction.reply({ content: 'Select a blacklist rule first.', ephemeral: true });
+                return true;
+            }
+
+            await interaction.update(buildBlacklistedEmojisRoleFiltersPayload(selectedRule));
+            return true;
+        }
+
+        if (interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_BACK_PREFIX)) {
+            const selectedRuleId = interaction.customId.slice(MANAGE_BLACKLISTED_EMOJIS_ROLE_FILTERS_BACK_PREFIX.length);
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_BLACKLISTED_EMOJIS,
+                selectedAutomodRuleId: selectedRuleId && selectedRuleId !== 'none' ? selectedRuleId : null
             }));
             return true;
         }
@@ -3449,7 +3507,7 @@ module.exports = {
 
                 const emojisInput = new TextInputBuilder()
                     .setCustomId(MODAL_AUTOMOD_TRIGGER_INPUT_ID)
-                    .setLabel('Blacklisted Emojis (comma/newline)')
+                    .setLabel('Blacklisted Reactions (comma/newline)')
                     .setStyle(TextInputStyle.Paragraph)
                     .setRequired(true);
 
@@ -3806,10 +3864,54 @@ module.exports = {
     },
     async handleRoleSelect({ client, interaction }) {
         if (interaction.customId !== MANAGE_AUTOMOD_DRAFT_ALLOWED_ROLES_ID
-            && interaction.customId !== MANAGE_AUTOMOD_DRAFT_IGNORED_ROLES_ID) return false;
+            && interaction.customId !== MANAGE_AUTOMOD_DRAFT_IGNORED_ROLES_ID
+            && !interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_ALLOWED_ROLES_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_IGNORED_ROLES_PREFIX)) return false;
 
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        if (interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_ALLOWED_ROLES_PREFIX)
+            || interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_IGNORED_ROLES_PREFIX)) {
+            const isAllowed = interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_ALLOWED_ROLES_PREFIX);
+            const ruleId = interaction.customId.slice(
+                isAllowed
+                    ? MANAGE_BLACKLISTED_EMOJIS_ALLOWED_ROLES_PREFIX.length
+                    : MANAGE_BLACKLISTED_EMOJIS_IGNORED_ROLES_PREFIX.length
+            );
+
+            const existingRule = client.getAutomodRules(interaction.guild.id)
+                .find(rule => rule.id === ruleId && String(rule?.type || '').trim().toLowerCase() === 'blacklisted_emojis');
+            if (!existingRule) {
+                await interaction.reply({ content: 'That blacklist rule no longer exists.', ephemeral: true });
+                return true;
+            }
+
+            if (typeof client.upsertAutomodRule !== 'function') {
+                await interaction.reply({ content: 'Automod storage is not available in this build.', ephemeral: true });
+                return true;
+            }
+
+            const nextAllowed = isAllowed
+                ? [...new Set(interaction.values.map(String))]
+                : [...new Set((existingRule.allowedRoleIds || []).map(String))];
+            const nextIgnored = isAllowed
+                ? [...new Set((existingRule.ignoredRoleIds || []).map(String))]
+                : [...new Set(interaction.values.map(String))];
+
+            const normalizedAllowed = nextAllowed.filter(id => !nextIgnored.includes(id));
+            const normalizedIgnored = nextIgnored.filter(id => !normalizedAllowed.includes(id));
+
+            const updatedRule = {
+                ...existingRule,
+                allowedRoleIds: normalizedAllowed,
+                ignoredRoleIds: normalizedIgnored
+            };
+            client.upsertAutomodRule(interaction.guild.id, updatedRule);
+
+            await interaction.update(buildBlacklistedEmojisRoleFiltersPayload(updatedRule, 'Updated role filters.'));
             return true;
         }
 
@@ -3968,6 +4070,15 @@ module.exports = {
                     return true;
                 }
 
+                const unsupportedShortcodes = findUnsupportedEmojiShortcodes(emojiList);
+                if (unsupportedShortcodes.length) {
+                    await interaction.reply({
+                        content: `Unsupported emoji format: ${unsupportedShortcodes.join(', ')}. Use the actual emoji character (example: 🍆) or a custom emoji like <:name:id>.`,
+                        ephemeral: true
+                    });
+                    return true;
+                }
+
                 const existingRule = draftId && draftId !== 'new'
                     ? client.getAutomodRules(interaction.guild.id).find(rule => rule.id === draftId)
                     : null;
@@ -3980,7 +4091,7 @@ module.exports = {
                 const generatedId = `am_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
                 const payload = buildAutomodRulePayloadFromDraft({
                     id: existingRule?.id || (draftId && draftId !== 'new' ? draftId : generatedId),
-                    name: name || 'Blacklisted Emojis',
+                    name: name || 'Blacklisted Reactions',
                     type: 'blacklisted_emojis',
                     trigger: '',
                     matchType: 'contains',
@@ -3997,9 +4108,7 @@ module.exports = {
                     ignoredUserIds: existingRule?.ignoredUserIds || [],
                     custom: {
                         ...(sanitizeCustomByType('blacklisted_emojis', existingRule?.custom) || {}),
-                        blacklistedEmojis: emojiList,
-                        emojiCounts: existingRule?.custom?.emojiCounts || {},
-                        totalHits: existingRule?.custom?.totalHits || 0
+                        blacklistedEmojis: emojiList
                     },
                     logChannelId: String(existingRule?.logChannelId || '').trim(),
                     customResponse: String(existingRule?.customResponse || '').trim(),
@@ -4021,9 +4130,9 @@ module.exports = {
             } catch (err) {
                 console.error('[Manage Blacklisted Emojis] Modal submit failed:', err);
                 if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp({ content: `Blacklisted emojis save failed: ${err.message || 'Unknown error'}`, ephemeral: true }).catch(() => null);
+                    await interaction.followUp({ content: `Blacklisted reactions save failed: ${err.message || 'Unknown error'}`, ephemeral: true }).catch(() => null);
                 } else {
-                    await interaction.reply({ content: `Blacklisted emojis save failed: ${err.message || 'Unknown error'}`, ephemeral: true }).catch(() => null);
+                    await interaction.reply({ content: `Blacklisted reactions save failed: ${err.message || 'Unknown error'}`, ephemeral: true }).catch(() => null);
                 }
                 return true;
             }
@@ -4244,7 +4353,16 @@ module.exports = {
             if (type === 'blacklisted_emojis') {
                 const blacklistedEmojis = parseBlacklistedEmojiList(trigger);
                 if (!blacklistedEmojis.length) {
-                    await interaction.reply({ content: 'Blacklisted emoji rules require at least one emoji.', ephemeral: true });
+                    await interaction.reply({ content: 'Blacklisted reaction rules require at least one emoji.', ephemeral: true });
+                    return true;
+                }
+
+                const unsupportedShortcodes = findUnsupportedEmojiShortcodes(blacklistedEmojis);
+                if (unsupportedShortcodes.length) {
+                    await interaction.reply({
+                        content: `Unsupported emoji format: ${unsupportedShortcodes.join(', ')}. Use the actual emoji character (example: 🍆) or a custom emoji like <:name:id>.`,
+                        ephemeral: true
+                    });
                     return true;
                 }
 
@@ -4264,7 +4382,7 @@ module.exports = {
                     ...buildManagePayload(client, interaction.guild.id, {
                         panel: MANAGE_PANEL_AUTOMOD,
                         automodDraft: draft,
-                        notice: 'Updated blacklisted emoji rule fields.'
+                        notice: 'Updated blacklisted reaction rule fields.'
                     }),
                     ephemeral: true
                 });

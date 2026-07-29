@@ -5794,7 +5794,7 @@ client.on('messageCreate', async (message) => {
                             anti_newline: 'Too many new lines',
                             character_count: 'Message too long',
                             emoji_spam: 'Too many emojis',
-                            blacklisted_emojis: 'Blacklisted Emojis',
+                            blacklisted_emojis: 'Blacklisted Reactions',
                             word_blacklist: 'Banned Word',
                             anti_links: 'Links detected',
                             invite_links: 'Invite links detected',
@@ -5963,7 +5963,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
         if (blacklistedEmojiRules.length) {
             let blacklistedMatch = false;
             let matchedRuleForLogging = null;
-            let matchedTotalHits = 0;
 
             for (const rule of blacklistedEmojiRules) {
                 const allowedChannels = Array.isArray(rule.allowedChannelIds) ? rule.allowedChannelIds : [];
@@ -5987,24 +5986,9 @@ client.on('messageReactionAdd', async (reaction, user) => {
                 const blockedKeys = new Set(blockedList.map(normalizeEmojiKey).filter(Boolean));
                 if (!reactionEmojiKey || !blockedKeys.has(reactionEmojiKey)) continue;
 
-                const nextCounts = { ...(custom.emojiCounts && typeof custom.emojiCounts === 'object' ? custom.emojiCounts : {}) };
-                nextCounts[reactionEmojiKey] = Math.max(0, Number(nextCounts[reactionEmojiKey]) || 0) + 1;
-                const nextCustom = {
-                    ...custom,
-                    blacklistedEmojis: blockedList.map(String).map(value => value.trim()).filter(Boolean),
-                    emojiCounts: nextCounts,
-                    totalHits: Math.max(0, Number(custom.totalHits) || 0) + 1
-                };
-
-                client.upsertAutomodRule(guild.id, {
-                    ...rule,
-                    custom: nextCustom
-                });
-
                 blacklistedMatch = true;
                 if (!matchedRuleForLogging) {
                     matchedRuleForLogging = rule;
-                    matchedTotalHits = nextCustom.totalHits;
                 }
             }
 
@@ -6027,10 +6011,10 @@ client.on('messageReactionAdd', async (reaction, user) => {
                         const automodEmbed = new EmbedBuilder()
                             .setColor(0xED4245)
                             .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ extension: 'png', size: 256 }) })
-                            .setDescription(`Reaction removed for <@${user.id}> in <#${channel.id}> due to blacklisted emojis.`)
+                            .setDescription(`Reaction removed for <@${user.id}> in <#${channel.id}> due to blacklisted reactions.`)
                             .addFields(
-                                { name: 'Reason', value: 'Blacklisted Emojis', inline: true },
-                                { name: 'Detailed Reason', value: `Blocked emoji: ${getEmojiDisplayFromKey(reactionEmojiKey)}\nTotal blocks: ${matchedTotalHits}`, inline: true }
+                                { name: 'Reason', value: 'Blacklisted Reactions', inline: true },
+                                { name: 'Detailed Reason', value: `Blocked emoji: ${getEmojiDisplayFromKey(reactionEmojiKey)}`, inline: true }
                             )
                             .setFooter({ text: `ID: ${user.id}` })
                             .setTimestamp();
