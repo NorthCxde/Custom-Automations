@@ -1982,12 +1982,19 @@ function buildBlacklistedEmojisModal(rule = null) {
         .setRequired(true)
         .setValue(String(rule?.name || 'Blacklisted Emojis').slice(0, 100));
 
+    const rawEmojiValue = Array.isArray(rule?.custom?.blacklistedEmojis)
+        ? rule.custom.blacklistedEmojis.join('\n').slice(0, 4000)
+        : '';
+
     const emojisInput = new TextInputBuilder()
         .setCustomId(MODAL_BLACKLISTED_EMOJIS_LIST_INPUT_ID)
         .setLabel('Blacklisted Emojis (comma or newline separated)')
         .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true)
-        .setValue(Array.isArray(rule?.custom?.blacklistedEmojis) ? rule.custom.blacklistedEmojis.join('\n').slice(0, 4000) : '');
+        .setRequired(true);
+
+    if (rawEmojiValue) {
+        emojisInput.setValue(rawEmojiValue);
+    }
 
     modal.addComponents(
         new ActionRowBuilder().addComponents(nameInput),
@@ -3436,12 +3443,19 @@ module.exports = {
                     .setRequired(true)
                     .setValue(String(draft.name || '').slice(0, 4000));
 
+                const rawEmojiValue = Array.isArray(draft.custom?.blacklistedEmojis)
+                    ? draft.custom.blacklistedEmojis.join('\n').slice(0, 4000)
+                    : '';
+
                 const emojisInput = new TextInputBuilder()
                     .setCustomId(MODAL_AUTOMOD_TRIGGER_INPUT_ID)
                     .setLabel('Blacklisted Emojis (comma or newline separated)')
                     .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true)
-                    .setValue(Array.isArray(draft.custom?.blacklistedEmojis) ? draft.custom.blacklistedEmojis.join('\n').slice(0, 4000) : '');
+                    .setRequired(true);
+
+                if (rawEmojiValue) {
+                    emojisInput.setValue(rawEmojiValue);
+                }
 
                 modal.addComponents(
                     new ActionRowBuilder().addComponents(nameInput),
