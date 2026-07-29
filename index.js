@@ -4204,6 +4204,7 @@ client.on('interactionCreate', async (interaction) => {
 
         if (interaction.customId.startsWith('manage_automod_modal:')
             || interaction.customId.startsWith('manage_automod_custom_modal:')
+            || interaction.customId.startsWith('manage_blacklisted_emojis_modal:')
             || interaction.customId.startsWith('manage_security_modal:')
             || interaction.customId.startsWith('manage_embeds_modal:')) {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
