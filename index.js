@@ -176,6 +176,30 @@ function setsAreEqual(left, right) {
     return true;
 }
 
+function normalizeEmojiKey(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const customMatch = text.match(/^<a?:[^:>]+:(\d+)>$/);
+    if (customMatch) return `custom:${customMatch[1]}`;
+    if (/^\d{17,20}$/.test(text)) return `custom:${text}`;
+    return `unicode:${text.replace(/\uFE0F/g, '')}`;
+}
+
+function getReactionEmojiKey(emoji) {
+    if (!emoji) return '';
+    if (emoji.id) return `custom:${String(emoji.id)}`;
+    const name = String(emoji.name || '').trim().replace(/\uFE0F/g, '');
+    return name ? `unicode:${name}` : '';
+}
+
+function getEmojiDisplayFromKey(key) {
+    const text = String(key || '').trim();
+    if (!text) return '';
+    if (text.startsWith('custom:')) return `custom emoji ${text.slice('custom:'.length)}`;
+    if (text.startsWith('unicode:')) return text.slice('unicode:'.length);
+    return text;
+}
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -1082,6 +1106,7 @@ client.loadAutomodRules = () => {
         const validTypes = new Set([
             'mentions_cooldown',
             'reaction_cooldown',
+            'blacklisted_emojis',
             'masked_links',
             'invite_links',
             'fast_message_spam',
@@ -5768,6 +5793,7 @@ client.on('messageCreate', async (message) => {
                             anti_newline: 'Too many new lines',
                             character_count: 'Message too long',
                             emoji_spam: 'Too many emojis',
+                            blacklisted_emojis: 'Blacklisted Emojis',
                             word_blacklist: 'Banned Word',
                             anti_links: 'Links detected',
                             invite_links: 'Invite links detected',
@@ -5920,8 +5946,9 @@ client.on('messageReactionAdd', async (reaction, user) => {
         const guildAutomodRules = client.getAutomodRules(guild.id);
         if (!guildAutomodRules.length) return;
 
+        const blacklistedEmojiRules = guildAutomodRules.filter(rule => String(rule?.type || '').trim().toLowerCase() === 'blacklisted_emojis' && rule.enabled !== false);
         const reactionRules = guildAutomodRules.filter(rule => String(rule?.type || '').trim().toLowerCase() === 'reaction_cooldown' && rule.enabled !== false);
-        if (!reactionRules.length) return;
+        if (!blacklistedEmojiRules.length && !reactionRules.length) return;
 
         let member = guild.members.cache.get(user.id) || null;
         if (!member) {
@@ -5930,6 +5957,94 @@ client.on('messageReactionAdd', async (reaction, user) => {
         if (!member) return;
 
         const now = Date.now();
+        const reactionEmojiKey = getReactionEmojiKey(reaction.emoji);
+
+        if (blacklistedEmojiRules.length) {
+            let blacklistedMatch = false;
+            let matchedRuleForLogging = null;
+            let matchedTotalHits = 0;
+
+            for (const rule of blacklistedEmojiRules) {
+                const allowedChannels = Array.isArray(rule.allowedChannelIds) ? rule.allowedChannelIds : [];
+                const ignoredChannels = Array.isArray(rule.ignoredChannelIds) ? rule.ignoredChannelIds : [];
+                const allowedRoles = Array.isArray(rule.allowedRoleIds) ? rule.allowedRoleIds : [];
+                const ignoredRoles = Array.isArray(rule.ignoredRoleIds) ? rule.ignoredRoleIds : [];
+                const allowedUsers = Array.isArray(rule.allowedUserIds) ? rule.allowedUserIds : [];
+                const ignoredUsers = Array.isArray(rule.ignoredUserIds) ? rule.ignoredUserIds : [];
+                const hasAllowedIdentityFilters = allowedRoles.length > 0 || allowedUsers.length > 0;
+                const matchesAllowedRole = allowedRoles.length > 0 && member.roles.cache.some(role => allowedRoles.includes(role.id));
+                const matchesAllowedUser = allowedUsers.includes(user.id);
+
+                if (allowedChannels.length && !allowedChannels.includes(channel.id)) continue;
+                if (ignoredChannels.includes(channel.id)) continue;
+                if (ignoredRoles.length && member.roles.cache.some(role => ignoredRoles.includes(role.id))) continue;
+                if (ignoredUsers.includes(user.id)) continue;
+                if (hasAllowedIdentityFilters && !matchesAllowedRole && !matchesAllowedUser) continue;
+
+                const custom = rule.custom && typeof rule.custom === 'object' ? rule.custom : {};
+                const blockedList = Array.isArray(custom.blacklistedEmojis) ? custom.blacklistedEmojis : [];
+                const blockedKeys = new Set(blockedList.map(normalizeEmojiKey).filter(Boolean));
+                if (!reactionEmojiKey || !blockedKeys.has(reactionEmojiKey)) continue;
+
+                const nextCounts = { ...(custom.emojiCounts && typeof custom.emojiCounts === 'object' ? custom.emojiCounts : {}) };
+                nextCounts[reactionEmojiKey] = Math.max(0, Number(nextCounts[reactionEmojiKey]) || 0) + 1;
+                const nextCustom = {
+                    ...custom,
+                    blacklistedEmojis: blockedList.map(String).map(value => value.trim()).filter(Boolean),
+                    emojiCounts: nextCounts,
+                    totalHits: Math.max(0, Number(custom.totalHits) || 0) + 1
+                };
+
+                client.upsertAutomodRule(guild.id, {
+                    ...rule,
+                    custom: nextCustom
+                });
+
+                blacklistedMatch = true;
+                if (!matchedRuleForLogging) {
+                    matchedRuleForLogging = rule;
+                    matchedTotalHits = nextCustom.totalHits;
+                }
+            }
+
+            if (blacklistedMatch) {
+                await reaction.users.remove(user.id).catch(() => null);
+
+                const logChannelId = String(matchedRuleForLogging?.logChannelId || '').trim();
+                const customResponse = String(matchedRuleForLogging?.customResponse || '').trim();
+
+                if (customResponse) {
+                    await user.send({
+                        embeds: [new EmbedBuilder().setColor(0xED4245).setDescription(customResponse)]
+                    }).catch(() => null);
+                }
+
+                if (logChannelId) {
+                    const logChannel = guild.channels.cache.get(logChannelId)
+                        || await guild.channels.fetch(logChannelId).catch(() => null);
+                    if (logChannel && logChannel.isTextBased()) {
+                        const automodEmbed = new EmbedBuilder()
+                            .setColor(0xED4245)
+                            .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ extension: 'png', size: 256 }) })
+                            .setDescription(`Reaction removed for <@${user.id}> in <#${channel.id}> due to blacklisted emojis.`)
+                            .addFields(
+                                { name: 'Reason', value: 'Blacklisted Emojis', inline: true },
+                                { name: 'Detailed Reason', value: `Blocked emoji: ${getEmojiDisplayFromKey(reactionEmojiKey)}\nTotal blocks: ${matchedTotalHits}`, inline: true }
+                            )
+                            .setFooter({ text: `ID: ${user.id}` })
+                            .setTimestamp();
+
+                        await logChannel.send({
+                            embeds: [automodEmbed],
+                            allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
+                        }).catch(() => null);
+                    }
+                }
+
+                return;
+            }
+        }
+
         // Only process reactions where this user created the emoji reaction on the message
         // (count becomes 1). Clicking an already-existing emoji should be ignored.
         const reactionCount = Number(reaction.count || 0);
