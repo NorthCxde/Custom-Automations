@@ -3958,64 +3958,75 @@ module.exports = {
         }
 
         if (interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_MODAL_PREFIX)) {
-            const draftId = interaction.customId.slice(MANAGE_BLACKLISTED_EMOJIS_MODAL_PREFIX.length);
-            const name = interaction.fields.getTextInputValue(MODAL_BLACKLISTED_EMOJIS_NAME_INPUT_ID).trim();
-            const emojiList = parseBlacklistedEmojiList(interaction.fields.getTextInputValue(MODAL_BLACKLISTED_EMOJIS_LIST_INPUT_ID));
+            try {
+                const draftId = interaction.customId.slice(MANAGE_BLACKLISTED_EMOJIS_MODAL_PREFIX.length);
+                const name = interaction.fields.getTextInputValue(MODAL_BLACKLISTED_EMOJIS_NAME_INPUT_ID).trim();
+                const emojiList = parseBlacklistedEmojiList(interaction.fields.getTextInputValue(MODAL_BLACKLISTED_EMOJIS_LIST_INPUT_ID));
 
-            if (!emojiList.length) {
-                await interaction.reply({ content: 'Add at least one emoji to blacklist.', ephemeral: true });
+                if (!emojiList.length) {
+                    await interaction.reply({ content: 'Add at least one emoji to blacklist.', ephemeral: true });
+                    return true;
+                }
+
+                const existingRule = draftId && draftId !== 'new'
+                    ? client.getAutomodRules(interaction.guild.id).find(rule => rule.id === draftId)
+                    : null;
+
+                if (typeof client.upsertAutomodRule !== 'function') {
+                    await interaction.reply({ content: 'Automod storage is not available in this build.', ephemeral: true });
+                    return true;
+                }
+
+                const generatedId = `am_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+                const payload = buildAutomodRulePayloadFromDraft({
+                    id: existingRule?.id || (draftId && draftId !== 'new' ? draftId : generatedId),
+                    name: name || 'Blacklisted Emojis',
+                    type: 'blacklisted_emojis',
+                    trigger: '',
+                    matchType: 'contains',
+                    actions: ['delete'],
+                    action: 'delete',
+                    timeoutDuration: '10m',
+                    enabled: existingRule ? existingRule.enabled !== false : true,
+                    ignoreAdmins: existingRule ? existingRule.ignoreAdmins !== false : true,
+                    allowedChannelIds: existingRule?.allowedChannelIds || [],
+                    ignoredChannelIds: existingRule?.ignoredChannelIds || [],
+                    allowedRoleIds: existingRule?.allowedRoleIds || [],
+                    ignoredRoleIds: existingRule?.ignoredRoleIds || [],
+                    allowedUserIds: existingRule?.allowedUserIds || [],
+                    ignoredUserIds: existingRule?.ignoredUserIds || [],
+                    custom: {
+                        ...(sanitizeCustomByType('blacklisted_emojis', existingRule?.custom) || {}),
+                        blacklistedEmojis: emojiList,
+                        emojiCounts: existingRule?.custom?.emojiCounts || {},
+                        totalHits: existingRule?.custom?.totalHits || 0
+                    },
+                    logChannelId: String(existingRule?.logChannelId || '').trim(),
+                    customResponse: String(existingRule?.customResponse || '').trim(),
+                    createdBy: String(existingRule?.createdBy || interaction.user.id),
+                    createdAt: String(existingRule?.createdAt || new Date().toISOString())
+                }, interaction.user.id);
+
+                client.upsertAutomodRule(interaction.guild.id, payload);
+
+                await interaction.reply({
+                    ...buildManagePayload(client, interaction.guild.id, {
+                        panel: MANAGE_PANEL_BLACKLISTED_EMOJIS,
+                        selectedAutomodRuleId: payload.id,
+                        notice: existingRule ? 'Updated the selected emoji blacklist.' : 'Created a new emoji blacklist.'
+                    }),
+                    ephemeral: true
+                });
+                return true;
+            } catch (err) {
+                console.error('[Manage Blacklisted Emojis] Modal submit failed:', err);
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp({ content: `Blacklisted emojis save failed: ${err.message || 'Unknown error'}`, ephemeral: true }).catch(() => null);
+                } else {
+                    await interaction.reply({ content: `Blacklisted emojis save failed: ${err.message || 'Unknown error'}`, ephemeral: true }).catch(() => null);
+                }
                 return true;
             }
-
-            const existingRule = draftId && draftId !== 'new'
-                ? client.getAutomodRules(interaction.guild.id).find(rule => rule.id === draftId)
-                : null;
-
-            if (typeof client.upsertAutomodRule !== 'function') {
-                await interaction.reply({ content: 'Automod storage is not available in this build.', ephemeral: true });
-                return true;
-            }
-
-            const payload = buildAutomodRulePayloadFromDraft({
-                id: existingRule?.id || draftId || `am_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`,
-                name: name || 'Blacklisted Emojis',
-                type: 'blacklisted_emojis',
-                trigger: '',
-                matchType: 'contains',
-                actions: ['delete'],
-                action: 'delete',
-                timeoutDuration: '10m',
-                enabled: existingRule ? existingRule.enabled !== false : true,
-                ignoreAdmins: existingRule ? existingRule.ignoreAdmins !== false : true,
-                allowedChannelIds: existingRule?.allowedChannelIds || [],
-                ignoredChannelIds: existingRule?.ignoredChannelIds || [],
-                allowedRoleIds: existingRule?.allowedRoleIds || [],
-                ignoredRoleIds: existingRule?.ignoredRoleIds || [],
-                allowedUserIds: existingRule?.allowedUserIds || [],
-                ignoredUserIds: existingRule?.ignoredUserIds || [],
-                custom: {
-                    ...(sanitizeCustomByType('blacklisted_emojis', existingRule?.custom) || {}),
-                    blacklistedEmojis: emojiList,
-                    emojiCounts: existingRule?.custom?.emojiCounts || {},
-                    totalHits: existingRule?.custom?.totalHits || 0
-                },
-                logChannelId: String(existingRule?.logChannelId || '').trim(),
-                customResponse: String(existingRule?.customResponse || '').trim(),
-                createdBy: String(existingRule?.createdBy || interaction.user.id),
-                createdAt: String(existingRule?.createdAt || new Date().toISOString())
-            }, interaction.user.id);
-
-            client.upsertAutomodRule(interaction.guild.id, payload);
-
-            await interaction.reply({
-                ...buildManagePayload(client, interaction.guild.id, {
-                    panel: MANAGE_PANEL_BLACKLISTED_EMOJIS,
-                    selectedAutomodRuleId: payload.id,
-                    notice: existingRule ? 'Updated the selected emoji blacklist.' : 'Created a new emoji blacklist.'
-                }),
-                ephemeral: true
-            });
-            return true;
         }
 
         if (interaction.customId.startsWith(MANAGE_EMBEDS_MAIN_MODAL_PREFIX)) {
