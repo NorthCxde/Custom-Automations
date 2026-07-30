@@ -6,17 +6,17 @@ const ASSET_DIR = path.join(__dirname, '..', 'assets', 'profilebeta');
 const BACKGROUND_PATH = path.join(ASSET_DIR, 'background.png');
 
 const CARD_LAYOUT = {
-    avatar: { x: 111, y: 98, size: 250 },
-    username: { x: 388, y: 147, maxWidth: 800, size: 64, color: '#DEE2EA' },
-    userId: { x: 388, y: 227, maxWidth: 800, size: 56, color: '#A7ADB9' },
-    badges: { y: 154, size: 48, gap: 10, offsetAfterName: 12 }
+    avatar: { x: 111, y: 73, size: 250 },
+    username: { x: 388, y: 122, maxWidth: 800, size: 64, color: '#DEE2EA' },
+    userId: { x: 388, y: 202, maxWidth: 800, size: 56, color: '#A7ADB9' },
+    badges: { size: 48, gap: 10, offsetAfterName: 12 }
 };
 
 const GRID_LAYOUT = {
     leftPadding: 72,
     rightPadding: 72,
     contentGap: 28,
-    headerBottomY: 315
+    headerBottomY: 290
 };
 
 // Output dimensions — match new background aspect ratio (1856x841 → ~940x426)
