@@ -19,10 +19,11 @@ const GRID_LAYOUT = {
     headerBottomY: 315
 };
 
-// Scale the final output down so it matches the compact reference card size.
-// 1920x1080 source → 940x529 output (same aspect ratio, Discord-friendly size)
+// Output dimensions — short compact card like the reference.
+// Source is 1920x1080; we crop to just the top 560px of source then scale to output.
 const OUTPUT_WIDTH = 940;
-const OUTPUT_HEIGHT = 529;
+const OUTPUT_HEIGHT = 275;
+const SOURCE_CROP_HEIGHT = 560; // how many source pixels tall to include before scaling
 
 const BADGE_CONFIG = {
     OWNER: {
@@ -218,10 +219,14 @@ async function renderProfileBetaCard({ user, member, debugGrid = false }) {
         });
     }
 
-    // Scale down to compact output size
+    // Crop to top SOURCE_CROP_HEIGHT px of source then scale to compact output size
     const outputCanvas = createCanvas(OUTPUT_WIDTH, OUTPUT_HEIGHT);
     const outputCtx = outputCanvas.getContext('2d');
-    outputCtx.drawImage(canvas, 0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+    outputCtx.drawImage(
+        canvas,
+        0, 0, canvas.width, SOURCE_CROP_HEIGHT,
+        0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT
+    );
 
     if (typeof outputCanvas.encode === 'function') {
         return await outputCanvas.encode('png');
