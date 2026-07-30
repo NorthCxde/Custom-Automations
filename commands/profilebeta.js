@@ -7,9 +7,16 @@ const BACKGROUND_PATH = path.join(ASSET_DIR, 'background.png');
 
 const CARD_LAYOUT = {
     avatar: { x: 111, y: 98, size: 250 },
-    username: { x: 330, y: 147, maxWidth: 860, size: 64, color: '#DEE2EA' },
-    userId: { x: 330, y: 227, maxWidth: 860, size: 56, color: '#A7ADB9' },
-    badges: { y: 154, size: 48, gap: 10, offsetAfterName: 14 }
+    username: { x: 388, y: 147, maxWidth: 800, size: 64, color: '#DEE2EA' },
+    userId: { x: 388, y: 227, maxWidth: 800, size: 56, color: '#A7ADB9' },
+    badges: { y: 154, size: 48, gap: 10, offsetAfterName: 12 }
+};
+
+const GRID_LAYOUT = {
+    leftPadding: 72,
+    rightPadding: 72,
+    contentGap: 28,
+    headerBottomY: 315
 };
 
 const BADGE_CONFIG = {
@@ -103,7 +110,38 @@ function drawCircularImage(ctx, image, x, y, size) {
     ctx.restore();
 }
 
-async function renderProfileBetaCard({ user, member }) {
+function drawDebugGuides(ctx, canvas, zones) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0, 255, 200, 0.5)';
+    ctx.lineWidth = 2;
+
+    ctx.strokeRect(zones.avatar.x, zones.avatar.y, zones.avatar.w, zones.avatar.h);
+    ctx.strokeRect(zones.text.x, zones.text.y, zones.text.w, zones.text.h);
+
+    ctx.strokeStyle = 'rgba(255, 200, 0, 0.45)';
+    ctx.beginPath();
+    ctx.moveTo(0, GRID_LAYOUT.headerBottomY);
+    ctx.lineTo(canvas.width, GRID_LAYOUT.headerBottomY);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(130, 160, 255, 0.25)';
+    for (let x = 0; x <= canvas.width; x += 100) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= canvas.height; y += 100) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+async function renderProfileBetaCard({ user, member, debugGrid = false }) {
     const background = await loadBackgroundImage();
     const canvas = createCanvas(background.width, background.height);
     const ctx = canvas.getContext('2d');
@@ -114,29 +152,54 @@ async function renderProfileBetaCard({ user, member }) {
     const avatarImage = await loadImage(avatarBuffer);
     drawCircularImage(ctx, avatarImage, CARD_LAYOUT.avatar.x, CARD_LAYOUT.avatar.y, CARD_LAYOUT.avatar.size);
 
+    const textStartX = Math.max(
+        CARD_LAYOUT.username.x,
+        CARD_LAYOUT.avatar.x + CARD_LAYOUT.avatar.size + GRID_LAYOUT.contentGap
+    );
+    const textRightX = canvas.width - GRID_LAYOUT.rightPadding;
+    const textMaxWidth = Math.max(120, Math.min(CARD_LAYOUT.username.maxWidth, textRightX - textStartX));
+
     const displayName = String(member?.displayName || user.username || 'Unknown').trim();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillStyle = CARD_LAYOUT.username.color;
     ctx.font = `700 ${CARD_LAYOUT.username.size}px sans-serif`;
-    ctx.fillText(displayName, CARD_LAYOUT.username.x, CARD_LAYOUT.username.y, CARD_LAYOUT.username.maxWidth);
+    ctx.fillText(displayName, textStartX, CARD_LAYOUT.username.y, textMaxWidth);
 
-    const nameWidth = ctx.measureText(displayName).width;
-    let badgeX = CARD_LAYOUT.username.x + Math.max(0, Math.round(nameWidth)) + CARD_LAYOUT.badges.offsetAfterName;
+    const nameWidth = Math.min(ctx.measureText(displayName).width, textMaxWidth);
+    let badgeX = textStartX + Math.max(0, Math.round(nameWidth)) + CARD_LAYOUT.badges.offsetAfterName;
     const badgeY = CARD_LAYOUT.badges.y;
     const badgeSize = CARD_LAYOUT.badges.size;
     const badgeFiles = getBadgeFileNames(member);
 
     for (const badgeFile of badgeFiles) {
         const badge = await loadBadgeImage(badgeFile);
-        if (badgeX + badgeSize > canvas.width - 24) break;
+        if (badgeX + badgeSize > textRightX) break;
         ctx.drawImage(badge, badgeX, badgeY, badgeSize, badgeSize);
         badgeX += badgeSize + CARD_LAYOUT.badges.gap;
     }
 
     ctx.fillStyle = CARD_LAYOUT.userId.color;
     ctx.font = `700 ${CARD_LAYOUT.userId.size}px sans-serif`;
-    ctx.fillText(`ID: ${user.id}`, CARD_LAYOUT.userId.x, CARD_LAYOUT.userId.y, CARD_LAYOUT.userId.maxWidth);
+    const idMaxWidth = Math.max(120, Math.min(CARD_LAYOUT.userId.maxWidth, textRightX - textStartX));
+    ctx.fillText(`ID: ${user.id}`, textStartX, CARD_LAYOUT.userId.y, idMaxWidth);
+
+    if (debugGrid) {
+        drawDebugGuides(ctx, canvas, {
+            avatar: {
+                x: CARD_LAYOUT.avatar.x,
+                y: CARD_LAYOUT.avatar.y,
+                w: CARD_LAYOUT.avatar.size,
+                h: CARD_LAYOUT.avatar.size
+            },
+            text: {
+                x: textStartX,
+                y: CARD_LAYOUT.username.y,
+                w: textMaxWidth,
+                h: GRID_LAYOUT.headerBottomY - CARD_LAYOUT.username.y
+            }
+        });
+    }
 
     if (typeof canvas.encode === 'function') {
         return await canvas.encode('png');
@@ -158,6 +221,12 @@ module.exports = {
                 .setName('user')
                 .setDescription('User to view (defaults to yourself)')
                 .setRequired(false)
+        )
+        .addBooleanOption(option =>
+            option
+                .setName('debuggrid')
+                .setDescription('Show debug guides for layout tuning')
+                .setRequired(false)
         ),
     contextData: null,
     async executeInteraction({ client, interaction }) {
@@ -166,10 +235,11 @@ module.exports = {
         }
 
         const user = interaction.options.getUser('user') || interaction.user;
+        const debugGrid = interaction.options.getBoolean('debuggrid') || false;
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
 
         try {
-            const cardBuffer = await renderProfileBetaCard({ user, member });
+            const cardBuffer = await renderProfileBetaCard({ user, member, debugGrid });
             const file = new AttachmentBuilder(cardBuffer, { name: 'profilebeta-card.png' });
             return interaction.reply({ files: [file], flags: MessageFlags.Ephemeral });
         } catch (err) {
