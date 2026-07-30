@@ -7,9 +7,9 @@ const BACKGROUND_PATH = path.join(ASSET_DIR, 'background.png');
 
 const CARD_LAYOUT = {
     avatar: { x: 111, y: 98, size: 250 },
-    username: { x: 72, y: 147, maxWidth: 1600, size: 64, color: '#DEE2EA' },
-    userId: { x: -110, y: 227, maxWidth: 1600, size: 56, color: '#A7ADB9' },
-    badges: { y: 149, size: 54, gap: 12, offsetAfterName: 16 }
+    username: { x: 330, y: 147, maxWidth: 860, size: 64, color: '#DEE2EA' },
+    userId: { x: 330, y: 227, maxWidth: 860, size: 56, color: '#A7ADB9' },
+    badges: { y: 154, size: 48, gap: 10, offsetAfterName: 14 }
 };
 
 const BADGE_CONFIG = {
