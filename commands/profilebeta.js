@@ -9,6 +9,7 @@ const CARD_LAYOUT = {
     avatar: { x: 111, y: 65, size: 250 },
     username: { x: 388, y: 114, maxWidth: 800, size: 64, color: '#DEE2EA' },
     userId: { x: 388, y: 194, maxWidth: 800, size: 56, color: '#A7ADB9' },
+    points: { x: 388, y: 268, maxWidth: 800, size: 48, labelColor: '#A7ADB9', valueColor: '#6B7280' },
     badges: { size: 48, gap: 10, offsetAfterName: 12 }
 };
 
@@ -201,6 +202,16 @@ async function renderProfileBetaCard({ user, member, debugGrid = false }) {
     ctx.font = `700 ${CARD_LAYOUT.userId.size}px sans-serif`;
     const idMaxWidth = Math.max(120, Math.min(CARD_LAYOUT.userId.maxWidth, textRightX - textStartX));
     ctx.fillText(`ID: ${user.id}`, textStartX, CARD_LAYOUT.userId.y, idMaxWidth);
+
+    // Points line
+    const pointsMaxWidth = Math.max(120, Math.min(CARD_LAYOUT.points.maxWidth, textRightX - textStartX));
+    ctx.font = `700 ${CARD_LAYOUT.points.size}px sans-serif`;
+    ctx.fillStyle = CARD_LAYOUT.points.labelColor;
+    const pointsLabel = 'Points: ';
+    const pointsLabelWidth = ctx.measureText(pointsLabel).width;
+    ctx.fillText(pointsLabel, textStartX, CARD_LAYOUT.points.y, pointsMaxWidth);
+    ctx.fillStyle = CARD_LAYOUT.points.valueColor;
+    ctx.fillText('Coming Soon', textStartX + pointsLabelWidth, CARD_LAYOUT.points.y, pointsMaxWidth - pointsLabelWidth);
 
     if (debugGrid) {
         drawDebugGuides(ctx, canvas, {
