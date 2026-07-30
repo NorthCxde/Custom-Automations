@@ -19,11 +19,9 @@ const GRID_LAYOUT = {
     headerBottomY: 315
 };
 
-// Output dimensions — short compact card like the reference.
-// Source is 1920x1080; we crop to just the top 560px of source then scale to output.
+// Output dimensions — match new background aspect ratio (1856x841 → ~940x426)
 const OUTPUT_WIDTH = 940;
-const OUTPUT_HEIGHT = 275;
-const SOURCE_CROP_HEIGHT = 560; // how many source pixels tall to include before scaling
+const OUTPUT_HEIGHT = Math.round(940 * (841 / 1856)); // ≈ 426
 
 const BADGE_CONFIG = {
     OWNER: {
@@ -62,6 +60,7 @@ const BADGE_CONFIG = {
 
 const badgeCache = new Map();
 let cachedBackgroundImage = null;
+let cachedBackgroundPath = null;
 
 async function fetchImageBuffer(url) {
     const response = await fetch(url);
@@ -73,8 +72,9 @@ async function fetchImageBuffer(url) {
 }
 
 async function loadBackgroundImage() {
-    if (!cachedBackgroundImage) {
+    if (!cachedBackgroundImage || cachedBackgroundPath !== BACKGROUND_PATH) {
         cachedBackgroundImage = await loadImage(BACKGROUND_PATH);
+        cachedBackgroundPath = BACKGROUND_PATH;
     }
     return cachedBackgroundImage;
 }
@@ -219,14 +219,10 @@ async function renderProfileBetaCard({ user, member, debugGrid = false }) {
         });
     }
 
-    // Crop to top SOURCE_CROP_HEIGHT px of source then scale to compact output size
+    // Scale full source canvas down to compact output size
     const outputCanvas = createCanvas(OUTPUT_WIDTH, OUTPUT_HEIGHT);
     const outputCtx = outputCanvas.getContext('2d');
-    outputCtx.drawImage(
-        canvas,
-        0, 0, canvas.width, SOURCE_CROP_HEIGHT,
-        0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT
-    );
+    outputCtx.drawImage(canvas, 0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
 
     if (typeof outputCanvas.encode === 'function') {
         return await outputCanvas.encode('png');
