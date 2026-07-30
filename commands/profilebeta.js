@@ -103,7 +103,7 @@ function getBadgeFileNames(member) {
     return files.slice(0, 8);
 }
 
-function drawCircularImage(ctx, image, x, y, size) {
+function drawCircularImage(ctx, image, x, y, size, outlineColor = null, outlineWidth = 6) {
     const radius = size / 2;
     const centerX = x + radius;
     const centerY = y + radius;
@@ -115,6 +115,17 @@ function drawCircularImage(ctx, image, x, y, size) {
     ctx.clip();
     ctx.drawImage(image, x, y, size, size);
     ctx.restore();
+
+    if (outlineColor) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius + outlineWidth / 2, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.strokeStyle = outlineColor;
+        ctx.lineWidth = outlineWidth;
+        ctx.stroke();
+        ctx.restore();
+    }
 }
 
 function drawDebugGuides(ctx, canvas, zones) {
@@ -169,7 +180,7 @@ async function renderProfileBetaCard({ user, member, debugGrid = false }) {
 
     const avatarBuffer = await fetchImageBuffer(user.displayAvatarURL({ extension: 'png', size: 512 }));
     const avatarImage = await loadImage(avatarBuffer);
-    drawCircularImage(ctx, avatarImage, CARD_LAYOUT.avatar.x, CARD_LAYOUT.avatar.y, CARD_LAYOUT.avatar.size);
+    drawCircularImage(ctx, avatarImage, CARD_LAYOUT.avatar.x, CARD_LAYOUT.avatar.y, CARD_LAYOUT.avatar.size, '#141414', 18);
 
     const textStartX = Math.max(
         CARD_LAYOUT.username.x,
