@@ -19,6 +19,11 @@ const GRID_LAYOUT = {
     headerBottomY: 315
 };
 
+// Scale the final output down so it matches the compact reference card size.
+// 1920x1080 source → 940x529 output (same aspect ratio, Discord-friendly size)
+const OUTPUT_WIDTH = 940;
+const OUTPUT_HEIGHT = 529;
+
 const BADGE_CONFIG = {
     OWNER: {
         roleIds: ['944796064207220801'],
@@ -213,11 +218,16 @@ async function renderProfileBetaCard({ user, member, debugGrid = false }) {
         });
     }
 
-    if (typeof canvas.encode === 'function') {
-        return await canvas.encode('png');
+    // Scale down to compact output size
+    const outputCanvas = createCanvas(OUTPUT_WIDTH, OUTPUT_HEIGHT);
+    const outputCtx = outputCanvas.getContext('2d');
+    outputCtx.drawImage(canvas, 0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+
+    if (typeof outputCanvas.encode === 'function') {
+        return await outputCanvas.encode('png');
     }
-    if (typeof canvas.toBuffer === 'function') {
-        return canvas.toBuffer('image/png');
+    if (typeof outputCanvas.toBuffer === 'function') {
+        return outputCanvas.toBuffer('image/png');
     }
     throw new Error('No supported canvas buffer export method found.');
 }
