@@ -141,6 +141,18 @@ function drawDebugGuides(ctx, canvas, zones) {
     ctx.restore();
 }
 
+function drawContainedImage(ctx, image, x, y, boxSize) {
+    const sourceWidth = Number(image.width) || boxSize;
+    const sourceHeight = Number(image.height) || boxSize;
+    const scale = Math.min(boxSize / sourceWidth, boxSize / sourceHeight);
+    const drawWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+    const drawX = x + Math.floor((boxSize - drawWidth) / 2);
+    const drawY = y + Math.floor((boxSize - drawHeight) / 2);
+
+    ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+}
+
 async function renderProfileBetaCard({ user, member, debugGrid = false }) {
     const background = await loadBackgroundImage();
     const canvas = createCanvas(background.width, background.height);
@@ -168,14 +180,14 @@ async function renderProfileBetaCard({ user, member, debugGrid = false }) {
 
     const nameWidth = Math.min(ctx.measureText(displayName).width, textMaxWidth);
     let badgeX = textStartX + Math.max(0, Math.round(nameWidth)) + CARD_LAYOUT.badges.offsetAfterName;
-    const badgeY = CARD_LAYOUT.badges.y;
     const badgeSize = CARD_LAYOUT.badges.size;
+    const badgeY = CARD_LAYOUT.username.y + Math.floor((CARD_LAYOUT.username.size - badgeSize) / 2);
     const badgeFiles = getBadgeFileNames(member);
 
     for (const badgeFile of badgeFiles) {
         const badge = await loadBadgeImage(badgeFile);
         if (badgeX + badgeSize > textRightX) break;
-        ctx.drawImage(badge, badgeX, badgeY, badgeSize, badgeSize);
+        drawContainedImage(ctx, badge, badgeX, badgeY, badgeSize);
         badgeX += badgeSize + CARD_LAYOUT.badges.gap;
     }
 
