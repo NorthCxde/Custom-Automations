@@ -215,8 +215,7 @@ module.exports = {
             const success = results.filter(result => result.success).map(result => `<@${result.targetId}>`);
             const failures = results.filter(result => !result.success);
 
-            if (success.length > 0 && client.sendBanSticker) {
-                await client.sendBanSticker(message.channel);
+            if (success.length > 0) {
                 const firstSuccess = results.find(result => result.success);
                 const cardText = success.length === 1
                     ? `${firstSuccess?.username || 'User'} was banned.`
@@ -306,9 +305,7 @@ module.exports = {
         const mentions = results.map(r => `<@${r.user.id}>`).join(', ');
         const reply = [];
 
-        if (successCount > 0 && client.sendBanSticker) {
-            await client.sendBanSticker(interaction.channel || interaction.channelId);
-
+        if (successCount > 0) {
             const firstSuccess = results.find(result => result.success);
             const cardText = successCount === 1 && firstSuccess
                 ? `${firstSuccess.user.username} was banned.`

@@ -138,7 +138,7 @@ const INFRACTION_RULES = {
         ]
     },
     instigation: {
-        label: 'Instigation',
+        label: 'Instigation/Ragebait',
         steps: [
             { type: 'timeout', duration: '3h' },
             { type: 'timeout', duration: '6h' },
@@ -192,7 +192,7 @@ const RULE_CHOICES = [
     { name: 'NSFW or Explicit Messages', value: 'nsfw_explicit_messages' },
     { name: 'Direct Slurs', value: 'direct_slurs' },
     { name: 'Harassment/Disrespect', value: 'harassment_disrespect' },
-    { name: 'Instigation', value: 'instigation' },
+    { name: 'Instigation/Ragebait', value: 'instigation' },
     { name: 'Promotion', value: 'promotion' },
     { name: 'Controversial Topics', value: 'controversial_topics' },
     { name: 'Roblox TOS Violation', value: 'roblox_tos_violation' },
@@ -457,7 +457,6 @@ function getRequiredPermission(action) {
 async function applyDecisionAction({ client, guild, decision, action, durationRaw, moderator, sourceChannel = null }) {
     const results = [];
     let durationMs = null;
-    let stickerSentForBatch = false;
 
     if (action === 'mute' || action === 'temp_ban') {
         durationMs = parseDuration(durationRaw || '');
@@ -542,11 +541,6 @@ async function applyDecisionAction({ client, guild, decision, action, durationRa
                     reason: action === 'temp_ban' ? `${reason} (Duration: ${durationRaw})` : reason
                 });
                 await guild.members.ban(userId, { reason });
-
-                if (!stickerSentForBatch && client.sendBanSticker) {
-                    await client.sendBanSticker(sourceChannel);
-                    stickerSentForBatch = true;
-                }
 
                 if (action === 'temp_ban') {
                     scheduleTempUnban(client, guild.id, userId, userTag, Date.now() + durationMs);

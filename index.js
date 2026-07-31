@@ -285,7 +285,6 @@ client.commandAccessLevels = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.hideCommandState = new Map(); // per-guild set of userIds for deleting their moderation prefix command messages
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
-client.banStickerId = '1480253710969082108';
 client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
 client.trelloModeratorLevelPermRoleNames = new Set(STATIC_MODERATOR_LEVEL_PERM_ROLE_NAMES.map(name => String(name).toLowerCase()));
 client.publicCommandNames = new Set(['profile', 'avatar', 'remind']);
@@ -580,58 +579,6 @@ client.sendActionStatusCard = async (channelOrId, text) => {
         return true;
     } catch (error) {
         console.error('Failed to send action status card:', error);
-        return false;
-    }
-};
-
-client.sendBanSticker = async (channelOrId) => {
-    try {
-        const stickerId = String(client.banStickerId || '').trim();
-        if (!stickerId) return false;
-
-        let channel = channelOrId || null;
-        if (typeof channel === 'string') {
-            channel = await client.channels.fetch(channel).catch(() => null);
-        } else if (channel && typeof channel.send !== 'function' && channel.id) {
-            channel = await client.channels.fetch(channel.id).catch(() => null);
-        }
-
-        const channelId = channel?.id || (typeof channelOrId === 'string' ? channelOrId : channelOrId?.id);
-
-        if (channel && typeof channel.send === 'function') {
-            await channel.send({
-                stickers: [stickerId],
-                allowedMentions: {
-                    parse: [],
-                    users: [],
-                    roles: [],
-                    repliedUser: false
-                }
-            });
-            console.log('sendBanSticker success via channel.send:', { channelId: channel.id, stickerId });
-            return true;
-        }
-
-        if (channelId) {
-            await client.rest.post(Routes.channelMessages(channelId), {
-                body: {
-                    stickers: [stickerId],
-                    allowed_mentions: {
-                        parse: [],
-                        users: [],
-                        roles: [],
-                        replied_user: false
-                    }
-                }
-            });
-            console.log('sendBanSticker success via REST fallback:', { channelId, stickerId });
-            return true;
-        }
-
-        console.warn('sendBanSticker skipped: no resolvable channel or channelId.');
-        return false;
-    } catch (error) {
-        console.error('Failed to send ban sticker:', error);
         return false;
     }
 };
@@ -5318,10 +5265,6 @@ client.on('interactionCreate', async (interaction) => {
             const successCount = results.filter(r => r.success).length;
             const failCount = results.length - successCount;
             const names = results.map(r => `${r.success ? `<@${r.user.id}>` : `${r.user.tag}`}`).join(', ');
-
-            if (selectedAction === 'ban' && successCount > 0 && client.sendBanSticker) {
-                await client.sendBanSticker(interaction.channel);
-            }
 
             return interaction.reply({ content: `${selectedAction === 'ban' ? 'Ban' : 'Kick'} complete: ${successCount} succeeded, ${failCount} failed. ${names}`, ephemeral: true });
         }
