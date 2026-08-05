@@ -57,18 +57,30 @@ module.exports = {
             const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
             let deleted = 0;
             let scanned = 0;
-            let lastId = null;
+            let beforeId = undefined;
 
             while (true) {
                 const fetchOptions = { limit: 100 };
-                if (lastId) fetchOptions.before = lastId;
+                if (beforeId) fetchOptions.before = beforeId;
 
-                const messages = await channel.messages.fetch(fetchOptions).catch(() => null);
+                let messages;
+                try {
+                    messages = await channel.messages.fetch(fetchOptions);
+                } catch {
+                    break;
+                }
+
                 if (!messages || messages.size === 0) break;
 
                 const arr = [...messages.values()];
                 scanned += arr.length;
-                lastId = arr[arr.length - 1].id;
+
+                // Explicitly find oldest message — avoids relying on Collection sort order
+                let oldestMsg = arr[0];
+                for (const m of arr) {
+                    if (m.createdTimestamp < oldestMsg.createdTimestamp) oldestMsg = m;
+                }
+                beforeId = oldestMsg.id;
 
                 const mine = arr.filter(m => m.author.id === OWNER_ID && m.createdTimestamp >= cutoff);
 
@@ -76,11 +88,14 @@ module.exports = {
                     const bulk = await channel.bulkDelete(mine, true).catch(() => null);
                     if (bulk) deleted += bulk.size;
                 } else if (mine.length === 1) {
-                    const success = await mine[0].delete().catch(() => null);
-                    if (success) deleted += 1;
+                    await mine[0].delete().catch(() => null);
+                    deleted++;
                 }
 
-                if (arr[arr.length - 1].createdTimestamp < cutoff || messages.size < 100) break;
+                if (oldestMsg.createdTimestamp < cutoff || messages.size < 100) break;
+
+                // Avoid hitting rate limits on large channels
+                await new Promise(r => setTimeout(r, 250));
             }
 
             await interaction.editReply({
