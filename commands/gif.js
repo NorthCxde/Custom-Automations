@@ -5,6 +5,13 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+let sharp;
+try {
+    sharp = require('sharp');
+} catch {
+    sharp = null;
+}
+
 async function downloadImage(url) {
     return new Promise((resolve, reject) => {
         const protocol = url.startsWith('https') ? https : http;
@@ -26,17 +33,17 @@ async function downloadImage(url) {
 
 async function convertToGif(inputPath, outputPath) {
     try {
-        const sharp = require('sharp');
-        const metadata = await sharp(inputPath).metadata();
+        if (!sharp) {
+            throw new Error('Sharp library not installed. Run: npm install sharp');
+        }
         
-        // Convert to GIF with minimal optimization
         await sharp(inputPath)
             .gif({ effort: 7 })
             .toFile(outputPath);
         
         return true;
     } catch (err) {
-        console.error('Sharp conversion error:', err);
+        console.error('GIF conversion error:', err);
         return false;
     }
 }
@@ -71,6 +78,10 @@ module.exports = {
 
         if (!attachment && !link) {
             return interaction.reply({ content: 'Please provide either an image attachment or a URL.', ephemeral: true });
+        }
+
+        if (!sharp) {
+            return interaction.reply({ content: 'Sharp library is not installed on the server. Contact the bot admin.', ephemeral: true });
         }
 
         await interaction.deferReply({ ephemeral: ephemeral });
