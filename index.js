@@ -5838,7 +5838,7 @@ client.on('messageCreate', async (message) => {
     const command = client.commands.get(commandName);
     if (!command) return;
 
-    const moderationPrefixCommands = new Set(['mute', 'ban', 'unmute', 'unban', 'purge', 'banevaders']);
+    const moderationPrefixCommands = new Set(['mute', 'ban', 'unmute', 'unban', 'purge']);
     const shouldHideModerationCommand = client.getHideCommandState(message.guild.id, message.author.id)
         && moderationPrefixCommands.has(commandName);
 
