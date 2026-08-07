@@ -4278,14 +4278,6 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit()) {
-        if (interaction.customId.startsWith('afk_leave_message_modal:')) {
-            const afkCommand = client.slashCommands.get('afk');
-            if (afkCommand && typeof afkCommand.handleModalSubmit === 'function') {
-                const handled = await afkCommand.handleModalSubmit({ client, interaction });
-                if (handled) return;
-            }
-        }
-
         if (interaction.customId.startsWith('remind_edit_modal:')) {
             const remindCommand = client.slashCommands.get('remind');
             if (remindCommand && typeof remindCommand.handleModalSubmit === 'function') {
@@ -4459,7 +4451,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
-        if (interaction.customId.startsWith('afk_leave_message:') || interaction.customId.startsWith('afk_notify_me:')) {
+        if (interaction.customId.startsWith('afk_notify_me:')) {
             const afkCommand = client.slashCommands.get('afk');
             if (afkCommand && typeof afkCommand.handleButton === 'function') {
                 const handled = await afkCommand.handleButton({ client, interaction });
@@ -5677,17 +5669,7 @@ client.on('messageCreate', async (message) => {
                         await member.setNickname(nickname, 'AFK removed after user activity').catch(() => null);
                     }
 
-                    await message.channel.send({
-                        content: `Welcome back <@${message.author.id}>, I removed your AFK`,
-                        allowedMentions: { parse: [], users: [message.author.id], roles: [], repliedUser: false }
-                    }).catch(() => null);
-
-                    if (Array.isArray(removedAfk.leaveMessages) && removedAfk.leaveMessages.length) {
-                        const summaryLines = removedAfk.leaveMessages.slice(0, 10).map(entry => `- ${entry.fromTag || entry.fromUserId}: ${entry.content}`);
-                        await message.author.send({
-                            content: `While you were AFK in ${message.guild.name}, people left messages for you:\n${summaryLines.join('\n')}`
-                        }).catch(() => null);
-                    }
+                    await message.author.send(`Welcome back in ${message.guild.name}, I removed your AFK`).catch(() => null);
 
                     const notified = new Set();
                     for (const subscriber of removedAfk.notifyUsers || []) {
@@ -5695,14 +5677,11 @@ client.on('messageCreate', async (message) => {
                         if (notified.has(notifyKey)) continue;
                         notified.add(notifyKey);
 
-                        const channel = message.guild.channels.cache.get(subscriber.channelId)
-                            || await message.guild.channels.fetch(subscriber.channelId).catch(() => null);
-                        if (!channel || !channel.isTextBased()) continue;
+                        const subscriberUser = client.users.cache.get(subscriber.userId)
+                            || await client.users.fetch(subscriber.userId).catch(() => null);
+                        if (!subscriberUser) continue;
 
-                        await channel.send({
-                            content: `<@${subscriber.userId}>, <@${message.author.id}> is back online.`,
-                            allowedMentions: { parse: [], users: [subscriber.userId, message.author.id], roles: [], repliedUser: false }
-                        }).catch(() => null);
+                        await subscriberUser.send(`${message.member?.displayName || message.author.username} is back online.`).catch(() => null);
                     }
                 }
             }
@@ -5723,16 +5702,12 @@ client.on('messageCreate', async (message) => {
             const displayName = stripAfkPrefix(mentionedMember?.displayName || firstMention.user.globalName || firstMention.user.username || 'User');
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
-                    .setCustomId(`afk_leave_message:${message.guild.id}:${firstMention.user.id}`)
-                    .setLabel('Leave a message')
-                    .setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder()
                     .setCustomId(`afk_notify_me:${message.guild.id}:${firstMention.user.id}`)
                     .setLabel('Tell me when they are back')
                     .setStyle(ButtonStyle.Secondary)
             );
 
-            await message.channel.send({
+            await message.author.send({
                 content: `${displayName} is AFK: ${firstMention.state.message} - ${formatAfkElapsed(firstMention.state.setAt)}`,
                 components: [row],
                 allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }

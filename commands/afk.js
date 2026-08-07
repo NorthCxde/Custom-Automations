@@ -1,10 +1,4 @@
-const {
-    SlashCommandBuilder,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
-    ActionRowBuilder
-} = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 
 const AFK_RETURN_GRACE_MS = 30_000;
 
@@ -91,17 +85,13 @@ module.exports = {
 
         return interaction.reply({
             content: `<@${interaction.user.id}> I set your AFK: ${afkMessage}`,
-            allowedMentions: { parse: [], users: [interaction.user.id], roles: [], repliedUser: false }
+            allowedMentions: { parse: [], users: [interaction.user.id], roles: [], repliedUser: false },
+            ephemeral: true
         });
     },
     async handleButton({ client, interaction }) {
-        if (!interaction.customId.startsWith('afk_leave_message:') && !interaction.customId.startsWith('afk_notify_me:')) {
+        if (!interaction.customId.startsWith('afk_notify_me:')) {
             return false;
-        }
-
-        if (!interaction.guild) {
-            await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
-            return true;
         }
 
         const [, guildId, userId] = interaction.customId.split(':');
@@ -116,62 +106,16 @@ module.exports = {
             return true;
         }
 
-        if (interaction.customId.startsWith('afk_notify_me:')) {
-            if (interaction.user.id === userId) {
-                await interaction.reply({ content: 'You are the AFK user.', ephemeral: true });
-                return true;
-            }
-
-            const added = client.addAfkNotificationSubscriber(guildId, userId, interaction.user.id, interaction.channelId);
-            await interaction.reply({
-                content: added ? 'I will tell you when they are back.' : 'You are already subscribed for their return.',
-                ephemeral: true
-            });
+        if (interaction.user.id === userId) {
+            await interaction.reply({ content: 'You are the AFK user.', ephemeral: true });
             return true;
         }
 
-        const modal = new ModalBuilder()
-            .setCustomId(`afk_leave_message_modal:${guildId}:${userId}`)
-            .setTitle('Leave a message');
-
-        const input = new TextInputBuilder()
-            .setCustomId('message')
-            .setLabel('Message')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true)
-            .setMaxLength(300);
-
-        modal.addComponents(new ActionRowBuilder().addComponents(input));
-        await interaction.showModal(modal);
-        return true;
-    },
-    async handleModalSubmit({ client, interaction }) {
-        if (!interaction.customId.startsWith('afk_leave_message_modal:')) {
-            return false;
-        }
-
-        const [, guildId, userId] = interaction.customId.split(':');
-        const state = client.getAfkState(guildId, userId);
-        if (!state) {
-            await interaction.reply({ content: 'That user is no longer AFK.', ephemeral: true });
-            return true;
-        }
-
-        const content = String(interaction.fields.getTextInputValue('message') || '').trim();
-        if (!content) {
-            await interaction.reply({ content: 'Please enter a message.', ephemeral: true });
-            return true;
-        }
-
-        client.addAfkLeaveMessage(guildId, userId, {
-            fromUserId: interaction.user.id,
-            fromTag: interaction.user.tag,
-            channelId: interaction.channelId,
-            content,
-            createdAt: Date.now()
+        const added = client.addAfkNotificationSubscriber(guildId, userId, interaction.user.id, interaction.channelId || 'dm');
+        await interaction.reply({
+            content: added ? 'I will tell you when they are back.' : 'You are already subscribed for their return.',
+            ephemeral: true
         });
-
-        await interaction.reply({ content: 'Your message has been saved for when they return.', ephemeral: true });
         return true;
     }
 };
