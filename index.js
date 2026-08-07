@@ -5700,15 +5700,16 @@ client.on('messageCreate', async (message) => {
             const mentionedMember = message.guild.members.cache.get(firstMention.user.id)
                 || await message.guild.members.fetch(firstMention.user.id).catch(() => null);
             const displayName = stripAfkPrefix(mentionedMember?.displayName || firstMention.user.globalName || firstMention.user.username || 'User');
+            const buttonLabel = `Tell me when ${displayName} is back`;
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId(`afk_notify_me:${message.guild.id}:${firstMention.user.id}`)
-                    .setLabel('Tell me when they are back')
+                    .setLabel(buttonLabel.length <= 80 ? buttonLabel : `Tell me when ${displayName.slice(0, 59)}... is back`)
                     .setStyle(ButtonStyle.Secondary)
             );
 
             await message.channel.send({
-                content: `${displayName} is AFK: ${firstMention.state.message} - ${formatAfkElapsed(firstMention.state.setAt)}`,
+                content: `${displayName} is AFK: **${firstMention.state.message.replace(/\*/g, '\\*')}** - ${formatAfkElapsed(firstMention.state.setAt)}`,
                 components: [row],
                 allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
             }).catch(() => null);

@@ -106,6 +106,10 @@ module.exports = {
             return true;
         }
 
+        const member = interaction.guild?.members?.cache.get(userId)
+            || await interaction.guild?.members?.fetch(userId).catch(() => null);
+        const displayName = stripAfkPrefix(member?.displayName || interaction.client?.users?.cache.get(userId)?.username || 'User');
+
         if (interaction.user.id === userId) {
             await interaction.reply({ content: 'You are the AFK user.', ephemeral: true });
             return true;
@@ -113,7 +117,7 @@ module.exports = {
 
         const added = client.addAfkNotificationSubscriber(guildId, userId, interaction.user.id, interaction.channelId || 'dm');
         await interaction.reply({
-            content: added ? 'I will tell you when they are back.' : 'You are already subscribed for their return.',
+            content: added ? `I will tell you when ${displayName} is back.` : `You are already subscribed for when ${displayName} is back.`,
             ephemeral: true
         });
         return true;
