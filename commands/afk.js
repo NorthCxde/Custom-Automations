@@ -55,9 +55,9 @@ module.exports = {
         const cooldownUntil = Number(client.afkSetCooldowns.get(key) || 0);
 
         if (cooldownUntil > now) {
-            const remainingSeconds = Math.ceil((cooldownUntil - now) / 1000);
             return interaction.reply({
-                content: `Please wait ${remainingSeconds} more second${remainingSeconds === 1 ? '' : 's'} before setting AFK again.`,
+                content: `<@${interaction.user.id}>, a little too quick there.`,
+                allowedMentions: { parse: [], users: [interaction.user.id], roles: [], repliedUser: false },
                 ephemeral: true
             });
         }

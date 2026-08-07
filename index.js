@@ -5668,12 +5668,7 @@ client.on('messageCreate', async (message) => {
         const afkState = client.getAfkState(message.guild.id, message.author.id);
         if (afkState) {
             const now = Date.now();
-            if (now < Number(afkState.returnEnabledAt || 0)) {
-                await message.channel.send({
-                    content: `<@${message.author.id}>, a little too quick there.`,
-                    allowedMentions: { parse: [], users: [message.author.id], roles: [], repliedUser: false }
-                }).catch(() => null);
-            } else {
+            if (now >= Number(afkState.returnEnabledAt || 0)) {
                 const removedAfk = client.clearAfkState(message.guild.id, message.author.id);
                 if (removedAfk) {
                     const member = message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
