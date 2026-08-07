@@ -62,24 +62,12 @@ module.exports = {
     description: 'AFK commands',
     data: new SlashCommandBuilder()
         .setName('afk')
-        .setDescription('AFK commands')
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('set')
-                .setDescription("Set an AFK status shown when you're mentioned, and display in nickname.")
-                .addStringOption(option =>
-                    option.setName('message')
-                        .setDescription('Message to set')
-                        .setRequired(true)
-                        .setMaxLength(150)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('settings')
-                .setDescription('Configure your AFK preferences.')
-                .addBooleanOption(option =>
-                    option.setName('notify_button')
-                        .setDescription('Enable or disable the "Tell me when back" button on your AFK notices.')
-                        .setRequired(true))),
+        .setDescription("Set an AFK status shown when you're mentioned, and display in nickname.")
+        .addStringOption(option =>
+            option.setName('message')
+                .setDescription('Message to set')
+                .setRequired(true)
+                .setMaxLength(150)),
     async execute({ client, message, args }) {
         if (!message.guild) {
             return message.reply('This command must be used in a server channel.');
@@ -104,7 +92,7 @@ module.exports = {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
         }
 
-        const subcommand = interaction.options.getSubcommand();
+        const subcommand = interaction.options.getSubcommand(false);
 
         if (subcommand === 'settings') {
             const notifyButton = interaction.options.getBoolean('notify_button');
@@ -117,7 +105,7 @@ module.exports = {
             });
         }
 
-        if (subcommand !== 'set') {
+        if (subcommand !== null && subcommand !== 'set') {
             return interaction.reply({ content: 'Unknown AFK subcommand.', ephemeral: true });
         }
 
