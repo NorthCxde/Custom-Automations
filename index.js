@@ -233,6 +233,7 @@ const autorespondersFile = path.join(dataPath, "autoresponders.json");
 const automodFile = path.join(dataPath, "automod.json");
 const giveawaysFile = path.join(dataPath, "giveaways.json");
 const remindersFile = path.join(dataPath, "reminders.json");
+const afkFile = path.join(dataPath, "afk.json");
 const entryRolesFile = path.join(dataPath, "entryroles.json");
 const infractionsFile = path.join(dataPath, "infractions.json");
 const manualLogsChannelsFile = path.join(dataPath, "manualLogsChannels.json");
@@ -270,6 +271,8 @@ client.giveawayTimers = new Map();
 client.giveawayDrafts = new Map();
 client.reminders = new Map();
 client.reminderTimers = new Map();
+client.afkStates = new Map();
+client.afkSetCooldowns = new Map();
 client.entryRoles = new Map();
 client.infractionRules = new Map();
 client.modStatsOverrides = new Map();
@@ -289,6 +292,41 @@ client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for pre
 client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
 client.trelloModeratorLevelPermRoleNames = new Set(STATIC_MODERATOR_LEVEL_PERM_ROLE_NAMES.map(name => String(name).toLowerCase()));
 client.publicCommandNames = new Set(['profile', 'avatar', 'remind']);
+DEFAULT_PUBLIC_COMMAND_NAMES.add('afk');
+
+const AFK_PREFIX = '[AFK] ';
+const AFK_RETURN_GRACE_MS = 30_000;
+const AFK_REENABLE_COOLDOWN_MS = 10_000;
+
+function getAfkStateKey(guildId, userId) {
+    return `${String(guildId || '')}:${String(userId || '')}`;
+}
+
+function stripAfkPrefix(value) {
+    return String(value || '').replace(/^\[AFK\]\s*/i, '').trim();
+}
+
+function buildAfkNickname(value) {
+    const base = stripAfkPrefix(value) || 'AFK';
+    const full = `${AFK_PREFIX}${base}`;
+    return full.length <= 32 ? full : `${AFK_PREFIX}${base.slice(0, 32 - AFK_PREFIX.length)}`;
+}
+
+function formatAfkElapsed(startedAt) {
+    const elapsedMs = Math.max(0, Date.now() - Number(startedAt || 0));
+    const seconds = Math.floor(elapsedMs / 1000);
+    if (seconds < 45) return 'a few seconds ago';
+    if (seconds < 90) return 'a minute ago';
+
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+
+    const days = Math.floor(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+}
 
 client.applyHardcodedAdmins = (ids = []) => {
     const merged = [...new Set([...STATIC_HARD_CODED_ADMINS.map(String), ...ids.map(String)])];
@@ -1957,6 +1995,135 @@ client.saveReminders = () => {
         out[id] = entry;
     }
     fs.writeFileSync(remindersFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.loadAfkStates = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    if (!fs.existsSync(afkFile)) {
+        fs.writeFileSync(afkFile, '{}', 'utf8');
+    }
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(afkFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read afk file:', err);
+    }
+
+    client.afkStates.clear();
+    for (const [key, entry] of Object.entries(parsed || {})) {
+        if (!entry || typeof entry !== 'object') continue;
+
+        const guildId = String(entry.guildId || '').trim();
+        const userId = String(entry.userId || '').trim();
+        const message = String(entry.message || '').trim();
+        if (!guildId || !userId || !message) continue;
+
+        client.afkStates.set(key, {
+            guildId,
+            userId,
+            message,
+            setAt: Number(entry.setAt || Date.now()),
+            returnEnabledAt: Number(entry.returnEnabledAt || 0),
+            originalNickname: entry.originalNickname === null ? null : String(entry.originalNickname || '').trim(),
+            notifyUsers: Array.isArray(entry.notifyUsers)
+                ? entry.notifyUsers
+                    .filter(item => item && typeof item === 'object')
+                    .map(item => ({
+                        userId: String(item.userId || '').trim(),
+                        channelId: String(item.channelId || '').trim(),
+                        createdAt: Number(item.createdAt || Date.now())
+                    }))
+                    .filter(item => item.userId && item.channelId)
+                : [],
+            leaveMessages: Array.isArray(entry.leaveMessages)
+                ? entry.leaveMessages
+                    .filter(item => item && typeof item === 'object')
+                    .map(item => ({
+                        fromUserId: String(item.fromUserId || '').trim(),
+                        fromTag: String(item.fromTag || '').trim(),
+                        channelId: String(item.channelId || '').trim(),
+                        content: String(item.content || '').trim(),
+                        createdAt: Number(item.createdAt || Date.now())
+                    }))
+                    .filter(item => item.fromUserId && item.content)
+                : []
+        });
+    }
+};
+
+client.saveAfkStates = () => {
+    const out = {};
+    for (const [key, entry] of client.afkStates.entries()) {
+        out[key] = entry;
+    }
+    fs.writeFileSync(afkFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getAfkState = (guildId, userId) => {
+    return client.afkStates.get(getAfkStateKey(guildId, userId)) || null;
+};
+
+client.setAfkState = (entry) => {
+    if (!entry?.guildId || !entry?.userId) return null;
+    const key = getAfkStateKey(entry.guildId, entry.userId);
+    const next = {
+        guildId: String(entry.guildId),
+        userId: String(entry.userId),
+        message: String(entry.message || '').trim(),
+        setAt: Number(entry.setAt || Date.now()),
+        returnEnabledAt: Number(entry.returnEnabledAt || (Date.now() + AFK_RETURN_GRACE_MS)),
+        originalNickname: entry.originalNickname === null ? null : String(entry.originalNickname || '').trim(),
+        notifyUsers: Array.isArray(entry.notifyUsers) ? entry.notifyUsers : [],
+        leaveMessages: Array.isArray(entry.leaveMessages) ? entry.leaveMessages : []
+    };
+    client.afkStates.set(key, next);
+    client.saveAfkStates();
+    return next;
+};
+
+client.clearAfkState = (guildId, userId) => {
+    const key = getAfkStateKey(guildId, userId);
+    const existing = client.afkStates.get(key) || null;
+    if (!existing) return null;
+
+    client.afkStates.delete(key);
+    client.afkSetCooldowns.set(key, Date.now() + AFK_REENABLE_COOLDOWN_MS);
+    client.saveAfkStates();
+    return existing;
+};
+
+client.addAfkNotificationSubscriber = (guildId, userId, subscriberUserId, channelId) => {
+    const state = client.getAfkState(guildId, userId);
+    if (!state) return false;
+
+    const existing = Array.isArray(state.notifyUsers) ? state.notifyUsers : [];
+    if (existing.some(item => item.userId === subscriberUserId && item.channelId === channelId)) {
+        return false;
+    }
+
+    state.notifyUsers = [...existing, { userId: subscriberUserId, channelId, createdAt: Date.now() }].slice(-25);
+    client.setAfkState(state);
+    return true;
+};
+
+client.addAfkLeaveMessage = (guildId, userId, payload) => {
+    const state = client.getAfkState(guildId, userId);
+    if (!state) return false;
+
+    const nextMessages = Array.isArray(state.leaveMessages) ? state.leaveMessages.slice(-24) : [];
+    nextMessages.push({
+        fromUserId: String(payload.fromUserId || '').trim(),
+        fromTag: String(payload.fromTag || '').trim(),
+        channelId: String(payload.channelId || '').trim(),
+        content: String(payload.content || '').trim(),
+        createdAt: Number(payload.createdAt || Date.now())
+    });
+    state.leaveMessages = nextMessages.filter(item => item.fromUserId && item.content);
+    client.setAfkState(state);
+    return true;
 };
 
 client.getReminder = (reminderId) => {
@@ -3659,6 +3826,7 @@ client.loadAutoresponders();
 client.loadAutomodRules();
 client.loadGiveaways();
 client.loadReminders();
+client.loadAfkStates();
 client.loadEntryRoles();
 client.loadInfractionRules();
 client.loadManualLogsChannels();
@@ -4110,6 +4278,14 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith('afk_leave_message_modal:')) {
+            const afkCommand = client.slashCommands.get('afk');
+            if (afkCommand && typeof afkCommand.handleModalSubmit === 'function') {
+                const handled = await afkCommand.handleModalSubmit({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId.startsWith('remind_edit_modal:')) {
             const remindCommand = client.slashCommands.get('remind');
             if (remindCommand && typeof remindCommand.handleModalSubmit === 'function') {
@@ -4283,6 +4459,14 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('afk_leave_message:') || interaction.customId.startsWith('afk_notify_me:')) {
+            const afkCommand = client.slashCommands.get('afk');
+            if (afkCommand && typeof afkCommand.handleButton === 'function') {
+                const handled = await afkCommand.handleButton({ client, interaction });
+                if (handled) return;
+            }
+        }
+
         if (interaction.customId.startsWith('invite_revoke:')) {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
@@ -5479,6 +5663,87 @@ client.on('messageCreate', async (message) => {
     }
 
     if (message.author?.bot) return;
+
+    if (message.guild) {
+        const afkState = client.getAfkState(message.guild.id, message.author.id);
+        if (afkState) {
+            const now = Date.now();
+            if (now < Number(afkState.returnEnabledAt || 0)) {
+                await message.channel.send({
+                    content: `<@${message.author.id}>, a little too quick there.`,
+                    allowedMentions: { parse: [], users: [message.author.id], roles: [], repliedUser: false }
+                }).catch(() => null);
+            } else {
+                const removedAfk = client.clearAfkState(message.guild.id, message.author.id);
+                if (removedAfk) {
+                    const member = message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
+                    if (member?.manageable) {
+                        const nickname = removedAfk.originalNickname === null ? null : removedAfk.originalNickname;
+                        await member.setNickname(nickname, 'AFK removed after user activity').catch(() => null);
+                    }
+
+                    await message.channel.send({
+                        content: `Welcome back <@${message.author.id}>, I removed your AFK`,
+                        allowedMentions: { parse: [], users: [message.author.id], roles: [], repliedUser: false }
+                    }).catch(() => null);
+
+                    if (Array.isArray(removedAfk.leaveMessages) && removedAfk.leaveMessages.length) {
+                        const summaryLines = removedAfk.leaveMessages.slice(0, 10).map(entry => `- ${entry.fromTag || entry.fromUserId}: ${entry.content}`);
+                        await message.author.send({
+                            content: `While you were AFK in ${message.guild.name}, people left messages for you:\n${summaryLines.join('\n')}`
+                        }).catch(() => null);
+                    }
+
+                    const notified = new Set();
+                    for (const subscriber of removedAfk.notifyUsers || []) {
+                        const notifyKey = `${subscriber.userId}:${subscriber.channelId}`;
+                        if (notified.has(notifyKey)) continue;
+                        notified.add(notifyKey);
+
+                        const channel = message.guild.channels.cache.get(subscriber.channelId)
+                            || await message.guild.channels.fetch(subscriber.channelId).catch(() => null);
+                        if (!channel || !channel.isTextBased()) continue;
+
+                        await channel.send({
+                            content: `<@${subscriber.userId}>, <@${message.author.id}> is back online.`,
+                            allowedMentions: { parse: [], users: [subscriber.userId, message.author.id], roles: [], repliedUser: false }
+                        }).catch(() => null);
+                    }
+                }
+            }
+        }
+
+        const mentionedAfkMembers = [];
+        for (const user of message.mentions.users.values()) {
+            if (user.id === message.author.id) continue;
+            const state = client.getAfkState(message.guild.id, user.id);
+            if (!state) continue;
+            mentionedAfkMembers.push({ user, state });
+        }
+
+        if (mentionedAfkMembers.length) {
+            const firstMention = mentionedAfkMembers[0];
+            const mentionedMember = message.guild.members.cache.get(firstMention.user.id)
+                || await message.guild.members.fetch(firstMention.user.id).catch(() => null);
+            const displayName = stripAfkPrefix(mentionedMember?.displayName || firstMention.user.globalName || firstMention.user.username || 'User');
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`afk_leave_message:${message.guild.id}:${firstMention.user.id}`)
+                    .setLabel('Leave a message')
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId(`afk_notify_me:${message.guild.id}:${firstMention.user.id}`)
+                    .setLabel('Tell me when they are back')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+
+            await message.channel.send({
+                content: `${displayName} is AFK: ${firstMention.state.message} - ${formatAfkElapsed(firstMention.state.setAt)}`,
+                components: [row],
+                allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
+            }).catch(() => null);
+        }
+    }
 
     if (message.guild && message.member && message.content) {
         const guildAutomodRules = client.getAutomodRules(message.guild.id);
