@@ -5681,7 +5681,7 @@ client.on('messageCreate', async (message) => {
                             || await client.users.fetch(subscriber.userId).catch(() => null);
                         if (!subscriberUser) continue;
 
-                        await subscriberUser.send(`${message.member?.displayName || message.author.username} is back online.`).catch(() => null);
+                        await subscriberUser.send(`${message.member?.displayName || message.author.username} is back online from AFK.`).catch(() => null);
                     }
                 }
             }
@@ -5707,7 +5707,7 @@ client.on('messageCreate', async (message) => {
                     .setStyle(ButtonStyle.Secondary)
             );
 
-            await message.author.send({
+            await message.channel.send({
                 content: `${displayName} is AFK: ${firstMention.state.message} - ${formatAfkElapsed(firstMention.state.setAt)}`,
                 components: [row],
                 allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
