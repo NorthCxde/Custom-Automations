@@ -92,23 +92,6 @@ module.exports = {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
         }
 
-        const subcommand = interaction.options.getSubcommand(false);
-
-        if (subcommand === 'settings') {
-            const notifyButton = interaction.options.getBoolean('notify_button');
-            client.setAfkNotifyEnabled(interaction.guild.id, interaction.user.id, notifyButton);
-            return interaction.reply({
-                content: notifyButton
-                    ? 'The \'Tell me when back\' button is now **enabled** on your AFK notices.'
-                    : 'The \'Tell me when back\' button is now **disabled** on your AFK notices.',
-                ephemeral: true
-            });
-        }
-
-        if (subcommand !== null && subcommand !== 'set') {
-            return interaction.reply({ content: 'Unknown AFK subcommand.', ephemeral: true });
-        }
-
         const afkMessage = String(interaction.options.getString('message') || '').trim();
         const result = await setAfk({
             client,
