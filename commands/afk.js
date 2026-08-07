@@ -71,7 +71,15 @@ module.exports = {
                     option.setName('message')
                         .setDescription('Message to set')
                         .setRequired(true)
-                        .setMaxLength(150))),
+                        .setMaxLength(150)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('settings')
+                .setDescription('Configure your AFK preferences.')
+                .addBooleanOption(option =>
+                    option.setName('notify_button')
+                        .setDescription('Enable or disable the "Tell me when back" button on your AFK notices.')
+                        .setRequired(true))),
     async execute({ client, message, args }) {
         if (!message.guild) {
             return message.reply('This command must be used in a server channel.');
@@ -97,6 +105,18 @@ module.exports = {
         }
 
         const subcommand = interaction.options.getSubcommand();
+
+        if (subcommand === 'settings') {
+            const notifyButton = interaction.options.getBoolean('notify_button');
+            client.setAfkNotifyEnabled(interaction.guild.id, interaction.user.id, notifyButton);
+            return interaction.reply({
+                content: notifyButton
+                    ? 'The \'Tell me when back\' button is now **enabled** on your AFK notices.'
+                    : 'The \'Tell me when back\' button is now **disabled** on your AFK notices.',
+                ephemeral: true
+            });
+        }
+
         if (subcommand !== 'set') {
             return interaction.reply({ content: 'Unknown AFK subcommand.', ephemeral: true });
         }

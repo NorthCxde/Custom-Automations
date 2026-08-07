@@ -234,6 +234,7 @@ const automodFile = path.join(dataPath, "automod.json");
 const giveawaysFile = path.join(dataPath, "giveaways.json");
 const remindersFile = path.join(dataPath, "reminders.json");
 const afkFile = path.join(dataPath, "afk.json");
+const afkSettingsFile = path.join(dataPath, "afkSettings.json");
 const entryRolesFile = path.join(dataPath, "entryroles.json");
 const infractionsFile = path.join(dataPath, "infractions.json");
 const manualLogsChannelsFile = path.join(dataPath, "manualLogsChannels.json");
@@ -273,6 +274,7 @@ client.reminders = new Map();
 client.reminderTimers = new Map();
 client.afkStates = new Map();
 client.afkSetCooldowns = new Map();
+client.afkUserSettings = new Map();
 client.entryRoles = new Map();
 client.infractionRules = new Map();
 client.modStatsOverrides = new Map();
@@ -2062,6 +2064,42 @@ client.saveAfkStates = () => {
     fs.writeFileSync(afkFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
+client.loadAfkUserSettings = () => {
+    if (!fs.existsSync(afkSettingsFile)) {
+        fs.writeFileSync(afkSettingsFile, '{}', 'utf8');
+    }
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(afkSettingsFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read afkSettings file:', err);
+    }
+    client.afkUserSettings.clear();
+    for (const [key, entry] of Object.entries(parsed || {})) {
+        if (!entry || typeof entry !== 'object') continue;
+        client.afkUserSettings.set(key, { notifyButtonEnabled: entry.notifyButtonEnabled !== false });
+    }
+};
+
+client.saveAfkUserSettings = () => {
+    const out = {};
+    for (const [key, entry] of client.afkUserSettings.entries()) {
+        out[key] = entry;
+    }
+    fs.writeFileSync(afkSettingsFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getAfkNotifyEnabled = (guildId, userId) => {
+    const entry = client.afkUserSettings.get(getAfkStateKey(guildId, userId));
+    return !entry || entry.notifyButtonEnabled !== false;
+};
+
+client.setAfkNotifyEnabled = (guildId, userId, enabled) => {
+    const key = getAfkStateKey(guildId, userId);
+    client.afkUserSettings.set(key, { notifyButtonEnabled: Boolean(enabled) });
+    client.saveAfkUserSettings();
+};
+
 client.getAfkState = (guildId, userId) => {
     return client.afkStates.get(getAfkStateKey(guildId, userId)) || null;
 };
@@ -3827,6 +3865,7 @@ client.loadAutomodRules();
 client.loadGiveaways();
 client.loadReminders();
 client.loadAfkStates();
+client.loadAfkUserSettings();
 client.loadEntryRoles();
 client.loadInfractionRules();
 client.loadManualLogsChannels();
@@ -5700,17 +5739,23 @@ client.on('messageCreate', async (message) => {
             const mentionedMember = message.guild.members.cache.get(firstMention.user.id)
                 || await message.guild.members.fetch(firstMention.user.id).catch(() => null);
             const displayName = stripAfkPrefix(mentionedMember?.displayName || firstMention.user.globalName || firstMention.user.username || 'User');
-            const buttonLabel = `Tell me when ${displayName} is back`;
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`afk_notify_me:${message.guild.id}:${firstMention.user.id}`)
-                    .setLabel(buttonLabel.length <= 80 ? buttonLabel : `Tell me when ${displayName.slice(0, 59)}... is back`)
-                    .setStyle(ButtonStyle.Secondary)
-            );
+            const notifyEnabled = client.getAfkNotifyEnabled(message.guild.id, firstMention.user.id);
+
+            let components = [];
+            if (notifyEnabled) {
+                const buttonLabel = `Tell me when ${displayName} is back`;
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`afk_notify_me:${message.guild.id}:${firstMention.user.id}`)
+                        .setLabel(buttonLabel.length <= 80 ? buttonLabel : `Tell me when ${displayName.slice(0, 59)}... is back`)
+                        .setStyle(ButtonStyle.Secondary)
+                );
+                components = [row];
+            }
 
             await message.channel.send({
                 content: `${displayName} is AFK: **${firstMention.state.message.replace(/\*/g, '\\*')}** - ${formatAfkElapsed(firstMention.state.setAt)}`,
-                components: [row],
+                components,
                 allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
             }).catch(() => null);
         }
