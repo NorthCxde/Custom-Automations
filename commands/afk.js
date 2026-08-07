@@ -17,6 +17,46 @@ function buildAfkNickname(value) {
     return full.length <= 32 ? full : `${prefix}${base.slice(0, 32 - prefix.length)}`;
 }
 
+async function setAfk({ client, guild, user, member, afkMessage }) {
+    const guildId = guild.id;
+    const userId = user.id;
+    const key = getAfkStateKey(guildId, userId);
+    const now = Date.now();
+    const cooldownUntil = Number(client.afkSetCooldowns.get(key) || 0);
+
+    if (cooldownUntil > now) {
+        return { ok: false, content: `${user.username}, a little too quick there.` };
+    }
+
+    const normalizedMessage = String(afkMessage || '').trim();
+    if (!normalizedMessage) {
+        return { ok: false, content: 'Please provide a message to set.' };
+    }
+
+    const previousState = client.getAfkState(guildId, userId);
+    const originalNickname = previousState
+        ? previousState.originalNickname
+        : (member && 'nickname' in member ? member.nickname ?? null : null);
+
+    client.setAfkState({
+        guildId,
+        userId,
+        message: normalizedMessage,
+        setAt: now,
+        returnEnabledAt: now + AFK_RETURN_GRACE_MS,
+        originalNickname,
+        notifyUsers: previousState?.notifyUsers || [],
+        leaveMessages: previousState?.leaveMessages || []
+    });
+
+    if (member?.manageable) {
+        const baseName = member.displayName || user.globalName || user.username;
+        await member.setNickname(buildAfkNickname(baseName), 'AFK enabled').catch(() => null);
+    }
+
+    return { ok: true, content: `<@${user.id}> I set your AFK: ${normalizedMessage}` };
+}
+
 module.exports = {
     name: 'afk',
     description: 'AFK commands',
@@ -32,6 +72,25 @@ module.exports = {
                         .setDescription('Message to set')
                         .setRequired(true)
                         .setMaxLength(150))),
+    async execute({ client, message, args }) {
+        if (!message.guild) {
+            return message.reply('This command must be used in a server channel.');
+        }
+
+        const afkMessage = String((args || []).join(' ') || '').trim();
+        const result = await setAfk({
+            client,
+            guild: message.guild,
+            user: message.author,
+            member: message.member,
+            afkMessage
+        });
+
+        return message.reply({
+            content: result.content,
+            allowedMentions: { parse: [], users: [message.author.id], roles: [], repliedUser: false }
+        });
+    },
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -42,49 +101,17 @@ module.exports = {
             return interaction.reply({ content: 'Unknown AFK subcommand.', ephemeral: true });
         }
 
-        const guildId = interaction.guild.id;
-        const userId = interaction.user.id;
-        const key = getAfkStateKey(guildId, userId);
-        const now = Date.now();
-        const cooldownUntil = Number(client.afkSetCooldowns.get(key) || 0);
-
-        if (cooldownUntil > now) {
-            return interaction.reply({
-                content: `<@${interaction.user.id}>, a little too quick there.`,
-                allowedMentions: { parse: [], users: [interaction.user.id], roles: [], repliedUser: false },
-                ephemeral: true
-            });
-        }
-
         const afkMessage = String(interaction.options.getString('message') || '').trim();
-        if (!afkMessage) {
-            return interaction.reply({ content: 'Please provide a message to set.', ephemeral: true });
-        }
-
-        const member = interaction.member;
-        const previousState = client.getAfkState(guildId, userId);
-        const originalNickname = previousState
-            ? previousState.originalNickname
-            : (member && 'nickname' in member ? member.nickname ?? null : null);
-
-        client.setAfkState({
-            guildId,
-            userId,
-            message: afkMessage,
-            setAt: now,
-            returnEnabledAt: now + AFK_RETURN_GRACE_MS,
-            originalNickname,
-            notifyUsers: previousState?.notifyUsers || [],
-            leaveMessages: previousState?.leaveMessages || []
+        const result = await setAfk({
+            client,
+            guild: interaction.guild,
+            user: interaction.user,
+            member: interaction.member,
+            afkMessage
         });
 
-        if (member?.manageable) {
-            const baseName = member.displayName || interaction.user.globalName || interaction.user.username;
-            await member.setNickname(buildAfkNickname(baseName), 'AFK enabled').catch(() => null);
-        }
-
         return interaction.reply({
-            content: `<@${interaction.user.id}> I set your AFK: ${afkMessage}`,
+            content: result.content,
             allowedMentions: { parse: [], users: [interaction.user.id], roles: [], repliedUser: false },
             ephemeral: true
         });
