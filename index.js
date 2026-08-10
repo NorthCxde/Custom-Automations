@@ -4304,6 +4304,10 @@ client.on('interactionCreate', async (interaction) => {
 
         if (commandLevel === 'admin') {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
+                await interaction.reply({
+                    content: 'Only the bot admins can use this command.',
+                    ephemeral: true
+                }).catch(() => null);
                 return;
             }
         } else if (!isDmCommand) {
@@ -6211,6 +6215,7 @@ client.on('messageCreate', async (message) => {
         : (command.public ? 'public' : 'moderator');
 
     if (commandLevel === 'admin' && !HARD_CODED_ADMINS.includes(message.author.id)) {
+        await client.sendPrefixCommandResponse(message.channel, 'Only the bot admins can use this command.');
         return;
     }
 
