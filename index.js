@@ -5729,7 +5729,10 @@ client.on('messageCreate', async (message) => {
         if (tap.enabled && Array.isArray(tap.roleIds) && tap.roleIds.length && Array.isArray(tap.channelIds) && tap.channelIds.length) {
             const thread = message.channel;
             const parentId = String(thread.parentId || '');
-            const channelMatch = tap.channelIds.includes(String(thread.id)) || (parentId && tap.channelIds.includes(parentId));
+            const parentChannel = thread.parent || null;
+            const parentCategoryId = String(parentChannel?.parentId || '');
+            const scopedChannelIds = [String(thread.id), parentId, parentCategoryId].filter(Boolean);
+            const channelMatch = scopedChannelIds.some(id => tap.channelIds.includes(id));
 
             if (channelMatch) {
                 const blockedMentions = [];
@@ -5743,12 +5746,14 @@ client.on('messageCreate', async (message) => {
                 }
 
                 if (blockedMentions.length) {
-                    if (message.deletable) {
-                        await message.delete().catch(() => null);
-                    }
+                    await message.delete().catch((err) => {
+                        console.error('Ticket Add Prevention failed to delete mention message:', err);
+                    });
 
                     for (const member of blockedMentions) {
-                        await thread.members.remove(member.id).catch(() => null);
+                        await thread.members.remove(member.id).catch((err) => {
+                            console.error(`Ticket Add Prevention failed to remove user ${member.id} from thread ${thread.id}:`, err);
+                        });
                     }
 
                     return;
