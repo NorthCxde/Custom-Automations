@@ -5726,20 +5726,30 @@ client.on('messageCreate', async (message) => {
             ? securitySettings.ticketAddPrevention
             : { enabled: false, roleIds: [], channelIds: [] };
 
-        if (tap.enabled && Array.isArray(tap.roleIds) && tap.roleIds.length && Array.isArray(tap.channelIds) && tap.channelIds.length) {
-            const thread = message.channel;
-            const parentId = String(thread.parentId || '');
-            const parentChannel = thread.parent || null;
-            const parentCategoryId = String(parentChannel?.parentId || '');
-            const scopedChannelIds = [String(thread.id), parentId, parentCategoryId].filter(Boolean);
-            const channelMatch = scopedChannelIds.some(id => tap.channelIds.includes(id));
+        const thread = message.channel;
+        const parentId = String(thread.parentId || '');
+        const parentChannel = thread.parent || null;
+        const parentCategoryId = String(parentChannel?.parentId || '');
+        const scopedChannelIds = [String(thread.id), parentId, parentCategoryId].filter(Boolean);
+        const channelMatch = scopedChannelIds.some(id => Array.isArray(tap.channelIds) && tap.channelIds.includes(id));
 
+        console.log(
+            `[TicketAddPrevention] guild=${message.guild.id} thread=${thread.id} author=${message.author.id} `
+            + `mentions=${message.mentions.users.size} enabled=${tap.enabled === true} `
+            + `roleCount=${Array.isArray(tap.roleIds) ? tap.roleIds.length : 0} channelCount=${Array.isArray(tap.channelIds) ? tap.channelIds.length : 0} `
+            + `channelMatch=${channelMatch}`
+        );
+
+        if (tap.enabled && Array.isArray(tap.roleIds) && tap.roleIds.length && Array.isArray(tap.channelIds) && tap.channelIds.length) {
             if (channelMatch) {
                 const blockedMentions = [];
                 for (const user of message.mentions.users.values()) {
                     const member = message.guild.members.cache.get(user.id)
                         || await message.guild.members.fetch(user.id).catch(() => null);
-                    if (!member) continue;
+                    if (!member) {
+                        console.log(`[TicketAddPrevention] mentioned user ${user.id} could not be resolved as a guild member.`);
+                        continue;
+                    }
                     if (member.roles.cache.some(role => tap.roleIds.includes(role.id))) {
                         blockedMentions.push(member);
                     }
@@ -5756,9 +5766,15 @@ client.on('messageCreate', async (message) => {
                         });
                     }
 
+                    console.log(`[TicketAddPrevention] blocked mention enforced for ${blockedMentions.length} user(s).`);
+
                     return;
                 }
+
+                console.log('[TicketAddPrevention] no mentioned users matched protected roles.');
             }
+        } else {
+            console.log('[TicketAddPrevention] skipped because it is disabled or missing configured roles/channels.');
         }
     }
 
