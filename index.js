@@ -4262,6 +4262,15 @@ client.on('inviteDelete', async (invite) => {
     existing.delete(invite.code);
 });
 
+client.on('threadCreate', async (thread) => {
+    try {
+        if (!thread || thread.joined) return;
+        await thread.join().catch(() => null);
+    } catch (err) {
+        console.error(`Failed to auto-join thread ${thread?.id || 'unknown'}:`, err);
+    }
+});
+
 client.on('interactionCreate', async (interaction) => {
     try {
     if (interaction.isAutocomplete()) {
