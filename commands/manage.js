@@ -49,6 +49,7 @@ const MANAGE_PANEL_AUTOMOD = 'automod';
 const MANAGE_PANEL_BLACKLISTED_EMOJIS = 'blacklisted_emojis';
 const MANAGE_PANEL_REVOKED_INVITES = 'revoked_invites';
 const MANAGE_PANEL_SECURITY = 'security';
+const MANAGE_PANEL_TICKET_ADD_PREVENTION = 'ticket_add_prevention';
 const MANAGE_PANEL_AUTORESPONDER = 'autoresponder';
 const MANAGE_PANEL_PERMS = 'perms';
 const MANAGE_PANEL_EMBEDS = 'embeds';
@@ -842,6 +843,12 @@ function buildPanelSelectRow(selectedPanel) {
                     default: selectedPanel === MANAGE_PANEL_SECURITY
                 },
                 {
+                    label: 'Ticket Add Prevention',
+                    value: MANAGE_PANEL_TICKET_ADD_PREVENTION,
+                    description: 'Prevent protected role mentions from adding users to tickets',
+                    default: selectedPanel === MANAGE_PANEL_TICKET_ADD_PREVENTION
+                },
+                {
                     label: 'Auto Responder',
                     value: MANAGE_PANEL_AUTORESPONDER,
                     description: 'Open autoresponder management flow',
@@ -1031,7 +1038,7 @@ function parseSecurityUserIds(text) {
     )];
 }
 
-function buildSecurityManagePayload(client, guildId, notice, selectedSection = MANAGE_SECURITY_SECTION_ACCOUNT_AGE) {
+function buildSecurityManagePayload(client, guildId, notice, selectedSection = MANAGE_SECURITY_SECTION_ACCOUNT_AGE, selectedPanelForRow = MANAGE_PANEL_SECURITY) {
     const settings = typeof client.getSecuritySettings === 'function'
         ? client.getSecuritySettings(guildId)
         : {
@@ -1124,7 +1131,7 @@ function buildSecurityManagePayload(client, guildId, notice, selectedSection = M
     const payload = {
         embeds: [embed],
         components: [
-            buildPanelSelectRow(MANAGE_PANEL_SECURITY),
+            buildPanelSelectRow(selectedPanelForRow),
             securitySectionSelectRow
         ]
     };
@@ -2574,6 +2581,16 @@ function buildManagePayload(client, guildId, options = {}) {
         return buildSecurityManagePayload(client, guildId, notice, selectedSecuritySection);
     }
 
+    if (panel === MANAGE_PANEL_TICKET_ADD_PREVENTION) {
+        return buildSecurityManagePayload(
+            client,
+            guildId,
+            notice,
+            MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION,
+            MANAGE_PANEL_TICKET_ADD_PREVENTION
+        );
+    }
+
     if (panel === MANAGE_PANEL_AUTORESPONDER) {
         return buildAutoresponderManagePayload(notice);
     }
@@ -2763,6 +2780,11 @@ module.exports = {
 
             if (panel === MANAGE_PANEL_SECURITY) {
                 await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_SECURITY }));
+                return true;
+            }
+
+            if (panel === MANAGE_PANEL_TICKET_ADD_PREVENTION) {
+                await interaction.update(buildManagePayload(client, interaction.guild.id, { panel: MANAGE_PANEL_TICKET_ADD_PREVENTION }));
                 return true;
             }
 
