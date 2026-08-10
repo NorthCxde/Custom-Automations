@@ -778,6 +778,9 @@ client.sanitizeSecuritySettings = (settings = {}) => {
     const joinFilter = settings && typeof settings === 'object' && settings.joinFilter && typeof settings.joinFilter === 'object'
         ? settings.joinFilter
         : {};
+    const ticketAddPrevention = settings && typeof settings === 'object' && settings.ticketAddPrevention && typeof settings.ticketAddPrevention === 'object'
+        ? settings.ticketAddPrevention
+        : {};
 
     return {
         accountAge: {
@@ -793,6 +796,15 @@ client.sanitizeSecuritySettings = (settings = {}) => {
                 .map(value => String(value || '').trim().toLowerCase())
                 .filter(Boolean)
                 .filter(value => value.length >= 2 && value.length <= 32))]
+        },
+        ticketAddPrevention: {
+            enabled: ticketAddPrevention.enabled === true,
+            roleIds: [...new Set((Array.isArray(ticketAddPrevention.roleIds) ? ticketAddPrevention.roleIds : [])
+                .map(String)
+                .filter(id => /^\d{17,20}$/.test(id)))],
+            channelIds: [...new Set((Array.isArray(ticketAddPrevention.channelIds) ? ticketAddPrevention.channelIds : [])
+                .map(String)
+                .filter(id => /^\d{17,20}$/.test(id)))]
         }
     };
 };
@@ -818,6 +830,10 @@ client.updateSecuritySettings = (guildId, updates = {}) => {
         joinFilter: {
             ...(existing.joinFilter || {}),
             ...((updates && typeof updates === 'object' && updates.joinFilter) ? updates.joinFilter : {})
+        },
+        ticketAddPrevention: {
+            ...(existing.ticketAddPrevention || {}),
+            ...((updates && typeof updates === 'object' && updates.ticketAddPrevention) ? updates.ticketAddPrevention : {})
         }
     });
     client.securitySettings.set(guildId, next);
@@ -5694,6 +5710,43 @@ client.on('messageCreate', async (message) => {
     }
 
     if (message.author?.bot) return;
+
+    if (message.guild && message.channel?.isThread?.() && message.mentions?.users?.size) {
+        const securitySettings = client.getSecuritySettings(message.guild.id);
+        const tap = securitySettings?.ticketAddPrevention && typeof securitySettings.ticketAddPrevention === 'object'
+            ? securitySettings.ticketAddPrevention
+            : { enabled: false, roleIds: [], channelIds: [] };
+
+        if (tap.enabled && Array.isArray(tap.roleIds) && tap.roleIds.length && Array.isArray(tap.channelIds) && tap.channelIds.length) {
+            const thread = message.channel;
+            const parentId = String(thread.parentId || '');
+            const channelMatch = tap.channelIds.includes(String(thread.id)) || (parentId && tap.channelIds.includes(parentId));
+
+            if (channelMatch) {
+                const blockedMentions = [];
+                for (const user of message.mentions.users.values()) {
+                    const member = message.guild.members.cache.get(user.id)
+                        || await message.guild.members.fetch(user.id).catch(() => null);
+                    if (!member) continue;
+                    if (member.roles.cache.some(role => tap.roleIds.includes(role.id))) {
+                        blockedMentions.push(member);
+                    }
+                }
+
+                if (blockedMentions.length) {
+                    if (message.deletable) {
+                        await message.delete().catch(() => null);
+                    }
+
+                    for (const member of blockedMentions) {
+                        await thread.members.remove(member.id).catch(() => null);
+                    }
+
+                    return;
+                }
+            }
+        }
+    }
 
     if (message.guild) {
         const afkState = client.getAfkState(message.guild.id, message.author.id);

@@ -4,6 +4,7 @@ const {
     ActionRowBuilder,
     StringSelectMenuBuilder,
     ChannelSelectMenuBuilder,
+    ChannelType,
     RoleSelectMenuBuilder,
     UserSelectMenuBuilder,
     ButtonBuilder,
@@ -104,9 +105,15 @@ const MANAGE_SECURITY_CLEAR_WHITELIST_ID = 'manage_security_clear_whitelist';
 const MANAGE_JOIN_FILTER_TOGGLE_ID = 'manage_join_filter_toggle';
 const MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID = 'manage_join_filter_edit_keywords';
 const MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID = 'manage_join_filter_clear_keywords';
+const MANAGE_TICKET_ADD_PREVENTION_TOGGLE_ID = 'manage_ticket_add_prevention_toggle';
+const MANAGE_TICKET_ADD_PREVENTION_ROLE_SELECT_ID = 'manage_ticket_add_prevention_roles';
+const MANAGE_TICKET_ADD_PREVENTION_CHANNEL_SELECT_ID = 'manage_ticket_add_prevention_channels';
+const MANAGE_TICKET_ADD_PREVENTION_CLEAR_ROLES_ID = 'manage_ticket_add_prevention_clear_roles';
+const MANAGE_TICKET_ADD_PREVENTION_CLEAR_CHANNELS_ID = 'manage_ticket_add_prevention_clear_channels';
 const MANAGE_SECURITY_SECTION_SELECT_ID = 'manage_security_section_select';
 const MANAGE_SECURITY_SECTION_ACCOUNT_AGE = 'account_age';
 const MANAGE_SECURITY_SECTION_JOIN_FILTER = 'join_filter';
+const MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION = 'ticket_add_prevention';
 const MANAGE_SECURITY_MODAL_PREFIX = 'manage_security_modal:';
 const MODAL_SECURITY_ACCOUNT_AGE_DAYS_INPUT_ID = 'account_age_days';
 const MODAL_SECURITY_WHITELIST_INPUT_ID = 'whitelist_ids';
@@ -1029,7 +1036,8 @@ function buildSecurityManagePayload(client, guildId, notice, selectedSection = M
         ? client.getSecuritySettings(guildId)
         : {
             accountAge: { enabled: true, minAgeDays: 7, whitelistedUserIds: [] },
-            joinFilter: { enabled: true, keywordBlacklist: [] }
+            joinFilter: { enabled: true, keywordBlacklist: [] },
+            ticketAddPrevention: { enabled: false, roleIds: [], channelIds: [] }
         };
 
     const whitelist = Array.isArray(settings.accountAge.whitelistedUserIds)
@@ -1041,10 +1049,19 @@ function buildSecurityManagePayload(client, guildId, notice, selectedSection = M
     const keywords = Array.isArray(joinFilter.keywordBlacklist)
         ? joinFilter.keywordBlacklist
         : [];
+    const ticketAddPrevention = settings.ticketAddPrevention && typeof settings.ticketAddPrevention === 'object'
+        ? settings.ticketAddPrevention
+        : { enabled: false, roleIds: [], channelIds: [] };
+    const roleIds = Array.isArray(ticketAddPrevention.roleIds) ? ticketAddPrevention.roleIds : [];
+    const channelIds = Array.isArray(ticketAddPrevention.channelIds) ? ticketAddPrevention.channelIds : [];
+    const channelMentions = channelIds.length ? channelIds.map(id => `<#${id}>`).join(', ').slice(0, 1024) : 'None';
+    const roleMentions = roleIds.length ? roleIds.map(id => `<@&${id}>`).join(', ').slice(0, 1024) : 'None';
 
     const normalizedSection = selectedSection === MANAGE_SECURITY_SECTION_JOIN_FILTER
         ? MANAGE_SECURITY_SECTION_JOIN_FILTER
-        : MANAGE_SECURITY_SECTION_ACCOUNT_AGE;
+        : (selectedSection === MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION
+            ? MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION
+            : MANAGE_SECURITY_SECTION_ACCOUNT_AGE);
 
     const embed = new EmbedBuilder()
         .setColor(0x000000)
@@ -1060,13 +1077,21 @@ function buildSecurityManagePayload(client, guildId, notice, selectedSection = M
             { name: 'Whitelisted IDs', value: whitelist.length ? whitelist.map(id => `\`${id}\``).join(', ').slice(0, 1024) : 'None', inline: false },
             { name: 'Behavior', value: 'Accounts younger than the configured age are automatically kicked and logged in the invite tracker channel.', inline: false }
         );
-    } else {
+    } else if (normalizedSection === MANAGE_SECURITY_SECTION_JOIN_FILTER) {
         embed.addFields(
             { name: 'Section', value: 'Join Filter', inline: false },
             { name: 'Enabled', value: joinFilter.enabled !== false ? 'Yes' : 'No', inline: true },
             { name: 'Blacklisted Keywords', value: keywords.length ? keywords.map(v => `\`${v}\``).join(', ').slice(0, 1024) : 'None', inline: false },
             { name: 'Match Logic', value: 'Raw contains matching only.', inline: false },
             { name: 'Action', value: 'DM first, then kick with reason: `For suspicious Discord account.`', inline: false }
+        );
+    } else {
+        embed.addFields(
+            { name: 'Section', value: 'Ticket Add Prevention', inline: false },
+            { name: 'Enabled', value: ticketAddPrevention.enabled ? 'Yes' : 'No', inline: true },
+            { name: 'Protected Roles', value: roleMentions, inline: false },
+            { name: 'Applied Channels', value: channelMentions, inline: false },
+            { name: 'Behavior', value: 'If someone mentions a user with one of these roles in a configured ticket thread, the mention message is deleted and mentioned users are removed from that thread.', inline: false }
         );
     }
 
@@ -1086,6 +1111,12 @@ function buildSecurityManagePayload(client, guildId, notice, selectedSection = M
                     value: MANAGE_SECURITY_SECTION_JOIN_FILTER,
                     description: 'Kick joins by username keyword matches',
                     default: normalizedSection === MANAGE_SECURITY_SECTION_JOIN_FILTER
+                },
+                {
+                    label: 'Ticket Add Prevention',
+                    value: MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION,
+                    description: 'Prevent adding protected roles to ticket threads via mentions',
+                    default: normalizedSection === MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION
                 }
             ])
     );
@@ -1119,7 +1150,7 @@ function buildSecurityManagePayload(client, guildId, notice, selectedSection = M
                     .setStyle(ButtonStyle.Secondary)
             )
         );
-    } else {
+    } else if (normalizedSection === MANAGE_SECURITY_SECTION_JOIN_FILTER) {
         payload.components.push(
             new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
@@ -1134,6 +1165,38 @@ function buildSecurityManagePayload(client, guildId, notice, selectedSection = M
                     .setCustomId(MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID)
                     .setLabel('Clear Join Filter Keywords')
                     .setStyle(ButtonStyle.Secondary)
+            )
+        );
+    } else {
+        payload.components.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_TICKET_ADD_PREVENTION_TOGGLE_ID)
+                    .setLabel(ticketAddPrevention.enabled ? 'Disable Ticket Add Prevention' : 'Enable Ticket Add Prevention')
+                    .setStyle(ticketAddPrevention.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_TICKET_ADD_PREVENTION_CLEAR_ROLES_ID)
+                    .setLabel('Clear Roles')
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId(MANAGE_TICKET_ADD_PREVENTION_CLEAR_CHANNELS_ID)
+                    .setLabel('Clear Channels')
+                    .setStyle(ButtonStyle.Secondary)
+            ),
+            new ActionRowBuilder().addComponents(
+                new RoleSelectMenuBuilder()
+                    .setCustomId(MANAGE_TICKET_ADD_PREVENTION_ROLE_SELECT_ID)
+                    .setPlaceholder('Select protected roles')
+                    .setMinValues(0)
+                    .setMaxValues(25)
+            ),
+            new ActionRowBuilder().addComponents(
+                new ChannelSelectMenuBuilder()
+                    .setCustomId(MANAGE_TICKET_ADD_PREVENTION_CHANNEL_SELECT_ID)
+                    .setPlaceholder('Select ticket parent channels')
+                    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildForum, ChannelType.GuildAnnouncement)
+                    .setMinValues(0)
+                    .setMaxValues(25)
             )
         );
     }
@@ -2727,9 +2790,12 @@ module.exports = {
         }
 
         if (interaction.customId === MANAGE_SECURITY_SECTION_SELECT_ID) {
-            const selectedSecuritySection = interaction.values?.[0] === MANAGE_SECURITY_SECTION_JOIN_FILTER
+            const selectedValue = interaction.values?.[0] || MANAGE_SECURITY_SECTION_ACCOUNT_AGE;
+            const selectedSecuritySection = selectedValue === MANAGE_SECURITY_SECTION_JOIN_FILTER
                 ? MANAGE_SECURITY_SECTION_JOIN_FILTER
-                : MANAGE_SECURITY_SECTION_ACCOUNT_AGE;
+                : (selectedValue === MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION
+                    ? MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION
+                    : MANAGE_SECURITY_SECTION_ACCOUNT_AGE);
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_SECURITY,
                 selectedSecuritySection
@@ -2865,6 +2931,9 @@ module.exports = {
             && interaction.customId !== MANAGE_JOIN_FILTER_TOGGLE_ID
             && interaction.customId !== MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID
             && interaction.customId !== MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID
+            && interaction.customId !== MANAGE_TICKET_ADD_PREVENTION_TOGGLE_ID
+            && interaction.customId !== MANAGE_TICKET_ADD_PREVENTION_CLEAR_ROLES_ID
+            && interaction.customId !== MANAGE_TICKET_ADD_PREVENTION_CLEAR_CHANNELS_ID
             && interaction.customId !== MANAGE_AUTORESPONDER_OPEN_ID
             && interaction.customId !== MANAGE_EMBEDS_CREATE_ID
             && interaction.customId !== MANAGE_EMBEDS_EDIT_ID
@@ -3082,7 +3151,10 @@ module.exports = {
             || interaction.customId === MANAGE_SECURITY_CLEAR_WHITELIST_ID
             || interaction.customId === MANAGE_JOIN_FILTER_TOGGLE_ID
             || interaction.customId === MANAGE_JOIN_FILTER_EDIT_KEYWORDS_ID
-            || interaction.customId === MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID)
+            || interaction.customId === MANAGE_JOIN_FILTER_CLEAR_KEYWORDS_ID
+            || interaction.customId === MANAGE_TICKET_ADD_PREVENTION_TOGGLE_ID
+            || interaction.customId === MANAGE_TICKET_ADD_PREVENTION_CLEAR_ROLES_ID
+            || interaction.customId === MANAGE_TICKET_ADD_PREVENTION_CLEAR_CHANNELS_ID)
             && !hasSecurityBackend(client)) {
             await interaction.reply({
                 content: 'Security backend is not loaded yet. Pull latest changes and restart the bot.',
@@ -3221,6 +3293,69 @@ module.exports = {
                 panel: MANAGE_PANEL_SECURITY,
                 selectedSecuritySection: MANAGE_SECURITY_SECTION_JOIN_FILTER,
                 notice: 'Cleared join filter keywords.'
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_TICKET_ADD_PREVENTION_TOGGLE_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const ticketAddPrevention = settings.ticketAddPrevention && typeof settings.ticketAddPrevention === 'object'
+                ? settings.ticketAddPrevention
+                : { enabled: false, roleIds: [], channelIds: [] };
+
+            client.updateSecuritySettings(interaction.guild.id, {
+                ticketAddPrevention: {
+                    ...ticketAddPrevention,
+                    enabled: !ticketAddPrevention.enabled
+                }
+            });
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection: MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION,
+                notice: `Ticket Add Prevention ${ticketAddPrevention.enabled ? 'disabled' : 'enabled'}.`
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_TICKET_ADD_PREVENTION_CLEAR_ROLES_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const ticketAddPrevention = settings.ticketAddPrevention && typeof settings.ticketAddPrevention === 'object'
+                ? settings.ticketAddPrevention
+                : { enabled: false, roleIds: [], channelIds: [] };
+
+            client.updateSecuritySettings(interaction.guild.id, {
+                ticketAddPrevention: {
+                    ...ticketAddPrevention,
+                    roleIds: []
+                }
+            });
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection: MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION,
+                notice: 'Cleared protected roles.'
+            }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_TICKET_ADD_PREVENTION_CLEAR_CHANNELS_ID) {
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const ticketAddPrevention = settings.ticketAddPrevention && typeof settings.ticketAddPrevention === 'object'
+                ? settings.ticketAddPrevention
+                : { enabled: false, roleIds: [], channelIds: [] };
+
+            client.updateSecuritySettings(interaction.guild.id, {
+                ticketAddPrevention: {
+                    ...ticketAddPrevention,
+                    channelIds: []
+                }
+            });
+
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection: MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION,
+                notice: 'Cleared applied channels.'
             }));
             return true;
         }
@@ -3830,10 +3965,34 @@ module.exports = {
     async handleChannelSelect({ client, interaction }) {
         if (interaction.customId !== MANAGE_AUTOMOD_DRAFT_ALLOWED_CHANNELS_ID
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_IGNORED_CHANNELS_ID
-            && interaction.customId !== MANAGE_AUTOMOD_DRAFT_LOG_CHANNEL_ID) return false;
+            && interaction.customId !== MANAGE_AUTOMOD_DRAFT_LOG_CHANNEL_ID
+            && interaction.customId !== MANAGE_TICKET_ADD_PREVENTION_CHANNEL_SELECT_ID) return false;
 
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_TICKET_ADD_PREVENTION_CHANNEL_SELECT_ID) {
+            if (!hasSecurityBackend(client)) {
+                await interaction.reply({ content: 'Security backend is not loaded yet. Pull latest changes and restart the bot.', ephemeral: true });
+                return true;
+            }
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const ticketAddPrevention = settings.ticketAddPrevention && typeof settings.ticketAddPrevention === 'object'
+                ? settings.ticketAddPrevention
+                : { enabled: false, roleIds: [], channelIds: [] };
+            client.updateSecuritySettings(interaction.guild.id, {
+                ticketAddPrevention: {
+                    ...ticketAddPrevention,
+                    channelIds: [...new Set(interaction.values.map(String))]
+                }
+            });
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection: MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION,
+                notice: 'Updated applied channels.'
+            }));
             return true;
         }
 
@@ -3865,11 +4024,35 @@ module.exports = {
     async handleRoleSelect({ client, interaction }) {
         if (interaction.customId !== MANAGE_AUTOMOD_DRAFT_ALLOWED_ROLES_ID
             && interaction.customId !== MANAGE_AUTOMOD_DRAFT_IGNORED_ROLES_ID
+            && interaction.customId !== MANAGE_TICKET_ADD_PREVENTION_ROLE_SELECT_ID
             && !interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_ALLOWED_ROLES_PREFIX)
             && !interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_IGNORED_ROLES_PREFIX)) return false;
 
         if (!interaction.guild) {
             await interaction.reply({ content: 'This action must be used in a server channel.', ephemeral: true });
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_TICKET_ADD_PREVENTION_ROLE_SELECT_ID) {
+            if (!hasSecurityBackend(client)) {
+                await interaction.reply({ content: 'Security backend is not loaded yet. Pull latest changes and restart the bot.', ephemeral: true });
+                return true;
+            }
+            const settings = client.getSecuritySettings(interaction.guild.id);
+            const ticketAddPrevention = settings.ticketAddPrevention && typeof settings.ticketAddPrevention === 'object'
+                ? settings.ticketAddPrevention
+                : { enabled: false, roleIds: [], channelIds: [] };
+            client.updateSecuritySettings(interaction.guild.id, {
+                ticketAddPrevention: {
+                    ...ticketAddPrevention,
+                    roleIds: [...new Set(interaction.values.map(String))]
+                }
+            });
+            await interaction.update(buildManagePayload(client, interaction.guild.id, {
+                panel: MANAGE_PANEL_SECURITY,
+                selectedSecuritySection: MANAGE_SECURITY_SECTION_TICKET_ADD_PREVENTION,
+                notice: 'Updated protected roles.'
+            }));
             return true;
         }
 
