@@ -16,7 +16,9 @@ function extractUserId(value) {
 }
 
 function buildAvatarPayload(user, member = null) {
-    const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 4096, forceStatic: true });
+    const avatarUrl = typeof member?.displayAvatarURL === 'function'
+        ? member.displayAvatarURL({ extension: 'png', size: 4096, forceStatic: true })
+        : user.displayAvatarURL({ extension: 'png', size: 4096, forceStatic: true });
     const title = member?.displayName || user.globalName || user.username;
 
     const embed = new EmbedBuilder()

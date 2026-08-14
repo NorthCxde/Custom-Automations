@@ -5766,16 +5766,8 @@ client.on('messageCreate', async (message) => {
                 components = [row];
             }
 
-            const afkAvatarUrl = typeof mentionedMember?.displayAvatarURL === 'function'
-                ? mentionedMember.displayAvatarURL({ extension: 'png', size: 256 })
-                : firstMention.user.displayAvatarURL({ extension: 'png', size: 256 });
-            const afkNoticeEmbed = new EmbedBuilder()
-                .setColor(0x2B2D31)
-                .setAuthor({ name: `${displayName} is AFK`, iconURL: afkAvatarUrl })
-                .setDescription(`**${firstMention.state.message.replace(/\*/g, '\\*')}**\n${formatAfkElapsed(firstMention.state.setAt)}`);
-
             await message.channel.send({
-                embeds: [afkNoticeEmbed],
+                content: `${displayName} is AFK: **${firstMention.state.message.replace(/\*/g, '\\*')}** - ${formatAfkElapsed(firstMention.state.setAt)}`,
                 components,
                 allowedMentions: { parse: [], users: [], roles: [], repliedUser: false }
             }).catch(() => null);
