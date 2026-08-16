@@ -119,5 +119,46 @@ module.exports = {
                 fs.unlinkSync(imagePath);
             }
         }
+    },
+    async execute({ message }) {
+        const attachment = message.attachments?.first?.();
+        if (!attachment) {
+            return message.reply('Attach an image to the `?gif` command.');
+        }
+
+        if (!sharp) {
+            return message.reply('Sharp library is not installed on the server. Contact the bot admin.');
+        }
+
+        let imagePath = null;
+        let outputPath = null;
+        try {
+            imagePath = await downloadImage(attachment.url);
+            outputPath = path.join(os.tmpdir(), `gif_output_${Date.now()}.gif`);
+            const success = await convertToGif(imagePath, outputPath);
+
+            if (!success || !fs.existsSync(outputPath)) {
+                return message.reply('Failed to convert the attachment to a GIF. Make sure it is a valid image.');
+            }
+
+            const stats = fs.statSync(outputPath);
+            if (stats.size > 25 * 1024 * 1024) {
+                return message.reply('The converted GIF exceeds Discord\'s 25MB file limit.');
+            }
+
+            return await message.reply({
+                files: [new AttachmentBuilder(outputPath, { name: 'converted.gif' })]
+            });
+        } catch (error) {
+            console.error('Prefix GIF conversion error:', error);
+            return message.reply(`Error converting image: ${error.message}`);
+        } finally {
+            if (imagePath && fs.existsSync(imagePath)) {
+                fs.unlinkSync(imagePath);
+            }
+            if (outputPath && fs.existsSync(outputPath)) {
+                fs.unlinkSync(outputPath);
+            }
+        }
     }
 };
