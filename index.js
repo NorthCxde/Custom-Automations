@@ -6129,7 +6129,8 @@ client.on('messageCreate', async (message) => {
 
     const args = message.content.slice(prefix.length).trim().split(/\s+/);
     const commandName = args.shift().toLowerCase();
-    const command = client.commands.get(commandName);
+    const command = client.commands.get(commandName)
+        || (commandName === 'av' ? client.commands.get('avatar') : null);
     if (!command) return;
 
     const moderationPrefixCommands = new Set(['mute', 'ban', 'unmute', 'unban', 'purge']);
