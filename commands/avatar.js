@@ -38,10 +38,34 @@ function buildAvatarPayload(user, member = null) {
 }
 
 async function resolveTargetUser(client, source, rawTarget) {
-    if (!rawTarget) return source.user || source.author;
-    const userId = extractUserId(rawTarget);
-    if (!userId) return null;
-    return await client.users.fetch(userId).catch(() => null);
+    const normalized = String(rawTarget || '').trim();
+    if (!normalized || ['me', 'myself', 'self'].includes(normalized.toLowerCase())) {
+        return source.user || source.author;
+    }
+
+    const userId = extractUserId(normalized);
+    if (userId) {
+        return await client.users.fetch(userId).catch(() => null);
+    }
+
+    const guild = source?.guild || source?.member?.guild || null;
+    const query = normalized.toLowerCase();
+    if (!guild || !query) return null;
+
+    const member = guild.members.cache.find((candidate) => {
+        const candidateUser = candidate.user || null;
+        const displayName = String(candidate.displayName || '').toLowerCase();
+        const globalName = String(candidateUser?.globalName || '').toLowerCase();
+        const username = String(candidateUser?.username || '').toLowerCase();
+        const nickname = String(candidate.nickname || '').toLowerCase();
+        return displayName.includes(query)
+            || globalName.includes(query)
+            || username.includes(query)
+            || nickname.includes(query);
+    }) || null;
+
+    if (!member) return null;
+    return member.user || null;
 }
 
 module.exports = {
@@ -63,7 +87,7 @@ module.exports = {
 
         const targetUser = await resolveTargetUser(client, message, args[0]);
         if (!targetUser) {
-            return message.reply('Please provide a valid user mention or user ID.');
+            return message.reply('Please provide a valid user mention, user ID, or guild username.');
         }
 
         const member = await message.guild.members.fetch(targetUser.id).catch(() => null);
