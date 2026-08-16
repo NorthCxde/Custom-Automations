@@ -6132,13 +6132,14 @@ client.on('messageCreate', async (message) => {
     const command = client.commands.get(commandName)
         || (commandName === 'av' ? client.commands.get('avatar') : null);
     if (!command) return;
+    const accessCommandName = command.name || commandName;
 
     const moderationPrefixCommands = new Set(['mute', 'ban', 'unmute', 'unban', 'purge']);
     const shouldHideModerationCommand = client.getHideCommandState(message.guild.id, message.author.id)
         && moderationPrefixCommands.has(commandName);
 
     const commandLevel = typeof client.getCommandAccessLevel === 'function'
-        ? client.getCommandAccessLevel(commandName)
+        ? client.getCommandAccessLevel(accessCommandName)
         : (command.public ? 'public' : 'moderator');
 
     if (commandLevel === 'admin' && !HARD_CODED_ADMINS.includes(message.author.id)) {
