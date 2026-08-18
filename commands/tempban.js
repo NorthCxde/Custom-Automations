@@ -15,6 +15,23 @@ function getPrefixUserId(value) {
     return /^\d{17,20}$/.test(normalized) ? normalized : null;
 }
 
+async function sendTempBanStatusCard(client, channel, text) {
+    if (!channel || !text) return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setDescription(`✅ ${String(text).trim()}`);
+
+    try {
+        const statusMessage = await channel.send({ embeds: [embed] });
+        if (client.prefixCommandReactionEmojiId && statusMessage) {
+            await statusMessage.react(client.prefixCommandReactionEmojiId).catch(() => null);
+        }
+    } catch (error) {
+        console.error('Failed to send temporary ban status card:', error);
+    }
+}
+
 function buildCommand() {
     return new SlashCommandBuilder()
         .setName('tempban')
@@ -100,7 +117,12 @@ module.exports = {
 
         const result = outcome.results[0];
         if (!result.success) return message.reply(`Could not temporarily ban that user: ${result.error}`);
-        return message.reply(`Temporarily banned ${result.user?.username || `<@${userId}>`} for ${durationRaw}.`);
+        await sendTempBanStatusCard(
+            client,
+            message.channel,
+            `${result.user?.username || 'User'} was temporarily banned for ${durationRaw}.`
+        );
+        return null;
     },
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
@@ -121,6 +143,17 @@ module.exports = {
 
         const successes = outcome.results.filter(result => result.success);
         const failures = outcome.results.filter(result => !result.success);
+        if (successes.length) {
+            const statusChannel = interaction.channel || (interaction.channelId
+                ? await client.channels.fetch(interaction.channelId).catch(() => null)
+                : null);
+            const firstSuccess = successes[0];
+            const statusText = successes.length === 1
+                ? `${firstSuccess.user?.username || 'User'} was temporarily banned for ${durationRaw}.`
+                : `${successes.length} users were temporarily banned for ${durationRaw}.`;
+            await sendTempBanStatusCard(client, statusChannel, statusText);
+        }
+
         const embed = new EmbedBuilder()
             .setColor(0xfaa61a)
             .setTitle('Temporary Ban Action')
