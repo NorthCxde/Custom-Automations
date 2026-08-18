@@ -1066,6 +1066,10 @@ module.exports = {
         const decisionCount = results.filter(r => r.needsModeratorDecision).length;
         const failCount = results.length - successCount - decisionCount;
         const mentions = results.map(r => `<@${r.user.id}>`).join(', ');
+        const appliedDurations = [...new Set(successResults.map(result => String(result.duration || '')).filter(Boolean))];
+        const loggedDuration = ruleConfig
+            ? (appliedDurations.length === 1 ? `${appliedDurations[0]} (auto)` : 'Varies (by infraction level)')
+            : (manualDuration || 'N/A');
         const reply = [];
 
         if (successCount > 0) {
@@ -1137,7 +1141,7 @@ module.exports = {
             .addFields(
                 { name: 'User(s)', value: mentions || 'None', inline: true },
                 { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
-                { name: 'Duration', value: ruleConfig ? 'Auto (by infraction rule)' : (manualDuration || 'N/A'), inline: true },
+                { name: 'Duration', value: loggedDuration, inline: true },
                 { name: 'Rule', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
                 { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                 { name: 'Reason', value: ruleConfig ? ruleConfig.label : (baseReason || 'No reason provided'), inline: false },
