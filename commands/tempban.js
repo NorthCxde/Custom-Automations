@@ -20,6 +20,7 @@ function buildCommand() {
         .setName('tempban')
         .setDescription('Temporarily ban one or more users from the guild')
         .addUserOption(option => option.setName('user').setDescription('The first user to temporarily ban').setRequired(true))
+        .addStringOption(option => option.setName('duration').setDescription('Ban duration, e.g. 1m, 2h, or 3d').setRequired(true))
         .addUserOption(option => option.setName('user2').setDescription('Another user to temporarily ban').setRequired(false))
         .addUserOption(option => option.setName('user3').setDescription('Another user to temporarily ban').setRequired(false))
         .addUserOption(option => option.setName('user4').setDescription('Another user to temporarily ban').setRequired(false))
@@ -27,7 +28,6 @@ function buildCommand() {
         .addAttachmentOption(option => option.setName('evidence2').setDescription('Screenshot evidence 2').setRequired(false))
         .addAttachmentOption(option => option.setName('evidence3').setDescription('Screenshot evidence 3').setRequired(false))
         .addAttachmentOption(option => option.setName('evidence4').setDescription('Screenshot evidence 4').setRequired(false))
-        .addStringOption(option => option.setName('duration').setDescription('Ban duration, e.g. 1m, 2h, or 3d').setRequired(true))
         .addStringOption(option => option.setName('reason').setDescription('Reason for the temporary bans').setRequired(false));
 }
 
