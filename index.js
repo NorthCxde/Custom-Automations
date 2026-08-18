@@ -233,6 +233,7 @@ const autorespondersFile = path.join(dataPath, "autoresponders.json");
 const automodFile = path.join(dataPath, "automod.json");
 const giveawaysFile = path.join(dataPath, "giveaways.json");
 const remindersFile = path.join(dataPath, "reminders.json");
+const tempBansFile = path.join(dataPath, "tempbans.json");
 const afkFile = path.join(dataPath, "afk.json");
 const afkSettingsFile = path.join(dataPath, "afkSettings.json");
 const entryRolesFile = path.join(dataPath, "entryroles.json");
@@ -272,6 +273,8 @@ client.giveawayTimers = new Map();
 client.giveawayDrafts = new Map();
 client.reminders = new Map();
 client.reminderTimers = new Map();
+client.tempBans = new Map();
+client.tempBanTimers = new Map();
 client.afkStates = new Map();
 client.afkSetCooldowns = new Map();
 client.afkUserSettings = new Map();
@@ -2323,6 +2326,71 @@ client.scheduleRemindersOnStartup = () => {
     }
 };
 
+client.loadTempBans = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(tempBansFile)) fs.writeFileSync(tempBansFile, '[]', 'utf8');
+
+    let entries = [];
+    try {
+        entries = JSON.parse(fs.readFileSync(tempBansFile, 'utf8') || '[]');
+    } catch (err) {
+        console.error('Failed to read temporary bans:', err);
+    }
+
+    client.tempBans.clear();
+    for (const entry of Array.isArray(entries) ? entries : []) {
+        if (!entry?.guildId || !entry?.userId || !Number(entry.unbanAt)) continue;
+        client.tempBans.set(`${entry.guildId}:${entry.userId}`, entry);
+    }
+};
+
+client.saveTempBans = () => {
+    fs.writeFileSync(tempBansFile, JSON.stringify([...client.tempBans.values()], null, 2), 'utf8');
+};
+
+client.scheduleTempBanExpiry = (entry) => {
+    if (!entry?.guildId || !entry?.userId) return;
+    const key = `${entry.guildId}:${entry.userId}`;
+    const existing = client.tempBanTimers.get(key);
+    if (existing) clearTimeout(existing);
+
+    const run = async () => {
+        const latest = client.tempBans.get(key);
+        if (!latest) return;
+        const remaining = Number(latest.unbanAt) - Date.now();
+        if (remaining > 0) {
+            const timer = setTimeout(run, Math.min(remaining, 2_147_000_000));
+            if (typeof timer.unref === 'function') timer.unref();
+            client.tempBanTimers.set(key, timer);
+            return;
+        }
+
+        client.tempBanTimers.delete(key);
+        const guild = await client.guilds.fetch(latest.guildId).catch(() => null);
+        if (guild) {
+            await guild.members.unban(latest.userId, 'Temporary ban expired').catch(err => {
+                if (err?.code !== 10026) console.error('Failed to auto-unban temporary ban:', err);
+            });
+        }
+        client.tempBans.delete(key);
+        client.saveTempBans();
+    };
+
+    run().catch(err => console.error('Failed to schedule temporary ban expiry:', err));
+};
+
+client.addTempBan = (entry) => {
+    const stored = { ...entry, createdAt: entry.createdAt || Date.now() };
+    client.tempBans.set(`${stored.guildId}:${stored.userId}`, stored);
+    client.saveTempBans();
+    client.scheduleTempBanExpiry(stored);
+    return stored;
+};
+
+client.scheduleTempBansOnStartup = () => {
+    for (const entry of client.tempBans.values()) client.scheduleTempBanExpiry(entry);
+};
+
 client.loadCommands = () => {
     client.commands.clear();
     client.slashCommands.clear();
@@ -3864,6 +3932,7 @@ client.loadAutoresponders();
 client.loadAutomodRules();
 client.loadGiveaways();
 client.loadReminders();
+client.loadTempBans();
 client.loadAfkStates();
 client.loadAfkUserSettings();
 client.loadEntryRoles();
@@ -4041,6 +4110,7 @@ client.on('clientReady', async () => {
     client.scheduleBloxlinkCacheRefresh();
     client.scheduleGiveawaysOnStartup();
     client.scheduleRemindersOnStartup();
+    client.scheduleTempBansOnStartup();
     client.bootstrapInviteCaches();
 });
 
