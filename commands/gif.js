@@ -58,7 +58,7 @@ async function convertVideoToGif(inputPath, outputPath) {
             '-y',
             '-i', inputPath,
             '-t', '15',
-            '-filter_complex', '[0:v]fps=12,scale=480:-2:flags=lanczos,split[main][palette];[palette]palettegen=stats_mode=diff[colors];[main][colors]paletteuse=dither=sierra2_4a:diff_mode=rectangle',
+            '-filter_complex', '[0:v]fps=15,scale=640:-2:flags=lanczos,split[main][palette];[palette]palettegen=max_colors=256:stats_mode=diff[colors];[main][colors]paletteuse=dither=sierra2_4a:diff_mode=rectangle',
             '-loop', '0',
             '-an',
             outputPath
