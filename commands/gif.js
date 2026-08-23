@@ -1,4 +1,9 @@
-const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const {
+    SlashCommandBuilder,
+    AttachmentBuilder,
+    InteractionContextType,
+    ApplicationIntegrationType
+} = require('discord.js');
 const https = require('https');
 const http = require('http');
 const fs = require('fs');
@@ -88,6 +93,15 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('gif')
         .setDescription('Converts an image into a GIF')
+        .setContexts(
+            InteractionContextType.Guild,
+            InteractionContextType.BotDM,
+            InteractionContextType.PrivateChannel
+        )
+        .setIntegrationTypes(
+            ApplicationIntegrationType.GuildInstall,
+            ApplicationIntegrationType.UserInstall
+        )
         .addAttachmentOption(option =>
             option.setName('image')
                 .setDescription('An image/GIF attachment')
