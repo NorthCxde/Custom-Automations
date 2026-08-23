@@ -94,7 +94,7 @@ module.exports = {
                 .setRequired(false))
         .addAttachmentOption(option =>
             option.setName('video')
-                .setDescription('An MP4/video attachment')
+                .setDescription('An MP4/video attachment (100MB limit)')
                 .setRequired(false))
         .addStringOption(option =>
             option.setName('link')
