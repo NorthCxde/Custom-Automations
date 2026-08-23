@@ -140,9 +140,9 @@ module.exports = {
             }
 
             const stats = fs.statSync(outputPath);
-            if (stats.size > 25 * 1024 * 1024) {
+            if (stats.size > 100 * 1024 * 1024) {
                 fs.unlinkSync(outputPath);
-                return interaction.editReply({ content: 'The converted GIF exceeds Discord\'s 25MB file limit.' });
+                return interaction.editReply({ content: 'The converted GIF exceeds Discord\'s 100MB file limit.' });
             }
 
             let fileName = 'converted.gif';
@@ -186,8 +186,8 @@ module.exports = {
             }
 
             const stats = fs.statSync(outputPath);
-            if (stats.size > 25 * 1024 * 1024) {
-                return message.reply('The converted GIF exceeds Discord\'s 25MB file limit.');
+            if (stats.size > 100 * 1024 * 1024) {
+                return message.reply('The converted GIF exceeds Discord\'s 100MB file limit.');
             }
 
             return await message.reply({
