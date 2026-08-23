@@ -93,6 +93,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('gif')
         .setDescription('Converts an image into a GIF')
+        .setDMPermission(true)
         .setContexts(
             InteractionContextType.Guild,
             InteractionContextType.BotDM,
