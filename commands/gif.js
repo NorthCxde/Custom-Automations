@@ -161,14 +161,22 @@ module.exports = {
             }
         }
     },
-    async execute({ message }) {
+    async execute({ message, args }) {
         const attachment = message.attachments?.first?.();
         if (!attachment) {
-            return message.reply('Attach an image to the `?gif` command.');
+            return message.reply('Attach an image to `?gif` or use `?gif video` for an MP4/video.');
         }
 
-        const isVideo = isVideoAttachment(attachment);
-        if (!isVideo && !sharp) {
+        const useVideo = String(args?.[0] || '').trim().toLowerCase() === 'video';
+        const attachmentIsVideo = isVideoAttachment(attachment);
+        if (useVideo && !attachmentIsVideo) {
+            return message.reply('Attach an MP4 or video file when using `?gif video`.');
+        }
+        if (!useVideo && attachmentIsVideo) {
+            return message.reply('Use `?gif video` when converting an MP4 or video file.');
+        }
+
+        if (!useVideo && !sharp) {
             return message.reply('Sharp library is not installed on the server. Contact the bot admin.');
         }
 
@@ -177,7 +185,7 @@ module.exports = {
         try {
             imagePath = await downloadImage(attachment.url);
             outputPath = path.join(os.tmpdir(), `gif_output_${Date.now()}.gif`);
-            const success = isVideo
+            const success = useVideo
                 ? await convertVideoToGif(imagePath, outputPath)
                 : await convertToGif(imagePath, outputPath);
 
