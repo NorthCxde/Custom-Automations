@@ -4,6 +4,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawn } = require('child_process');
+const ffmpegPath = require('ffmpeg-static');
 
 let sharp;
 try {
@@ -48,6 +50,37 @@ async function convertToGif(inputPath, outputPath) {
     }
 }
 
+async function convertVideoToGif(inputPath, outputPath) {
+    if (!ffmpegPath) throw new Error('FFmpeg binary is not available on this server.');
+
+    return new Promise((resolve, reject) => {
+        const ffmpeg = spawn(ffmpegPath, [
+            '-y',
+            '-i', inputPath,
+            '-t', '15',
+            '-vf', 'fps=12,scale=480:-2:flags=lanczos',
+            '-loop', '0',
+            outputPath
+        ], { windowsHide: true });
+
+        let errorOutput = '';
+        ffmpeg.stderr.on('data', chunk => {
+            errorOutput += chunk.toString();
+        });
+        ffmpeg.on('error', reject);
+        ffmpeg.on('close', code => {
+            if (code === 0) return resolve(true);
+            reject(new Error(errorOutput.trim().split('\n').pop() || `FFmpeg exited with code ${code}.`));
+        });
+    });
+}
+
+function isVideoAttachment(attachment) {
+    const contentType = String(attachment?.contentType || '').toLowerCase();
+    const name = String(attachment?.name || attachment?.url || '').toLowerCase();
+    return contentType.startsWith('video/') || /\.(mp4|mov|webm|mkv)(?:$|\?)/.test(name);
+}
+
 module.exports = {
     name: 'gif',
     description: 'Converts an image into a GIF',
@@ -57,6 +90,10 @@ module.exports = {
         .addAttachmentOption(option =>
             option.setName('image')
                 .setDescription('An image/GIF attachment')
+                .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('video')
+                .setDescription('An MP4/video attachment')
                 .setRequired(false))
         .addStringOption(option =>
             option.setName('link')
@@ -72,15 +109,16 @@ module.exports = {
                 .setRequired(false)),
     async executeInteraction({ client, interaction }) {
         const attachment = interaction.options.getAttachment('image');
+        const video = interaction.options.getAttachment('video');
         const link = interaction.options.getString('link');
         const spoiler = interaction.options.getBoolean('spoiler') || false;
         const ephemeral = interaction.options.getBoolean('ephemeral') || false;
 
-        if (!attachment && !link) {
-            return interaction.reply({ content: 'Please provide either an image attachment or a URL.', ephemeral: true });
+        if (!attachment && !video && !link) {
+            return interaction.reply({ content: 'Please provide an image, video attachment, or URL.', ephemeral: true });
         }
 
-        if (!sharp) {
+        if (!video && !sharp) {
             return interaction.reply({ content: 'Sharp library is not installed on the server. Contact the bot admin.', ephemeral: true });
         }
 
@@ -88,11 +126,13 @@ module.exports = {
 
         let imagePath = null;
         try {
-            const imageUrl = attachment ? attachment.url : link;
+            const imageUrl = video ? video.url : (attachment ? attachment.url : link);
             imagePath = await downloadImage(imageUrl);
 
             const outputPath = path.join(os.tmpdir(), `gif_output_${Date.now()}.gif`);
-            const success = await convertToGif(imagePath, outputPath);
+            const success = video
+                ? await convertVideoToGif(imagePath, outputPath)
+                : await convertToGif(imagePath, outputPath);
 
             if (!success || !fs.existsSync(outputPath)) {
                 return interaction.editReply({ content: 'Failed to convert image to GIF. Make sure the input is a valid image format.' });
@@ -126,7 +166,8 @@ module.exports = {
             return message.reply('Attach an image to the `?gif` command.');
         }
 
-        if (!sharp) {
+        const isVideo = isVideoAttachment(attachment);
+        if (!isVideo && !sharp) {
             return message.reply('Sharp library is not installed on the server. Contact the bot admin.');
         }
 
@@ -135,7 +176,9 @@ module.exports = {
         try {
             imagePath = await downloadImage(attachment.url);
             outputPath = path.join(os.tmpdir(), `gif_output_${Date.now()}.gif`);
-            const success = await convertToGif(imagePath, outputPath);
+            const success = isVideo
+                ? await convertVideoToGif(imagePath, outputPath)
+                : await convertToGif(imagePath, outputPath);
 
             if (!success || !fs.existsSync(outputPath)) {
                 return message.reply('Failed to convert the attachment to a GIF. Make sure it is a valid image.');
