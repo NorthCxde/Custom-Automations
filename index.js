@@ -1579,7 +1579,11 @@ client.buildGiveawayActionRow = (giveaway) => {
         new ButtonBuilder()
             .setCustomId(`gv_join:${giveaway.id}`)
             .setLabel('🎉')
-            .setStyle(ButtonStyle.Primary)
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+            .setCustomId(`gv_edit:${giveaway.id}`)
+            .setLabel('Edit')
+            .setStyle(ButtonStyle.Secondary)
     );
 };
 
@@ -1877,7 +1881,7 @@ client.finalizeGiveaway = async (guildId, giveawayId) => {
     return giveaway;
 };
 
-client.rerollGiveaway = async (guildId, giveawayId, count = 1, actorId = null) => {
+client.rerollGiveaway = async (guildId, giveawayId, count = 1) => {
     const giveaway = client.getGiveaway(guildId, giveawayId);
     if (!giveaway || !giveaway.ended) return { giveaway: null, winners: [] };
 
@@ -1887,15 +1891,6 @@ client.rerollGiveaway = async (guildId, giveawayId, count = 1, actorId = null) =
 
     giveaway.winnerIds = [...new Set([...(giveaway.winnerIds || []), ...winners])];
     client.upsertGiveaway(guildId, giveaway);
-
-    const resolved = await client.resolveGiveawayMessage(giveaway);
-    if (resolved) {
-        const { channel } = resolved;
-        const actorPrefix = actorId ? `<@${actorId}> rerolled the giveaway!` : 'Giveaway rerolled!';
-        await channel.send({
-            content: `${actorPrefix} Congratulations ${winners.map(id => `<@${id}>`).join(', ')}!`
-        }).catch(() => null);
-    }
 
     return { giveaway, winners };
 };
@@ -4509,6 +4504,58 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
+        if (interaction.customId.startsWith('gv_edit_modal:')) {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This must be used in a server.', ephemeral: true });
+            }
+            if (!client.isMemberAllowed(interaction.member)) {
+                return interaction.reply({ content: 'You do not have permission to edit giveaways.', ephemeral: true });
+            }
+
+            const giveawayId = interaction.customId.slice('gv_edit_modal:'.length);
+            const giveaway = client.getGiveaway(interaction.guildId, giveawayId);
+            if (!giveaway) {
+                return interaction.reply({ content: 'This giveaway could not be found.', ephemeral: true });
+            }
+            if (giveaway.ended || Date.now() >= Number(giveaway.endAt)) {
+                return interaction.reply({ content: 'Ended giveaways cannot be edited.', ephemeral: true });
+            }
+
+            const durationRaw = interaction.fields.getTextInputValue('gv_edit_duration').trim();
+            const winnersRaw = interaction.fields.getTextInputValue('gv_edit_winners').trim();
+            const prize = interaction.fields.getTextInputValue('gv_edit_prize').trim();
+            const description = (interaction.fields.getTextInputValue('gv_edit_description') || '').trim();
+            const durationMs = client.parseGiveawayDurationMs(durationRaw);
+            const winnerCount = Number(winnersRaw);
+
+            if (!durationMs) {
+                return interaction.reply({ content: 'Invalid duration. Examples: `10 minutes`, `1h`, `2d 3h`.', ephemeral: true });
+            }
+            if (!Number.isInteger(winnerCount) || winnerCount < 1 || winnerCount > 25) {
+                return interaction.reply({ content: 'Number of winners must be a whole number between 1 and 25.', ephemeral: true });
+            }
+            if (!prize) {
+                return interaction.reply({ content: 'Prize is required.', ephemeral: true });
+            }
+
+            giveaway.prize = prize;
+            giveaway.description = description;
+            giveaway.winnerCount = winnerCount;
+            giveaway.endAt = Date.now() + durationMs;
+            client.upsertGiveaway(interaction.guildId, giveaway);
+            client.scheduleGiveaway(giveaway);
+
+            const resolved = await client.resolveGiveawayMessage(giveaway);
+            if (resolved?.message) {
+                await resolved.message.edit({
+                    embeds: [client.buildGiveawayEmbed(giveaway)],
+                    components: client.buildGiveawayComponents(giveaway)
+                });
+            }
+
+            return interaction.reply({ content: 'Giveaway updated successfully.', ephemeral: true });
+        }
+
         if (interaction.customId !== 'ar_create_modal' && interaction.customId !== 'ar_edit_response_modal') return;
 
         if (!interaction.guild) {
@@ -4878,6 +4925,64 @@ client.on('interactionCreate', async (interaction) => {
                     components: []
                 });
             }
+        }
+
+        if (interaction.customId.startsWith('gv_edit:')) {
+            if (!interaction.guild) {
+                return interaction.reply({ content: 'This must be used in a server.', ephemeral: true });
+            }
+            if (!client.isMemberAllowed(interaction.member)) {
+                return interaction.reply({ content: 'You do not have permission to edit giveaways.', ephemeral: true });
+            }
+
+            const giveawayId = interaction.customId.slice('gv_edit:'.length);
+            const giveaway = client.getGiveaway(interaction.guildId, giveawayId);
+            if (!giveaway) {
+                return interaction.reply({ content: 'This giveaway could not be found.', ephemeral: true });
+            }
+            if (giveaway.ended || Date.now() >= Number(giveaway.endAt)) {
+                return interaction.reply({ content: 'Ended giveaways cannot be edited.', ephemeral: true });
+            }
+
+            const modal = new ModalBuilder()
+                .setCustomId(`gv_edit_modal:${giveaway.id}`)
+                .setTitle('Edit Giveaway');
+            const duration = new TextInputBuilder()
+                .setCustomId('gv_edit_duration')
+                .setLabel('Duration from now')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(80)
+                .setValue('10 minutes');
+            const winners = new TextInputBuilder()
+                .setCustomId('gv_edit_winners')
+                .setLabel('Number of Winners')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(2)
+                .setValue(String(giveaway.winnerCount || 1));
+            const prize = new TextInputBuilder()
+                .setCustomId('gv_edit_prize')
+                .setLabel('Prize')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(200)
+                .setValue(String(giveaway.prize || '').slice(0, 200));
+            const description = new TextInputBuilder()
+                .setCustomId('gv_edit_description')
+                .setLabel('Description')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(false)
+                .setMaxLength(500)
+                .setValue(String(giveaway.description || '').slice(0, 500));
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(duration),
+                new ActionRowBuilder().addComponents(winners),
+                new ActionRowBuilder().addComponents(prize),
+                new ActionRowBuilder().addComponents(description)
+            );
+            return interaction.showModal(modal);
         }
 
         if (interaction.customId.startsWith('gv_join:') || interaction.customId.startsWith('gv_leave:')) {
