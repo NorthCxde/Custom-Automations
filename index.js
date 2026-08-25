@@ -4949,11 +4949,12 @@ client.on('interactionCreate', async (interaction) => {
                 .setTitle('Edit Giveaway');
             const duration = new TextInputBuilder()
                 .setCustomId('gv_edit_duration')
-                .setLabel('Duration from now')
+                .setLabel('Duration (10m, 2h, 1s)')
+                .setPlaceholder('Examples: 10m, 2h, 1s')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
                 .setMaxLength(80)
-                .setValue('10 minutes');
+                .setValue('10m');
             const winners = new TextInputBuilder()
                 .setCustomId('gv_edit_winners')
                 .setLabel('Number of Winners')
