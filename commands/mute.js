@@ -1070,6 +1070,14 @@ module.exports = {
         const loggedDuration = ruleConfig
             ? (appliedDurations.length === 1 ? `${appliedDurations[0]} (auto)` : 'Varies (by infraction level)')
             : (manualDuration || 'N/A');
+        const infractionLevelLines = successResults
+            .filter(result => ruleConfig && Number.isInteger(result.infractionCount))
+            .map(result => `Level ${result.infractionCount}`);
+        const infractionLevelValue = infractionLevelLines.length ? infractionLevelLines.join('\n').slice(0, 1024) : 'N/A';
+        const detectedRuleValue = ruleConfig?.label ? `\`${ruleConfig.label}\`` : 'None';
+        const detectedPhraseValue = ruleConfig
+            ? `\`${ruleConfig.label}\``
+            : (baseReason || 'No reason provided');
         const reply = [];
 
         if (successCount > 0) {
@@ -1187,10 +1195,12 @@ module.exports = {
                 .addFields(
                     { name: 'User(s)', value: mentions || 'None', inline: true },
                     { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: 'Duration', value: loggedDuration, inline: true },
                     { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
                     { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false },
-                    { name: 'Rule', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
-                    { name: 'Reason', value: ruleConfig ? ruleConfig.label : (baseReason || 'No reason provided'), inline: false },
+                    { name: 'Detected Rule', value: detectedRuleValue, inline: true },
+                    { name: 'Infraction Level', value: infractionLevelValue, inline: true },
+                    { name: ruleConfig ? 'Detected Phrase' : 'Reason', value: detectedPhraseValue.slice(0, 1024), inline: false },
                     { name: 'Outcome', value: `${successCount} muted, ${decisionCount} needs decision, ${failCount} failed`, inline: false }
                 )
                 .setTimestamp();
