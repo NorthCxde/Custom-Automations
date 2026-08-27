@@ -4448,11 +4448,27 @@ client.on('threadCreate', async (thread) => {
         const roleId = client.getForumPingRoleId(thread.guildId, thread.parentId);
         if (!roleId) return;
 
-        await thread.send({
+        const pingPayload = {
             content: `<@&${roleId}>`,
             allowedMentions: { roles: [roleId] },
             components: [client.buildForumPingCloseRow(thread.id)]
-        }).catch(err => console.error(`Failed to send forum ping in thread ${thread.id}:`, err));
+        };
+
+        // the starter message isn't registered instantly on creation (code 40058), so retry briefly before giving up
+        const maxAttempts = 5;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                await thread.send(pingPayload);
+                break;
+            } catch (err) {
+                const isNotReadyYet = Number(err?.code) === 40058;
+                if (!isNotReadyYet || attempt === maxAttempts) {
+                    console.error(`Failed to send forum ping in thread ${thread.id}:`, err);
+                    break;
+                }
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
     } catch (err) {
         console.error(`Failed to process forum ping for thread ${thread?.id || 'unknown'}:`, err);
     }
