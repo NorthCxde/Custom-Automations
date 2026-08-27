@@ -3305,6 +3305,9 @@ client.closeForumPost = async ({ thread, closedBy, reason = null }) => {
             console.error(`Failed to unfollow members from forum post ${thread.id}:`, err);
         }
 
+        // archive last, and separately from setLocked, since combining lock+archive in one edit can be rejected by Discord
+        await thread.setArchived(true, reason || 'Closed').catch(err => console.error(`Failed to archive forum post ${thread.id}:`, err));
+
         const transcriptChannel = await client.channels.fetch(FORUM_CLOSE_TRANSCRIPT_CHANNEL_ID).catch(() => null);
         if (transcriptChannel?.isTextBased()) {
             const embed = new EmbedBuilder()
@@ -4800,7 +4803,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setStyle(ButtonStyle.Secondary)
             );
             return interaction.reply({
-                content: '⚠️ Are you sure you want to close this post? This will lock it, tag it Solved, and unfollow everyone.',
+                content: '⚠️ Are you sure you want to close this post?',
                 components: [confirmRow],
                 ephemeral: true
             });
