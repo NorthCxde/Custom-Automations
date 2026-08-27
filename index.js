@@ -3295,6 +3295,16 @@ client.closeForumPost = async ({ thread, closedBy, reason = null }) => {
 
         await thread.setLocked(true, reason || 'Closed');
 
+        try {
+            const threadMembers = await thread.members.fetch();
+            for (const [memberId] of threadMembers) {
+                if (memberId === client.user.id) continue;
+                await thread.members.remove(memberId).catch(err => console.error(`Failed to unfollow ${memberId} from forum post ${thread.id}:`, err));
+            }
+        } catch (err) {
+            console.error(`Failed to unfollow members from forum post ${thread.id}:`, err);
+        }
+
         const transcriptChannel = await client.channels.fetch(FORUM_CLOSE_TRANSCRIPT_CHANNEL_ID).catch(() => null);
         if (transcriptChannel?.isTextBased()) {
             const embed = new EmbedBuilder()
@@ -4779,8 +4789,42 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.showModal(modal);
             }
 
+            const confirmRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`forumping_close_confirm:${thread.id}`)
+                    .setLabel('Confirm Close')
+                    .setStyle(ButtonStyle.Danger),
+                new ButtonBuilder()
+                    .setCustomId(`forumping_close_cancel:${thread.id}`)
+                    .setLabel('Cancel')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+            return interaction.reply({
+                content: '⚠️ Are you sure you want to close this post? This will lock it, tag it Solved, and unfollow everyone.',
+                components: [confirmRow],
+                ephemeral: true
+            });
+        }
+
+        if (interaction.customId.startsWith('forumping_close_confirm:') || interaction.customId.startsWith('forumping_close_cancel:')) {
+            if (!interaction.guild || !interaction.channel?.isThread()) {
+                return interaction.reply({ content: 'This action must be used inside a forum post.', ephemeral: true });
+            }
+            if (!client.isMemberAllowed(interaction.member)) {
+                return interaction.reply({ content: 'You do not have permission to close this post.', ephemeral: true });
+            }
+
+            if (interaction.customId.startsWith('forumping_close_cancel:')) {
+                return interaction.update({ content: 'Close cancelled.', components: [] });
+            }
+
+            const thread = interaction.channel;
+            if (thread.locked) {
+                return interaction.update({ content: 'This post is already closed.', components: [] });
+            }
+
             const result = await client.closeForumPost({ thread, closedBy: interaction.user, reason: null });
-            return interaction.reply({ content: result.success ? 'Post closed.' : result.error, ephemeral: true });
+            return interaction.update({ content: result.success ? 'Post closed.' : result.error, components: [] });
         }
 
         if (interaction.customId.startsWith('afk_notify_me:')) {
