@@ -3265,6 +3265,58 @@ client.clearForumPing = (guildId, channelId) => {
     return removed;
 };
 
+const FORUM_CLOSE_SOLVED_TAG_ID = '1542309566438576128';
+const FORUM_CLOSE_TRANSCRIPT_CHANNEL_ID = '964450455247794246';
+
+client.isForumPingThread = (thread) => {
+    return Boolean(thread?.guildId && thread.parentId && client.getForumPingRoleId(thread.guildId, thread.parentId));
+};
+
+client.buildForumPingCloseRow = (threadId) => new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+        .setCustomId(`forumping_close:${threadId}`)
+        .setLabel('Close')
+        .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+        .setCustomId(`forumping_close_reason:${threadId}`)
+        .setLabel('Close With Reason')
+        .setStyle(ButtonStyle.Danger)
+);
+
+client.closeForumPost = async ({ thread, closedBy, reason = null }) => {
+    if (!thread) return { success: false, error: 'Thread not found.' };
+    if (thread.locked) return { success: false, error: 'This post is already closed.' };
+
+    try {
+        const existingTags = Array.isArray(thread.appliedTags) ? thread.appliedTags : [];
+        if (!existingTags.includes(FORUM_CLOSE_SOLVED_TAG_ID) && existingTags.length < 5) {
+            await thread.setAppliedTags([...existingTags, FORUM_CLOSE_SOLVED_TAG_ID]).catch(err => console.error(`Failed to tag forum post ${thread.id} as solved:`, err));
+        }
+
+        await thread.setLocked(true, reason || 'Closed');
+
+        const transcriptChannel = await client.channels.fetch(FORUM_CLOSE_TRANSCRIPT_CHANNEL_ID).catch(() => null);
+        if (transcriptChannel?.isTextBased()) {
+            const embed = new EmbedBuilder()
+                .setColor(0x000000)
+                .setTitle('Forum Post Closed')
+                .addFields(
+                    { name: 'Post', value: `${thread} (${thread.name})`, inline: false },
+                    { name: 'Forum Channel', value: thread.parentId ? `<#${thread.parentId}>` : 'Unknown', inline: true },
+                    { name: 'Closed By', value: `<@${closedBy.id}>`, inline: true },
+                    { name: 'Reason', value: reason ? reason.slice(0, 1024) : 'N/A', inline: false }
+                )
+                .setTimestamp();
+            await transcriptChannel.send({ embeds: [embed] }).catch(err => console.error('Failed to send forum close transcript log:', err));
+        }
+
+        return { success: true };
+    } catch (err) {
+        console.error(`Failed to close forum post ${thread.id}:`, err);
+        return { success: false, error: 'Failed to close this post. Check my Manage Threads permission.' };
+    }
+};
+
 client.loadManualLogsChannels = () => {
     if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
     if (!fs.existsSync(manualLogsChannelsFile)) fs.writeFileSync(manualLogsChannelsFile, '{}', 'utf8');
@@ -4378,7 +4430,8 @@ client.on('threadCreate', async (thread) => {
 
         await thread.send({
             content: `<@&${roleId}>`,
-            allowedMentions: { roles: [roleId] }
+            allowedMentions: { roles: [roleId] },
+            components: [client.buildForumPingCloseRow(thread.id)]
         }).catch(err => console.error(`Failed to send forum ping in thread ${thread.id}:`, err));
     } catch (err) {
         console.error(`Failed to process forum ping for thread ${thread?.id || 'unknown'}:`, err);
@@ -4460,6 +4513,19 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith('forumping_close_reason_modal:')) {
+            if (!interaction.guild || !interaction.channel?.isThread()) {
+                return interaction.reply({ content: 'This action must be used inside a forum post.', ephemeral: true });
+            }
+            if (!client.isMemberAllowed(interaction.member)) {
+                return interaction.reply({ content: 'You do not have permission to close this post.', ephemeral: true });
+            }
+
+            const reason = interaction.fields.getTextInputValue('forumping_close_reason_input').trim();
+            const result = await client.closeForumPost({ thread: interaction.channel, closedBy: interaction.user, reason: reason || null });
+            return interaction.reply({ content: result.success ? 'Post closed.' : result.error, ephemeral: true });
+        }
+
         if (interaction.customId.startsWith('remind_edit_modal:')) {
             const remindCommand = client.slashCommands.get('remind');
             if (remindCommand && typeof remindCommand.handleModalSubmit === 'function') {
@@ -4685,6 +4751,38 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('forumping_close:') || interaction.customId.startsWith('forumping_close_reason:')) {
+            if (!interaction.guild || !interaction.channel?.isThread()) {
+                return interaction.reply({ content: 'This action must be used inside a forum post.', ephemeral: true });
+            }
+            if (!client.isMemberAllowed(interaction.member)) {
+                return interaction.reply({ content: 'You do not have permission to close this post.', ephemeral: true });
+            }
+
+            const thread = interaction.channel;
+            if (thread.locked) {
+                return interaction.reply({ content: 'This post is already closed.', ephemeral: true });
+            }
+
+            if (interaction.customId.startsWith('forumping_close_reason:')) {
+                const modal = new ModalBuilder()
+                    .setCustomId(`forumping_close_reason_modal:${thread.id}`)
+                    .setTitle('Close With Reason');
+                const reasonInput = new TextInputBuilder()
+                    .setCustomId('forumping_close_reason_input')
+                    .setLabel('Reason')
+                    .setPlaceholder('Reason for closing the post, e.g. "Resolved"')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(true)
+                    .setMaxLength(1000);
+                modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+                return interaction.showModal(modal);
+            }
+
+            const result = await client.closeForumPost({ thread, closedBy: interaction.user, reason: null });
+            return interaction.reply({ content: result.success ? 'Post closed.' : result.error, ephemeral: true });
+        }
+
         if (interaction.customId.startsWith('afk_notify_me:')) {
             const afkCommand = client.slashCommands.get('afk');
             if (afkCommand && typeof afkCommand.handleButton === 'function') {
