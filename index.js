@@ -3296,19 +3296,6 @@ client.closeForumPost = async ({ thread, closedBy, reason = null, tagId = FORUM_
 
         await thread.setLocked(true, reason || 'Closed');
 
-        try {
-            const threadMembers = await thread.members.fetch();
-            for (const [memberId] of threadMembers) {
-                if (memberId === client.user.id) continue;
-                await thread.members.remove(memberId).catch(err => console.error(`Failed to unfollow ${memberId} from forum post ${thread.id}:`, err));
-            }
-        } catch (err) {
-            console.error(`Failed to unfollow members from forum post ${thread.id}:`, err);
-        }
-
-        // archive last, and separately from setLocked, since combining lock+archive in one edit can be rejected by Discord
-        await thread.setArchived(true, reason || 'Closed').catch(err => console.error(`Failed to archive forum post ${thread.id}:`, err));
-
         const embed = new EmbedBuilder()
             .setColor(0x000000)
             .setTitle('Exploiter Report Closed')
@@ -3321,20 +3308,48 @@ client.closeForumPost = async ({ thread, closedBy, reason = null, tagId = FORUM_
             .setTimestamp();
 
         const transcriptChannel = await client.channels.fetch(FORUM_CLOSE_TRANSCRIPT_CHANNEL_ID).catch(() => null);
+        const transcriptPromise = transcriptChannel?.isTextBased()
+            ? transcriptChannel.send({
+                embeds: [embed],
+                components: [new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setLabel('View Ticket')
+                        .setStyle(ButtonStyle.Link)
+                        .setURL(thread.url)
+                )]
+            }).catch(err => console.error('Failed to send forum close transcript log:', err))
+            : Promise.resolve();
+
+        const creatorId = thread.ownerId;
+        const creator = creatorId && creatorId !== client.user.id
+            ? await client.users.fetch(creatorId).catch(() => null)
+            : null;
+        const dmPromise = creator
+            ? creator.send({ embeds: [embed] }).catch(err => console.error(`Failed to DM forum post creator ${creatorId} about closure:`, err))
+            : Promise.resolve();
+
         if (transcriptChannel?.isTextBased()) {
-            const viewTicketRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setLabel('View Ticket')
-                    .setStyle(ButtonStyle.Link)
-                    .setURL(thread.url)
-            );
-            await transcriptChannel.send({ embeds: [embed], components: [viewTicketRow] }).catch(err => console.error('Failed to send forum close transcript log:', err));
+            await transcriptPromise;
         }
 
-        if (thread.ownerId && thread.ownerId !== client.user.id) {
-            const creator = await client.users.fetch(thread.ownerId).catch(() => null);
-            await creator?.send({ embeds: [embed] }).catch(err => console.error(`Failed to DM forum post creator ${thread.ownerId} about closure:`, err));
+        try {
+            const threadMembers = await thread.members.fetch();
+            if (creatorId && creatorId !== client.user.id) {
+                await thread.members.remove(creatorId).catch(err => console.error(`Failed to remove forum post creator ${creatorId} from thread ${thread.id}:`, err));
+            }
+
+            const remainingMemberIds = [...threadMembers.keys()]
+                .filter(memberId => memberId !== client.user.id && memberId !== creatorId);
+            await Promise.all(remainingMemberIds.map(memberId =>
+                thread.members.remove(memberId).catch(err => console.error(`Failed to unfollow ${memberId} from forum post ${thread.id}:`, err))
+            ));
+        } catch (err) {
+            console.error(`Failed to unfollow members from forum post ${thread.id}:`, err);
         }
+
+        // archive separately from setLocked, since combining lock+archive in one edit can be rejected by Discord
+        await thread.setArchived(true, reason || 'Closed').catch(err => console.error(`Failed to archive forum post ${thread.id}:`, err));
+        await dmPromise;
 
         return { success: true };
     } catch (err) {
