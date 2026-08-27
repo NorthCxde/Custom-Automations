@@ -3322,7 +3322,13 @@ client.closeForumPost = async ({ thread, closedBy, reason = null, tagId = FORUM_
 
         const transcriptChannel = await client.channels.fetch(FORUM_CLOSE_TRANSCRIPT_CHANNEL_ID).catch(() => null);
         if (transcriptChannel?.isTextBased()) {
-            await transcriptChannel.send({ embeds: [embed] }).catch(err => console.error('Failed to send forum close transcript log:', err));
+            const viewTicketRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setLabel('View Ticket')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(thread.url)
+            );
+            await transcriptChannel.send({ embeds: [embed], components: [viewTicketRow] }).catch(err => console.error('Failed to send forum close transcript log:', err));
         }
 
         if (thread.ownerId && thread.ownerId !== client.user.id) {
