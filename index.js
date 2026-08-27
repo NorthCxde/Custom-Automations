@@ -3309,19 +3309,25 @@ client.closeForumPost = async ({ thread, closedBy, reason = null, tagId = FORUM_
         // archive last, and separately from setLocked, since combining lock+archive in one edit can be rejected by Discord
         await thread.setArchived(true, reason || 'Closed').catch(err => console.error(`Failed to archive forum post ${thread.id}:`, err));
 
+        const embed = new EmbedBuilder()
+            .setColor(0x000000)
+            .setTitle('Forum Post Closed')
+            .addFields(
+                { name: 'Post', value: `${thread} (${thread.name})`, inline: false },
+                { name: 'Forum Channel', value: thread.parentId ? `<#${thread.parentId}>` : 'Unknown', inline: true },
+                { name: 'Closed By', value: `<@${closedBy.id}>`, inline: true },
+                { name: 'Reason', value: reason ? reason.slice(0, 1024) : 'N/A', inline: false }
+            )
+            .setTimestamp();
+
         const transcriptChannel = await client.channels.fetch(FORUM_CLOSE_TRANSCRIPT_CHANNEL_ID).catch(() => null);
         if (transcriptChannel?.isTextBased()) {
-            const embed = new EmbedBuilder()
-                .setColor(0x000000)
-                .setTitle('Forum Post Closed')
-                .addFields(
-                    { name: 'Post', value: `${thread} (${thread.name})`, inline: false },
-                    { name: 'Forum Channel', value: thread.parentId ? `<#${thread.parentId}>` : 'Unknown', inline: true },
-                    { name: 'Closed By', value: `<@${closedBy.id}>`, inline: true },
-                    { name: 'Reason', value: reason ? reason.slice(0, 1024) : 'N/A', inline: false }
-                )
-                .setTimestamp();
             await transcriptChannel.send({ embeds: [embed] }).catch(err => console.error('Failed to send forum close transcript log:', err));
+        }
+
+        if (thread.ownerId && thread.ownerId !== client.user.id) {
+            const creator = await client.users.fetch(thread.ownerId).catch(() => null);
+            await creator?.send({ embeds: [embed] }).catch(err => console.error(`Failed to DM forum post creator ${thread.ownerId} about closure:`, err));
         }
 
         return { success: true };
