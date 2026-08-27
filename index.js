@@ -3266,6 +3266,7 @@ client.clearForumPing = (guildId, channelId) => {
 };
 
 const FORUM_CLOSE_SOLVED_TAG_ID = '1542309566438576128';
+const FORUM_CLOSE_NO_REASON_TAG_ID = '1542316857019859159';
 const FORUM_CLOSE_TRANSCRIPT_CHANNEL_ID = '964450455247794246';
 
 client.isForumPingThread = (thread) => {
@@ -3283,14 +3284,14 @@ client.buildForumPingCloseRow = (threadId) => new ActionRowBuilder().addComponen
         .setStyle(ButtonStyle.Danger)
 );
 
-client.closeForumPost = async ({ thread, closedBy, reason = null }) => {
+client.closeForumPost = async ({ thread, closedBy, reason = null, tagId = FORUM_CLOSE_SOLVED_TAG_ID }) => {
     if (!thread) return { success: false, error: 'Thread not found.' };
     if (thread.locked) return { success: false, error: 'This post is already closed.' };
 
     try {
         const existingTags = Array.isArray(thread.appliedTags) ? thread.appliedTags : [];
-        if (!existingTags.includes(FORUM_CLOSE_SOLVED_TAG_ID) && existingTags.length < 5) {
-            await thread.setAppliedTags([...existingTags, FORUM_CLOSE_SOLVED_TAG_ID]).catch(err => console.error(`Failed to tag forum post ${thread.id} as solved:`, err));
+        if (!existingTags.includes(tagId) && existingTags.length < 5) {
+            await thread.setAppliedTags([...existingTags, tagId]).catch(err => console.error(`Failed to tag forum post ${thread.id} as closed:`, err));
         }
 
         await thread.setLocked(true, reason || 'Closed');
@@ -4841,7 +4842,7 @@ client.on('interactionCreate', async (interaction) => {
             // ack immediately, since unfollowing every thread member can take longer than the 3s interaction window
             try {
                 await interaction.deferUpdate();
-                const result = await client.closeForumPost({ thread, closedBy: interaction.user, reason: null });
+                const result = await client.closeForumPost({ thread, closedBy: interaction.user, reason: null, tagId: FORUM_CLOSE_NO_REASON_TAG_ID });
                 return await interaction.editReply({ content: result.success ? 'Post closed.' : result.error, components: [] });
             } catch (err) {
                 console.error('Failed to close forum post via confirm button:', err);
