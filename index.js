@@ -239,6 +239,7 @@ const afkSettingsFile = path.join(dataPath, "afkSettings.json");
 const entryRolesFile = path.join(dataPath, "entryroles.json");
 const infractionsFile = path.join(dataPath, "infractions.json");
 const manualLogsChannelsFile = path.join(dataPath, "manualLogsChannels.json");
+const forumPingsFile = path.join(dataPath, "forumPings.json");
 const publicPermsFile = path.join(dataPath, "publicperms.json");
 const inviteLogsFile = path.join(dataPath, "invitelogs.json");
 const inviteMemberStatsFile = path.join(dataPath, "inviteMemberStats.json");
@@ -282,6 +283,7 @@ client.entryRoles = new Map();
 client.infractionRules = new Map();
 client.modStatsOverrides = new Map();
 client.manualLogsChannels = new Map();
+client.forumPings = new Map();
 client.publicAllowedRoles = new Map();
 client.inviteLogChannels = new Map();
 client.inviteMemberStats = new Map();
@@ -3214,6 +3216,55 @@ client.saveBoostChannels = () => {
     fs.writeFileSync(boostChannelFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
+client.loadForumPings = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(forumPingsFile)) fs.writeFileSync(forumPingsFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(forumPingsFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read forum pings file:', err);
+    }
+
+    client.forumPings.clear();
+    for (const [guildId, entries] of Object.entries(parsed)) {
+        if (!entries || typeof entries !== 'object') continue;
+        const channelMap = new Map();
+        for (const [channelId, roleId] of Object.entries(entries)) {
+            if (roleId) channelMap.set(String(channelId), String(roleId));
+        }
+        if (channelMap.size) client.forumPings.set(String(guildId), channelMap);
+    }
+};
+
+client.saveForumPings = () => {
+    const out = {};
+    for (const [guildId, channelMap] of client.forumPings.entries()) {
+        out[guildId] = Object.fromEntries(channelMap);
+    }
+    fs.writeFileSync(forumPingsFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
+client.getForumPingRoleId = (guildId, channelId) => {
+    return client.forumPings.get(String(guildId))?.get(String(channelId)) || null;
+};
+
+client.setForumPing = (guildId, channelId, roleId) => {
+    const channelMap = client.forumPings.get(String(guildId)) || new Map();
+    channelMap.set(String(channelId), String(roleId));
+    client.forumPings.set(String(guildId), channelMap);
+    client.saveForumPings();
+};
+
+client.clearForumPing = (guildId, channelId) => {
+    const channelMap = client.forumPings.get(String(guildId));
+    if (!channelMap) return false;
+    const removed = channelMap.delete(String(channelId));
+    if (removed) client.saveForumPings();
+    return removed;
+};
+
 client.loadManualLogsChannels = () => {
     if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
     if (!fs.existsSync(manualLogsChannelsFile)) fs.writeFileSync(manualLogsChannelsFile, '{}', 'utf8');
@@ -3933,6 +3984,7 @@ client.loadAfkUserSettings();
 client.loadEntryRoles();
 client.loadInfractionRules();
 client.loadManualLogsChannels();
+client.loadForumPings();
 client.loadPublicPermissions();
 client.loadInviteLogChannels();
 client.loadInviteMemberStats();
@@ -4317,6 +4369,19 @@ client.on('threadCreate', async (thread) => {
         await thread.join().catch(() => null);
     } catch (err) {
         console.error(`Failed to auto-join thread ${thread?.id || 'unknown'}:`, err);
+    }
+
+    try {
+        if (!thread?.guildId || !thread.parentId) return;
+        const roleId = client.getForumPingRoleId(thread.guildId, thread.parentId);
+        if (!roleId) return;
+
+        await thread.send({
+            content: `<@&${roleId}>`,
+            allowedMentions: { roles: [roleId] }
+        }).catch(err => console.error(`Failed to send forum ping in thread ${thread.id}:`, err));
+    } catch (err) {
+        console.error(`Failed to process forum ping for thread ${thread?.id || 'unknown'}:`, err);
     }
 });
 
