@@ -22,7 +22,19 @@ module.exports = {
         }
 
         const reason = interaction.options.getString('reason');
-        const result = await client.closeForumPost({ thread: interaction.channel, closedBy: interaction.user, reason });
-        return interaction.reply({ content: result.success ? 'Post closed.' : result.error, ephemeral: true });
+
+        try {
+            // ack immediately, since unfollowing every thread member can take longer than the 3s interaction window
+            await interaction.deferReply({ ephemeral: true });
+            const result = await client.closeForumPost({ thread: interaction.channel, closedBy: interaction.user, reason });
+            return await interaction.editReply({ content: result.success ? 'Post closed.' : result.error });
+        } catch (err) {
+            console.error('Failed to close forum post via /close command:', err);
+            const content = 'Something went wrong while closing this post. Check the bot logs.';
+            if (interaction.deferred || interaction.replied) {
+                return interaction.editReply({ content }).catch(() => null);
+            }
+            return interaction.reply({ content, ephemeral: true }).catch(() => null);
+        }
     }
 };

@@ -4535,8 +4535,20 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             const reason = interaction.fields.getTextInputValue('forumping_close_reason_input').trim();
-            const result = await client.closeForumPost({ thread: interaction.channel, closedBy: interaction.user, reason: reason || null });
-            return interaction.reply({ content: result.success ? 'Post closed.' : result.error, ephemeral: true });
+
+            try {
+                // ack immediately, since unfollowing every thread member can take longer than the 3s interaction window
+                await interaction.deferReply({ ephemeral: true });
+                const result = await client.closeForumPost({ thread: interaction.channel, closedBy: interaction.user, reason: reason || null });
+                return await interaction.editReply({ content: result.success ? 'Post closed.' : result.error });
+            } catch (err) {
+                console.error('Failed to close forum post via close-with-reason modal:', err);
+                const content = 'Something went wrong while closing this post. Check the bot logs.';
+                if (interaction.deferred || interaction.replied) {
+                    return interaction.editReply({ content }).catch(() => null);
+                }
+                return interaction.reply({ content, ephemeral: true }).catch(() => null);
+            }
         }
 
         if (interaction.customId.startsWith('remind_edit_modal:')) {
@@ -4826,8 +4838,19 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.update({ content: 'This post is already closed.', components: [] });
             }
 
-            const result = await client.closeForumPost({ thread, closedBy: interaction.user, reason: null });
-            return interaction.update({ content: result.success ? 'Post closed.' : result.error, components: [] });
+            // ack immediately, since unfollowing every thread member can take longer than the 3s interaction window
+            try {
+                await interaction.deferUpdate();
+                const result = await client.closeForumPost({ thread, closedBy: interaction.user, reason: null });
+                return await interaction.editReply({ content: result.success ? 'Post closed.' : result.error, components: [] });
+            } catch (err) {
+                console.error('Failed to close forum post via confirm button:', err);
+                const content = 'Something went wrong while closing this post. Check the bot logs.';
+                if (interaction.deferred || interaction.replied) {
+                    return interaction.editReply({ content, components: [] }).catch(() => null);
+                }
+                return interaction.reply({ content, ephemeral: true }).catch(() => null);
+            }
         }
 
         if (interaction.customId.startsWith('afk_notify_me:')) {
