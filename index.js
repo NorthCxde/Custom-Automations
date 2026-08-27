@@ -3311,7 +3311,7 @@ client.closeForumPost = async ({ thread, closedBy, reason = null, tagId = FORUM_
 
         const embed = new EmbedBuilder()
             .setColor(0x000000)
-            .setTitle('Forum Post Closed')
+            .setTitle('Exploiter Report Closed')
             .addFields(
                 { name: 'Post', value: `${thread} (${thread.name})`, inline: false },
                 { name: 'Forum Channel', value: thread.parentId ? `<#${thread.parentId}>` : 'Unknown', inline: true },
