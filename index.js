@@ -3289,17 +3289,11 @@ client.closeForumPost = async ({ thread, closedBy, reason = null }) => {
 
     try {
         const existingTags = Array.isArray(thread.appliedTags) ? thread.appliedTags : [];
-        const nextTags = existingTags.includes(FORUM_CLOSE_SOLVED_TAG_ID) || existingTags.length >= 5
-            ? existingTags
-            : [...existingTags, FORUM_CLOSE_SOLVED_TAG_ID];
+        if (!existingTags.includes(FORUM_CLOSE_SOLVED_TAG_ID) && existingTags.length < 5) {
+            await thread.setAppliedTags([...existingTags, FORUM_CLOSE_SOLVED_TAG_ID]).catch(err => console.error(`Failed to tag forum post ${thread.id} as solved:`, err));
+        }
 
-        // archived + locked in one edit so the post drops off the list immediately instead of on the next archive sweep
-        await thread.edit({
-            appliedTags: nextTags,
-            locked: true,
-            archived: true,
-            reason: reason || 'Closed'
-        });
+        await thread.setLocked(true, reason || 'Closed');
 
         const transcriptChannel = await client.channels.fetch(FORUM_CLOSE_TRANSCRIPT_CHANNEL_ID).catch(() => null);
         if (transcriptChannel?.isTextBased()) {
