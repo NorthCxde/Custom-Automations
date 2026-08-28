@@ -1299,7 +1299,15 @@ function buildRuleManagePayload(client, guildId, selectedRuleKey) {
 
 function buildInfractionResetScheduleModal(currentSchedule = null) {
     const intervalMonths = String(currentSchedule?.intervalMonths || 2);
-    const startDate = String(currentSchedule?.startDate || new Date(Date.now() + 3 * 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+    const nextMonth = new Date();
+    nextMonth.setDate(1);
+    nextMonth.setMonth(nextMonth.getMonth() + 1);
+    const defaultStartDate = [
+        nextMonth.getFullYear(),
+        String(nextMonth.getMonth() + 1).padStart(2, '0'),
+        '01'
+    ].join('-');
+    const startDate = String(currentSchedule?.startDate || defaultStartDate);
     const startTime = String(currentSchedule?.startTime || '00:00');
     const timezone = String(currentSchedule?.timezone || 'EST');
 
