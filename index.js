@@ -2987,6 +2987,16 @@ function getTimezoneOffsetMinutes(timezone) {
     return 0;
 }
 
+function addCalendarMonths(date, months) {
+    const result = new Date(date.getTime());
+    const originalDay = result.getUTCDate();
+    result.setUTCDate(1);
+    result.setUTCMonth(result.getUTCMonth() + months);
+    const lastDayOfTargetMonth = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate();
+    result.setUTCDate(Math.min(originalDay, lastDayOfTargetMonth));
+    return result;
+}
+
 function resolveScheduleNextRun(schedule) {
     if (!schedule || !schedule.enabled) return null;
 
@@ -3001,18 +3011,22 @@ function resolveScheduleNextRun(schedule) {
 
     const offsetMinutes = getTimezoneOffsetMinutes(schedule.timezone || 'EST');
     const localDate = new Date(Date.UTC(year, month - 1, day, timeParts.hours, timeParts.minutes, 0, 0));
+    if (localDate.getUTCFullYear() !== year
+        || localDate.getUTCMonth() !== month - 1
+        || localDate.getUTCDate() !== day
+        || localDate.getUTCHours() !== timeParts.hours
+        || localDate.getUTCMinutes() !== timeParts.minutes) return null;
     const localTimestamp = localDate.getTime() - (offsetMinutes * 60 * 1000);
 
     const now = Date.now();
     let next = new Date(localTimestamp);
     if (next.getTime() <= now) {
-        let candidate = new Date(next.getTime());
-        const monthStepMs = 30 * 24 * 60 * 60 * 1000;
+        let candidate = new Date(localDate.getTime());
         const jump = Math.max(1, intervalMonths || 1);
-        while (candidate.getTime() <= now) {
-            candidate = new Date(candidate.getTime() + (jump * monthStepMs));
+        while ((candidate.getTime() - (offsetMinutes * 60 * 1000)) <= now) {
+            candidate = addCalendarMonths(candidate, jump);
         }
-        next = candidate;
+        next = new Date(candidate.getTime() - (offsetMinutes * 60 * 1000));
     }
 
     return next.toISOString();
@@ -3064,22 +3078,17 @@ client.scheduleInfractionResetForGuild = (guildId) => {
     if (!schedule || !schedule.enabled || !schedule.nextRunAt) return null;
 
     const delayMs = new Date(schedule.nextRunAt).getTime() - Date.now();
-    const safeDelayMs = Math.max(1, delayMs);
+    const maxTimeoutMs = 2_147_483_647;
+    const safeDelayMs = Math.max(1, Math.min(maxTimeoutMs, delayMs));
     const timer = setTimeout(() => {
+        if (delayMs > maxTimeoutMs) {
+            client.scheduleInfractionResetForGuild(guildId);
+            return;
+        }
+
         const result = client.resetAllInfractionProgress(guildId);
         const nextSchedule = client.getInfractionResetSchedule(guildId);
         if (!nextSchedule || !nextSchedule.enabled) return;
-
-        const nextRunAt = new Date(new Date(nextSchedule.nextRunAt || Date.now()).getTime() + ((Number(nextSchedule.intervalMonths || 1) * 30 * 24 * 60 * 60 * 1000)));
-        client.setInfractionResetSchedule(guildId, {
-            ...nextSchedule,
-            enabled: true,
-            nextRunAt: nextRunAt.toISOString(),
-            intervalMonths: Number(nextSchedule.intervalMonths || 1),
-            startDate: nextSchedule.startDate,
-            startTime: nextSchedule.startTime,
-            timezone: nextSchedule.timezone
-        });
 
         client.scheduleInfractionResetForGuild(guildId);
         console.log(`[InfractionReset] Guild ${guildId} reset completed: ${result.resetCount}/${result.totalCases} cases.`);
