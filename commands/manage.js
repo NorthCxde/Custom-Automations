@@ -2911,6 +2911,7 @@ module.exports = {
         if (!interaction.customId.startsWith(MANAGE_EDIT_PREFIX)
             && !interaction.customId.startsWith(MANAGE_RESET_PREFIX)
             && !interaction.customId.startsWith(MANAGE_REMOVE_PREFIX)
+            && interaction.customId !== MANAGE_USER_INFRACTIONS_AUTO_RESET_ID
             && interaction.customId !== MANAGE_USER_INFRACTIONS_RESET_PROMPT_ID
             && interaction.customId !== MANAGE_USER_INFRACTIONS_RESET_CONFIRM_ID
             && interaction.customId !== MANAGE_USER_INFRACTIONS_RESET_CANCEL_ID
