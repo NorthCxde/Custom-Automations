@@ -282,6 +282,8 @@ client.afkUserSettings = new Map();
 client.entryRoles = new Map();
 client.infractionRules = new Map();
 client.modStatsOverrides = new Map();
+client.infractionResetSchedules = new Map();
+client.infractionResetTimers = new Map();
 client.manualLogsChannels = new Map();
 client.forumPings = new Map();
 client.publicAllowedRoles = new Map();
@@ -2952,6 +2954,139 @@ client.resetAllInfractionProgress = (guildId) => {
         resetCount,
         totalCases: logs.length
     };
+};
+
+function parseScheduleTimeParts(input) {
+    const raw = String(input || '').trim();
+    if (!/^\d{1,2}:\d{2}$/.test(raw)) return null;
+    const [hours, minutes] = raw.split(':').map(Number);
+    if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+    return { hours, minutes };
+}
+
+function getTimezoneOffsetMinutes(timezone) {
+    const raw = String(timezone || '').trim();
+    if (!raw) return 0;
+    const normalized = raw.toUpperCase();
+    if (normalized === 'EST' || normalized === 'EDT') return -5 * 60;
+    if (normalized === 'UTC') return 0;
+    if (/^UTC[+-]/i.test(normalized)) {
+        const match = normalized.match(/^UTC([+-])(\d{1,2})(?::?(\d{2}))?$/i);
+        if (!match) return 0;
+        const sign = match[1] === '-' ? -1 : 1;
+        const hours = Number(match[2] || 0);
+        const minutes = Number(match[3] || 0);
+        return sign * (hours * 60 + minutes);
+    }
+    if (/^[+-]\d{2}:?\d{2}$/.test(raw)) {
+        const match = raw.match(/^([+-])(\d{2}):?(\d{2})$/);
+        if (!match) return 0;
+        const sign = match[1] === '-' ? -1 : 1;
+        return sign * ((Number(match[2]) * 60) + Number(match[3] || 0));
+    }
+    return 0;
+}
+
+function resolveScheduleNextRun(schedule) {
+    if (!schedule || !schedule.enabled) return null;
+
+    const intervalMonths = Number(schedule.intervalMonths || 1);
+    const startDate = String(schedule.startDate || '').trim();
+    const startTime = String(schedule.startTime || '00:00').trim();
+    const timeParts = parseScheduleTimeParts(startTime);
+    if (!startDate || !timeParts) return null;
+
+    const [year, month, day] = startDate.split('-').map(Number);
+    if (!year || !month || !day) return null;
+
+    const offsetMinutes = getTimezoneOffsetMinutes(schedule.timezone || 'EST');
+    const localDate = new Date(Date.UTC(year, month - 1, day, timeParts.hours, timeParts.minutes, 0, 0));
+    const localTimestamp = localDate.getTime() - (offsetMinutes * 60 * 1000);
+
+    const now = Date.now();
+    let next = new Date(localTimestamp);
+    if (next.getTime() <= now) {
+        let candidate = new Date(next.getTime());
+        const monthStepMs = 30 * 24 * 60 * 60 * 1000;
+        const jump = Math.max(1, intervalMonths || 1);
+        while (candidate.getTime() <= now) {
+            candidate = new Date(candidate.getTime() + (jump * monthStepMs));
+        }
+        next = candidate;
+    }
+
+    return next.toISOString();
+}
+
+client.getInfractionResetSchedule = (guildId) => {
+    if (!guildId) return null;
+    const schedule = client.infractionResetSchedules.get(guildId) || null;
+    if (!schedule) return null;
+    return {
+        ...schedule,
+        nextRunAt: resolveScheduleNextRun(schedule)
+    };
+};
+
+client.setInfractionResetSchedule = (guildId, schedule) => {
+    if (!guildId) return null;
+    const intervalMonths = Math.max(1, Number(schedule?.intervalMonths || 1));
+    const startDate = String(schedule?.startDate || '').trim();
+    const startTime = String(schedule?.startTime || '00:00').trim();
+    const timezone = String(schedule?.timezone || 'EST').trim() || 'EST';
+
+    const nextSchedule = {
+        enabled: Boolean(schedule?.enabled),
+        intervalMonths,
+        startDate,
+        startTime,
+        timezone,
+        nextRunAt: null
+    };
+
+    if (nextSchedule.enabled) {
+        nextSchedule.nextRunAt = resolveScheduleNextRun(nextSchedule);
+    }
+
+    client.infractionResetSchedules.set(guildId, nextSchedule);
+    return { ...nextSchedule, nextRunAt: nextSchedule.nextRunAt };
+};
+
+client.scheduleInfractionResetForGuild = (guildId) => {
+    if (!guildId) return null;
+    const existing = client.infractionResetTimers.get(guildId);
+    if (existing) {
+        clearTimeout(existing);
+        client.infractionResetTimers.delete(guildId);
+    }
+
+    const schedule = client.getInfractionResetSchedule(guildId);
+    if (!schedule || !schedule.enabled || !schedule.nextRunAt) return null;
+
+    const delayMs = new Date(schedule.nextRunAt).getTime() - Date.now();
+    const safeDelayMs = Math.max(1, delayMs);
+    const timer = setTimeout(() => {
+        const result = client.resetAllInfractionProgress(guildId);
+        const nextSchedule = client.getInfractionResetSchedule(guildId);
+        if (!nextSchedule || !nextSchedule.enabled) return;
+
+        const nextRunAt = new Date(new Date(nextSchedule.nextRunAt || Date.now()).getTime() + ((Number(nextSchedule.intervalMonths || 1) * 30 * 24 * 60 * 60 * 1000)));
+        client.setInfractionResetSchedule(guildId, {
+            ...nextSchedule,
+            enabled: true,
+            nextRunAt: nextRunAt.toISOString(),
+            intervalMonths: Number(nextSchedule.intervalMonths || 1),
+            startDate: nextSchedule.startDate,
+            startTime: nextSchedule.startTime,
+            timezone: nextSchedule.timezone
+        });
+
+        client.scheduleInfractionResetForGuild(guildId);
+        console.log(`[InfractionReset] Guild ${guildId} reset completed: ${result.resetCount}/${result.totalCases} cases.`);
+    }, safeDelayMs);
+
+    client.infractionResetTimers.set(guildId, timer);
+    return timer;
 };
 
 client.getAllowedRoleIds = (guildId) => {
