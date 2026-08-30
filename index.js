@@ -4108,7 +4108,6 @@ client.logManualModerationAction = async (guild, payload) => {
     if (category !== 'mute' && category !== 'ban') return;
 
     const files = Array.isArray(payload.files) ? payload.files : [];
-    if (!files.length) return;
 
     const config = client.getManualLogsChannels(guild.id);
     const channelId = category === 'ban' ? config.banChannelId : config.muteChannelId;

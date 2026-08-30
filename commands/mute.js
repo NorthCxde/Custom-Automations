@@ -1248,6 +1248,29 @@ module.exports = {
             files: evidenceFiles.map(file => ({ attachment: file.url, name: file.name }))
         });
 
+        const banEscalationResults = successResults.filter(result => result.action === 'ban' || result.action === 'temp_ban');
+        if (client.logManualModerationAction && banEscalationResults.length > 0) {
+            const banEmbed = new EmbedBuilder()
+                .setColor(0x000000)
+                .setTitle('Automatic Ban Escalation')
+                .addFields(
+                    { name: 'User(s)', value: banEscalationResults.map(result => `<@${result.user.id}>`).join(', '), inline: true },
+                    { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: 'Action', value: banEscalationResults.map(result => formatEscalationAction({ type: result.action, duration: result.duration })).join('\n'), inline: true },
+                    { name: 'Rule', value: ruleConfig?.label || 'Unknown Rule', inline: true },
+                    { name: 'Infraction Level', value: banEscalationResults.map(result => `Level ${result.infractionCount}`).join('\n'), inline: true },
+                    { name: 'Reason', value: baseReason || 'No reason provided', inline: false },
+                    { name: 'Proofs', value: formatProofLinks(evidenceFiles), inline: false }
+                )
+                .setTimestamp();
+
+            await client.logManualModerationAction(interaction.guild, {
+                category: 'ban',
+                embeds: [banEmbed],
+                files: toSpoilerFiles(evidenceFiles)
+            });
+        }
+
         if (client.logManualModerationAction && evidenceFiles.length > 0) {
             const manualEmbed = new EmbedBuilder()
                 .setColor(0x000000)
