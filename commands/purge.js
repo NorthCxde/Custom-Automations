@@ -20,7 +20,7 @@ module.exports = {
                 .setDescription('Delete messages that were sent by this user')
                 .addIntegerOption(option =>
                     option.setName('count')
-                        .setDescription('Number of messages to delete.')
+                        .setDescription('Number of messages to delete. Limit 1000')
                         .setRequired(true))
                 .addUserOption(option =>
                     option.setName('user')
@@ -32,7 +32,7 @@ module.exports = {
                 .setDescription('Delete messages that were sent by bots.')
                 .addIntegerOption(option =>
                     option.setName('count')
-                        .setDescription('Number of messages to delete.')
+                        .setDescription('Number of messages to delete. Limit 1000')
                         .setRequired(true)))
         .addSubcommand(sub =>
             sub
@@ -40,7 +40,7 @@ module.exports = {
                 .setDescription('Delete messages that were sent by humans (non-bots)')
                 .addIntegerOption(option =>
                     option.setName('count')
-                        .setDescription('Number of messages to delete.')
+                        .setDescription('Number of messages to delete. Limit 1000')
                         .setRequired(true))),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
@@ -57,13 +57,13 @@ module.exports = {
         const subcommand = interaction.options.getSubcommand();
         const count = interaction.options.getInteger('count');
 
-        if (!count || count < 1 || (subcommand === 'any' && count > 1000) || (subcommand !== 'any' && count > 100)) {
-            const limit = subcommand === 'any' ? 1000 : 100;
+        if (!count || count < 1 || count > 1000) {
+            const limit = 1000;
             return interaction.reply({ content: `Please provide a number between 1 and ${limit} for the count.`, ephemeral: true });
         }
 
         try {
-            const messages = await interaction.channel.messages.fetch({ limit: subcommand === 'any' ? 1000 : 100 });
+            const messages = await interaction.channel.messages.fetch({ limit: 1000 });
             let candidates = [];
 
             if (subcommand === 'any') {
@@ -132,8 +132,8 @@ module.exports = {
 
             return interaction.reply({ content: replyText, ephemeral: true });
         } catch (error) {
-            console.error(error);
-            return interaction.reply({ content: 'Unable to purge messages. Ensure the messages are not older than 14 days and I have the correct permissions.', ephemeral: true });
+            console.error('[Purge Error]', error.message || error);
+            return interaction.reply({ content: `Unable to purge messages: ${error.message || 'Unknown error. Check bot logs.'}`, ephemeral: true });
         }
     }
 };
