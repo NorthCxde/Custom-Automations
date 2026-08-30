@@ -32,6 +32,34 @@ async function sendTempBanStatusCard(client, channel, text) {
     }
 }
 
+async function sendTempBanUsageCard(channel) {
+    if (!channel || typeof channel.send !== 'function') return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x3498db)
+        .setDescription([
+            '**Command:** ?tempban',
+            '',
+            '**Description:** Temporarily ban a member for a set duration',
+            '**Cooldown:** 3 seconds',
+            '**Usage:**',
+            '?tempban [user] [duration] [reason]',
+            '',
+            '**Example:**',
+            '?tempban albeanie 1d Repeated spam'
+        ].join('\n'));
+
+    await channel.send({
+        embeds: [embed],
+        allowedMentions: {
+            parse: [],
+            users: [],
+            roles: [],
+            repliedUser: false
+        }
+    });
+}
+
 function buildCommand() {
     return new SlashCommandBuilder()
         .setName('tempban')
@@ -102,7 +130,8 @@ module.exports = {
         const userId = getPrefixUserId(args[0]);
         const durationRaw = args[1];
         if (!userId || !parseDuration(durationRaw)) {
-            return message.reply('Usage: `?tempban <user mention or ID> <duration> [reason]`\nExample: `?tempban 123456789012345678 1d Repeated spam`');
+            await sendTempBanUsageCard(message.channel);
+            return null;
         }
 
         const outcome = await applyTempBans({
