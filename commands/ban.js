@@ -1,5 +1,20 @@
 ﻿const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
+async function fetchGuildMemberSafe(guild, userId) {
+    if (!guild || !userId) return null;
+
+    try {
+        return await guild.members.fetch(userId);
+    } catch (error) {
+        const errorCode = Number(error?.code || error?.rawError?.code || 0);
+        const message = String(error?.message || '').toLowerCase();
+        if (errorCode === 10007 || message.includes('unknown member') || message.includes('member not found')) {
+            return null;
+        }
+        throw error;
+    }
+}
+
 function formatProofLinks(files = []) {
     const sanitizeProofUrl = (value) => {
         const url = String(value || '').trim();
@@ -174,7 +189,7 @@ module.exports = {
 
             const results = await Promise.all(uniqueTargetIds.map(async (targetId) => {
                 try {
-                    const member = await message.guild.members.fetch(targetId).catch(() => null);
+                    const member = await fetchGuildMemberSafe(message.guild, targetId);
                     if (member && typeof client.isModerationImmuneMember === 'function' && client.isModerationImmuneMember(member)) {
                         return { targetId, success: false, reason: `${member.user.username} is immune to moderation actions.` };
                     }
@@ -265,7 +280,7 @@ module.exports = {
 
         const results = await Promise.all(users.map(async (user) => {
             try {
-                const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+                const member = await fetchGuildMemberSafe(interaction.guild, user.id);
                 if (member && typeof client.isModerationImmuneMember === 'function' && client.isModerationImmuneMember(member)) {
                     return { user, success: false, error: new Error(`${member.user.username} is immune to moderation actions.`) };
                 }

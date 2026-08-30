@@ -224,8 +224,6 @@ const dataPath = path.join(__dirname, "data");
 const permsFile = path.join(dataPath, "perms.json");
 const logsFile = path.join(dataPath, "logs.json");
 const modLogsFile = path.join(dataPath, "modlogs.json");
-const bloxlinkFile = path.join(dataPath, "bloxlink.json");
-const bloxlinkHistoryFile = path.join(dataPath, "bloxlinkHistory.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
 const hideCommandStateFile = path.join(dataPath, "hidecommand-state.json");
@@ -254,11 +252,6 @@ client.boostChannels = new Map();
 client.pendingModerationActions = new Map();
 client.pendingPermsUndoActions = new Map();
 client.pendingGlobalModUndoActions = new Map();
-client.bloxlink = new Map();
-client.bloxlinkHistory = new Map();
-client.bloxlinkRateLimitUntilByGuild = new Map();
-client.bloxlinkRateLimitNoticeUntilByGuild = new Map();
-client.bloxlinkLogCooldownByKey = new Map();
 client.slashCommands = new Map();
 client.autoresponders = new Map();
 client.autoresponderDrafts = new Map();
@@ -2506,290 +2499,6 @@ client.saveLogChannels = () => {
     fs.writeFileSync(logsFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
-client.loadBloxlink = () => {
-    if (!fs.existsSync(dataPath)) {
-        fs.mkdirSync(dataPath, { recursive: true });
-    }
-    if (!fs.existsSync(bloxlinkFile)) {
-        fs.writeFileSync(bloxlinkFile, '{}', 'utf8');
-    }
-
-    let raw = '{}';
-    try {
-        raw = fs.readFileSync(bloxlinkFile, 'utf8') || '{}';
-    } catch (err) {
-        console.error('Failed to read bloxlink file:', err);
-    }
-
-    let parsed = {};
-    try {
-        parsed = JSON.parse(raw);
-    } catch (err) {
-        console.error('Failed to parse bloxlink file:', err);
-    }
-
-    client.bloxlink.clear();
-    for (const [discordId, entry] of Object.entries(parsed)) {
-        client.bloxlink.set(discordId, entry);
-    }
-};
-
-client.saveBloxlink = () => {
-    const out = {};
-    for (const [discordId, entry] of client.bloxlink.entries()) {
-        out[discordId] = entry;
-    }
-    fs.writeFileSync(bloxlinkFile, JSON.stringify(out, null, 2), 'utf8');
-};
-
-client.loadBloxlinkHistory = () => {
-    if (!fs.existsSync(dataPath)) {
-        fs.mkdirSync(dataPath, { recursive: true });
-    }
-    if (!fs.existsSync(bloxlinkHistoryFile)) {
-        fs.writeFileSync(bloxlinkHistoryFile, '{}', 'utf8');
-    }
-
-    let raw = '{}';
-    try {
-        raw = fs.readFileSync(bloxlinkHistoryFile, 'utf8') || '{}';
-    } catch (err) {
-        console.error('Failed to read bloxlink history file:', err);
-    }
-
-    let parsed = {};
-    try {
-        parsed = JSON.parse(raw);
-    } catch (err) {
-        console.error('Failed to parse bloxlink history file:', err);
-    }
-
-    client.bloxlinkHistory.clear();
-    for (const [guildId, history] of Object.entries(parsed)) {
-        const guildHistory = { robloxToBannedDiscord: new Map() };
-        if (history && typeof history.robloxToBannedDiscord === 'object') {
-            for (const [robloxId, discordIds] of Object.entries(history.robloxToBannedDiscord)) {
-                guildHistory.robloxToBannedDiscord.set(robloxId, new Set(Array.isArray(discordIds) ? discordIds : []));
-            }
-        }
-        client.bloxlinkHistory.set(guildId, guildHistory);
-    }
-};
-
-client.saveBloxlinkHistory = () => {
-    const out = {};
-    for (const [guildId, history] of client.bloxlinkHistory.entries()) {
-        out[guildId] = { robloxToBannedDiscord: {} };
-        for (const [robloxId, discordIds] of history.robloxToBannedDiscord.entries()) {
-            out[guildId].robloxToBannedDiscord[robloxId] = Array.from(discordIds);
-        }
-    }
-    fs.writeFileSync(bloxlinkHistoryFile, JSON.stringify(out, null, 2), 'utf8');
-};
-
-client.rememberBannedRobloxId = (guildId, robloxId, discordId) => {
-    if (!guildId || !robloxId || !discordId) return;
-    let history = client.bloxlinkHistory.get(guildId);
-    if (!history) {
-        history = { robloxToBannedDiscord: new Map() };
-        client.bloxlinkHistory.set(guildId, history);
-    }
-    let set = history.robloxToBannedDiscord.get(robloxId);
-    if (!set) {
-        set = new Set();
-        history.robloxToBannedDiscord.set(robloxId, set);
-    }
-    set.add(discordId);
-    client.saveBloxlinkHistory();
-};
-
-client.getBannedDiscordIdsForRoblox = (guildId, robloxId) => {
-    const history = client.bloxlinkHistory.get(guildId);
-    if (!history) return [];
-    return Array.from(history.robloxToBannedDiscord.get(robloxId) ?? []);
-};
-
-client.getKnownBannedRobloxIds = (guildId) => {
-    const history = client.bloxlinkHistory.get(guildId);
-    if (!history) return new Set();
-    return new Set(history.robloxToBannedDiscord.keys());
-};
-
-client.getBloxlinkApiKey = (guildId) => {
-    const guildSpecificEnvKey = guildId ? process.env[`BLOXLINK_API_KEY_${guildId}`] : null;
-    if (guildSpecificEnvKey) return guildSpecificEnvKey;
-
-    const perGuildConfig = config.bloxlinkApiKeys && guildId
-        ? config.bloxlinkApiKeys[String(guildId)]
-        : null;
-    if (perGuildConfig) return perGuildConfig;
-
-    return process.env.BLOXLINK_API_KEY || config.bloxlinkApiKey || null;
-};
-
-const extractRobloxIdFromBloxlinkPayload = (body) => {
-    const candidates = [
-        body?.robloxID,
-        body?.robloxId,
-        body?.roblox_id,
-        body?.user?.robloxID,
-        body?.user?.robloxId,
-        body?.user?.roblox_id,
-        body?.user?.id,
-        body?.robloxAccount?.id,
-        body?.robloxAccount?.robloxID,
-        body?.robloxAccount?.robloxId,
-        body?.primaryAccount?.id,
-        body?.primaryAccount?.robloxID,
-        body?.primaryAccount?.robloxId,
-        body?.account?.id,
-        body?.account?.robloxID,
-        body?.account?.robloxId
-    ];
-
-    for (const candidate of candidates) {
-        if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
-            return String(candidate).trim();
-        }
-    }
-
-    return null;
-};
-
-client.logBloxlinkThrottled = (key, message, level = 'warn', cooldownMs = 5 * 60 * 1000) => {
-    const now = Date.now();
-    const nextAllowed = Number(client.bloxlinkLogCooldownByKey.get(key) || 0);
-    if (nextAllowed > now) return;
-    client.bloxlinkLogCooldownByKey.set(key, now + Math.max(1000, Number(cooldownMs) || 0));
-
-    if (level === 'error') {
-        console.error(message);
-    } else {
-        console.warn(message);
-    }
-};
-
-client.lookupLinkedRobloxAccount = async (guildId, discordId) => {
-    if (!guildId || !discordId) {
-        return { ok: false, status: 400, reason: 'missing-params', robloxId: null };
-    }
-
-    const cacheKey = `${guildId}:${discordId}`;
-    const cached = client.bloxlink.get(cacheKey) || client.bloxlink.get(discordId);
-    const now = Date.now();
-
-    const rateLimitedUntil = Number(client.bloxlinkRateLimitUntilByGuild.get(guildId) || 0);
-    if (rateLimitedUntil > now) {
-        if (cached && cached.robloxId) {
-            return { ok: true, status: 200, reason: 'stale-cache', robloxId: cached.robloxId };
-        }
-        return { ok: false, status: 429, reason: 'rate-limited', robloxId: null };
-    }
-
-    if (cached && cached.robloxId && (!cached.expires || cached.expires > now)) {
-        if (client.bloxlink.has(discordId) && !client.bloxlink.has(cacheKey)) {
-            client.bloxlink.set(cacheKey, cached);
-            client.bloxlink.delete(discordId);
-            client.saveBloxlink();
-        }
-        return { ok: true, status: 200, reason: 'cache', robloxId: cached.robloxId };
-    }
-
-    const apiKey = client.getBloxlinkApiKey(guildId);
-    if (!apiKey) {
-        return { ok: false, status: 0, reason: 'missing-api-key', robloxId: null };
-    }
-
-    const url = `https://api.blox.link/v4/public/guilds/${guildId}/discord-to-roblox/${discordId}`;
-    try {
-        const res = await fetch(url, { headers: { Authorization: apiKey } });
-        if (res.status === 404) {
-            return { ok: false, status: 404, reason: 'not-linked', robloxId: null };
-        }
-
-        const bodyText = await res.text();
-        let body = null;
-        if (bodyText) {
-            try {
-                body = JSON.parse(bodyText);
-            } catch {
-                body = null;
-            }
-        }
-
-        if (res.status === 429) {
-            const retryAfterHeader = Number(res.headers.get('retry-after'));
-            const headerBackoffMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
-                ? Math.ceil(retryAfterHeader * 1000)
-                : 0;
-            const configuredBackoffMs = Number(config.bloxlinkRateLimitBackoffMs);
-            const fallbackBackoffMs = Number.isFinite(configuredBackoffMs) && configuredBackoffMs > 0
-                ? configuredBackoffMs
-                : 10 * 60 * 1000;
-            const backoffMs = Math.max(headerBackoffMs, fallbackBackoffMs);
-            const cooldownUntil = now + backoffMs;
-
-            client.bloxlinkRateLimitUntilByGuild.set(guildId, cooldownUntil);
-
-            const nextNoticeAt = Number(client.bloxlinkRateLimitNoticeUntilByGuild.get(guildId) || 0);
-            if (nextNoticeAt <= now) {
-                client.bloxlinkRateLimitNoticeUntilByGuild.set(guildId, cooldownUntil);
-                client.logBloxlinkThrottled(
-                    `rate-limit:${guildId}`,
-                    `Bloxlink is rate limited (429) for guild ${guildId}. Backing off lookups for ${Math.ceil(backoffMs / 1000)}s.`,
-                    'warn',
-                    backoffMs
-                );
-            }
-
-            if (cached && cached.robloxId) {
-                return { ok: true, status: 200, reason: 'stale-cache', robloxId: cached.robloxId };
-            }
-            return { ok: false, status: 429, reason: 'rate-limited', robloxId: null };
-        }
-
-        if (!res.ok) {
-            client.logBloxlinkThrottled(
-                `request-failed:${guildId}:${res.status}`,
-                `Bloxlink discord-to-roblox lookup returned ${res.status} for guild ${guildId}. Body: ${bodyText || '<empty body>'}`,
-                'error',
-                5 * 60 * 1000
-            );
-            return { ok: false, status: res.status, reason: 'request-failed', robloxId: null };
-        }
-
-        const robloxId = extractRobloxIdFromBloxlinkPayload(body);
-        if (!robloxId) {
-            client.logBloxlinkThrottled(
-                `unrecognized-payload:${guildId}`,
-                `Bloxlink discord-to-roblox lookup returned an unrecognized payload for guild ${guildId}. Body: ${bodyText || '<empty body>'}`,
-                'error',
-                5 * 60 * 1000
-            );
-            return { ok: false, status: res.status, reason: 'unrecognized-payload', robloxId: null };
-        }
-
-        const ttl = Number(config.bloxlinkCacheTtlMs) || 5 * 60 * 1000;
-        client.bloxlink.set(cacheKey, { robloxId, expires: Date.now() + ttl });
-        if (client.bloxlink.has(discordId)) client.bloxlink.delete(discordId);
-        client.saveBloxlink();
-        return { ok: true, status: res.status, reason: 'api', robloxId };
-    } catch (err) {
-        client.logBloxlinkThrottled(
-            `network-error:${guildId}`,
-            `Bloxlink lookup failed for guild ${guildId}: ${err?.message || 'Unknown network error'}`,
-            'error',
-            5 * 60 * 1000
-        );
-        return { ok: false, status: 0, reason: 'network-error', robloxId: null };
-    }
-};
-
-client.getLinkedRobloxId = async (guildId, discordId) => {
-    const result = await client.lookupLinkedRobloxAccount(guildId, discordId);
-    return result.robloxId || null;
-};
-
 client.loadModLogs = () => {
     if (!fs.existsSync(dataPath)) {
         fs.mkdirSync(dataPath, { recursive: true });
@@ -4209,8 +3918,6 @@ client.loadCommandAccessLevels();
 client.loadPermissions();
 client.loadLogChannels();
 client.loadModLogs();
-client.loadBloxlink();
-client.loadBloxlinkHistory();
 client.loadBoostChannels();
 client.loadPrefixCommandState();
 client.loadHideCommandState();
@@ -4230,58 +3937,6 @@ client.loadInviteLogChannels();
 client.loadInviteMemberStats();
 client.loadRevokedInvites();
 client.loadSecuritySettings();
-
-client.refreshGuildBloxlinkCache = async (guild) => {
-    if (!guild) return;
-    const now = Date.now();
-    const rateLimitedUntil = Number(client.bloxlinkRateLimitUntilByGuild.get(guild.id) || 0);
-    if (rateLimitedUntil > now) return;
-
-    // Avoid full member fetches, which can trigger gateway opcode 8 rate limits on large guilds.
-    const cachedMembers = Array.from(guild.members.cache.values()).slice(0, 100);
-    for (const member of cachedMembers) {
-        if (member.user.bot) continue;
-        try {
-            if (client.getLinkedRobloxId) {
-                await client.getLinkedRobloxId(guild.id, member.user.id);
-            }
-        } catch (err) {
-            console.error(`Failed to refresh Bloxlink cache for cached member ${member.user.id} in guild ${guild.id}:`, err);
-        }
-    }
-
-    try {
-        const bans = await guild.bans.fetch();
-        for (const ban of bans.values()) {
-            try {
-                if (client.getLinkedRobloxId) {
-                    const robloxId = await client.getLinkedRobloxId(guild.id, ban.user.id);
-                    if (robloxId && client.rememberBannedRobloxId) {
-                        client.rememberBannedRobloxId(guild.id, robloxId, ban.user.id);
-                    }
-                }
-            } catch (err) {
-                console.error(`Failed to refresh Bloxlink cache for banned user ${ban.user.id} in guild ${guild.id}:`, err);
-            }
-        }
-    } catch (err) {
-        console.error(`Failed to fetch guild bans for Bloxlink cache refresh in guild ${guild.id}:`, err);
-    }
-};
-
-client.scheduleBloxlinkCacheRefresh = () => {
-    const configuredMs = Number(config.bloxlinkCacheIntervalMs);
-    const intervalMs = Number.isFinite(configuredMs) && configuredMs > 0
-        ? Math.max(configuredMs, 300_000)
-        : 900_000;
-    const refresh = async () => {
-        for (const guild of client.guilds.cache.values()) {
-            await client.refreshGuildBloxlinkCache(guild);
-        }
-    };
-    refresh().catch(err => console.error('Initial bloxlink cache refresh failed:', err));
-    setInterval(() => refresh().catch(err => console.error('Periodic bloxlink cache refresh failed:', err)), intervalMs);
-};
 
 client.addPendingModerationAction = (key, data) => {
     client.pendingModerationActions.set(key, data);
@@ -4394,24 +4049,10 @@ client.on('clientReady', async () => {
     });
 
     client.scheduleHardcodedAdminsSync();
-    client.scheduleBloxlinkCacheRefresh();
     client.scheduleGiveawaysOnStartup();
     client.scheduleRemindersOnStartup();
     client.scheduleTempBansOnStartup();
     client.bootstrapInviteCaches();
-});
-
-client.on('guildBanAdd', async (ban) => {
-    try {
-        if (client.getLinkedRobloxId) {
-            const robloxId = await client.getLinkedRobloxId(ban.guild.id, ban.user.id);
-            if (robloxId && client.rememberBannedRobloxId) {
-                client.rememberBannedRobloxId(ban.guild.id, robloxId, ban.user.id);
-            }
-        }
-    } catch (err) {
-        console.error(`Failed to refresh Bloxlink cache for banned user ${ban.user.id}:`, err);
-    }
 });
 
 client.on('guildMemberAdd', async (member) => {
@@ -4541,13 +4182,6 @@ client.on('guildMemberAdd', async (member) => {
         console.error(`Failed to enforce account age security for new member ${member.user.id}:`, err);
     }
 
-    try {
-        if (client.getLinkedRobloxId) {
-            await client.getLinkedRobloxId(member.guild.id, member.user.id);
-        }
-    } catch (err) {
-        console.error(`Failed to refresh Bloxlink cache for new member ${member.user.id}:`, err);
-    }
 });
 
 client.on('guildMemberRemove', async (member) => {
@@ -5251,12 +4885,6 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.guild.members.ban(userId, { reason: 'Banned via profile command' });
 
                 if (client.addModLog) {
-                    let robloxId = null;
-                    if (targetMember && client.bloxlink && client.bloxlink.cache) {
-                        const cached = client.bloxlink.cache.get(userId);
-                        if (cached) robloxId = cached.robloxId;
-                    }
-
                     await client.addModLog({
                         client,
                         guildId: interaction.guild.id,
@@ -5264,7 +4892,7 @@ client.on('interactionCreate', async (interaction) => {
                         targetId: userId,
                         action: 'ban',
                         reason: 'Banned via profile command',
-                        robloxId
+                        robloxId: null
                     });
                 }
 

@@ -1,5 +1,20 @@
 const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder } = require('discord.js');
 
+async function fetchGuildMemberSafe(guild, userId) {
+    if (!guild || !userId) return null;
+
+    try {
+        return await guild.members.fetch(userId);
+    } catch (error) {
+        const errorCode = Number(error?.code || error?.rawError?.code || 0);
+        const message = String(error?.message || '').toLowerCase();
+        if (errorCode === 10007 || message.includes('unknown member') || message.includes('member not found')) {
+            return null;
+        }
+        throw error;
+    }
+}
+
 async function sendUnmuteStatusCard(client, channel, text, isSuccess = true) {
     if (!channel || !text) return;
 
@@ -89,9 +104,9 @@ module.exports = {
 
             const results = await Promise.all(targetIds.map(async (targetId) => {
                 try {
-                    const member = await message.guild.members.fetch(targetId);
+                    const member = await fetchGuildMemberSafe(message.guild, targetId);
                     if (!member) {
-                        return { targetId, success: false, reason: 'Member not found' };
+                        return { targetId, success: false, reason: 'Member not found in this guild.' };
                     }
 
                     const isMuted = Number(member.communicationDisabledUntilTimestamp || 0) > Date.now();
@@ -195,7 +210,7 @@ module.exports = {
         }
 
         try {
-            const member = await interaction.guild.members.fetch(user.id);
+            const member = await fetchGuildMemberSafe(interaction.guild, user.id);
             if (!member) {
                 return interaction.reply({ content: 'Could not find that member in this guild.', ephemeral: true });
             }

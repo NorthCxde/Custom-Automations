@@ -34,7 +34,7 @@ module.exports = {
             return interaction.reply({ content: 'You can only reroll a giveaway after it has ended.', ephemeral: true });
         }
 
-        const result = await client.rerollGiveaway(interaction.guildId, giveaway.id, count, interaction.user.id);
+        const result = await client.rerollGiveaway(interaction.guildId, giveaway.id, count);
         if (!result.giveaway) {
             return interaction.reply({ content: 'Giveaway not found.', ephemeral: true });
         }
