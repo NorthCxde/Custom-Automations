@@ -124,7 +124,12 @@ module.exports = {
 
         const input = args[0];
         if (!input) {
-            return message.reply('Usage: `?modstats <user ID or @mention>`');
+            const user = message.author;
+            const displayName = message.member?.displayName || user.username;
+            const avatarUrl = user.displayAvatarURL({ extension: 'png', size: 256 });
+            const embed = buildModStatsEmbed(client, message.guild.id, user, displayName, avatarUrl);
+            await message.channel.send({ embeds: [embed] });
+            return null;
         }
 
         const rawId = input.replace(/[<@!>]/g, '').trim();
