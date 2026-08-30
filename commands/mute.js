@@ -1120,9 +1120,9 @@ module.exports = {
         if (successCount) {
             if (ruleConfig) {
                 const outcome = successResults
-                    .map(result => `<@${result.user.id}> -> ${result.duration} (Infraction ${result.infractionCount})`)
+                    .map(result => `<@${result.user.id}> -> **${result.duration}** **(Infraction ${result.infractionCount})**`)
                     .join('\n');
-                reply.push(`Timed out ${successCount} user(s) using ${ruleConfig.label} escalation:\n${outcome}`);
+                reply.push(`Timed out **${successCount} user(s)** using **${ruleConfig.label}** escalation:\n${outcome}`);
             } else {
                 reply.push(`Timed out ${successCount} user(s): ${mentions} for ${manualDuration}.`);
             }
@@ -1177,7 +1177,7 @@ module.exports = {
                 { name: '**Duration**', value: loggedDuration, inline: true },
                 { name: '**Rule**', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
                 { name: '**Evidence**', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
-                ...(!ruleConfig ? [{ name: '**Reason**', value: baseReason || 'No reason provided', inline: false }] : []),
+                ...(!ruleConfig || baseReason ? [{ name: '**Reason**', value: baseReason || 'No reason provided', inline: false }] : []),
                 { name: 'Target IDs', value: users.map(u => u.id).join(', ') || 'None', inline: false }
             )
             .setTimestamp();
