@@ -1026,11 +1026,45 @@ module.exports = {
                         };
                     }
 
-                    if (escalationStep.type !== 'timeout' || !escalationStep.duration) {
+                    if (escalationStep.type === 'ticket_blacklist') {
                         return {
                             user,
                             success: false,
-                            reason: `Escalation requires ${formatEscalationAction(escalationStep)} instead of timeout.`
+                            reason: 'Ticket blacklist escalation is not configured for this bot.'
+                        };
+                    }
+
+                    if (escalationStep.type !== 'timeout') {
+                        const applied = await applyDecisionAction({
+                            client,
+                            guild: interaction.guild,
+                            decision: {
+                                users: [{ id: user.id, tag: user.tag, infractionCount }],
+                                ruleKey,
+                                ruleLabel: ruleConfig.label,
+                                baseReason
+                            },
+                            action: escalationStep.type,
+                            durationRaw: escalationStep.duration,
+                            moderator: interaction.user,
+                            sourceChannel: (interaction.channel || interaction.channelId)
+                        });
+                        const result = applied.results?.[0];
+                        if (applied.error || !result?.success) {
+                            return {
+                                user,
+                                success: false,
+                                reason: applied.error || result?.reason || `Unable to apply ${formatEscalationAction(escalationStep)}.`
+                            };
+                        }
+
+                        return {
+                            user,
+                            success: true,
+                            action: escalationStep.type,
+                            duration: escalationStep.duration || escalationStep.type,
+                            infractionCount,
+                            ruleLabel: ruleConfig.label
                         };
                     }
 
@@ -1076,6 +1110,7 @@ module.exports = {
                 return {
                     user,
                     success: true,
+                    action: 'timeout',
                     duration,
                     infractionCount,
                     ruleLabel: ruleConfig?.label || null
@@ -1108,8 +1143,8 @@ module.exports = {
         if (successCount > 0) {
             const firstSuccess = successResults[0];
             const cardText = successCount === 1 && firstSuccess
-                ? `${firstSuccess.user.username} was muted.`
-                : `${successCount} users were muted.`;
+                ? `${firstSuccess.user.username} had an escalation action applied.`
+                : `${successCount} users had escalation actions applied.`;
 
             const statusChannel = interaction.channel || (interaction.channelId
                 ? await client.channels.fetch(interaction.channelId).catch(() => null)
@@ -1120,9 +1155,9 @@ module.exports = {
         if (successCount) {
             if (ruleConfig) {
                 const outcome = successResults
-                    .map(result => `<@${result.user.id}> -> **${result.duration}** **(Infraction ${result.infractionCount})**`)
+                    .map(result => `<@${result.user.id}> -> **${formatEscalationAction({ type: result.action, duration: result.duration })}** **(Infraction ${result.infractionCount})**`)
                     .join('\n');
-                reply.push(`Timed out **${successCount} user(s)** using **${ruleConfig.label}** escalation:\n${outcome}`);
+                reply.push(`Applied **${ruleConfig.label}** escalation to **${successCount} user(s)**:\n${outcome}`);
             } else {
                 reply.push(`Timed out ${successCount} user(s): ${mentions} for ${manualDuration}.`);
             }
