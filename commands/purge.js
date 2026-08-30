@@ -11,12 +11,15 @@ function parsePrefixPurgeArguments(args) {
     }
 
     if (filter === 'user') {
-        const targetUserId = String(args[2] || '').replace(/[<@!>]/g, '');
+        const targetUserMention = String(args[2] || '');
+        const targetUserId = targetUserMention.replace(/[<@!>]/g, '');
+        if (!/^<@!?\d{17,20}>$/.test(targetUserMention)) return null;
         return { subcommand: 'user', count: Number(args[1]), targetUserId };
     }
 
-    const targetUserId = String(args[0] || '').replace(/[<@!>]/g, '');
-    if (/^\d{17,20}$/.test(targetUserId)) {
+    const targetUserMention = String(args[0] || '');
+    const targetUserId = targetUserMention.replace(/[<@!>]/g, '');
+    if (/^<@!?\d{17,20}>$/.test(targetUserMention)) {
         return { subcommand: 'user', count: Number(args[1]), targetUserId };
     }
 
@@ -116,7 +119,7 @@ module.exports = {
         const parsed = parsePrefixPurgeArguments(args);
         if (!parsed || !Number.isInteger(parsed.count) || parsed.count < 1 || parsed.count > 1000
             || (parsed.subcommand === 'user' && !/^\d{17,20}$/.test(parsed.targetUserId))) {
-            return message.reply('Usage: `?purge <count>`, `?purge humans <count>`, `?purge bots <count>`, or `?purge <user mention or ID> <count>`');
+            return message.reply('Usage: `?purge <count>`, `?purge humans <count>`, `?purge bots <count>`, or `?purge @user <count>`');
         }
 
         try {
