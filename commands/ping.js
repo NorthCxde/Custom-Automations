@@ -11,8 +11,9 @@ module.exports = {
         await sent.edit(`Pong! Latency: ${sent.createdTimestamp - message.createdTimestamp}ms`);
     },
     async executeInteraction({ interaction }) {
-        const sent = await interaction.reply({ content: 'Pinging...', fetchReply: true });
-        const latency = sent.createdTimestamp - interaction.createdTimestamp;
+        const response = await interaction.reply({ content: 'Pinging...', withResponse: true });
+        const sent = response.resource?.message;
+        const latency = (sent?.createdTimestamp || Date.now()) - interaction.createdTimestamp;
         await interaction.editReply({ content: `Pong! Latency: ${latency}ms` });
     }
 };
