@@ -1143,8 +1143,8 @@ module.exports = {
         if (successCount > 0) {
             const firstSuccess = successResults[0];
             const cardText = successCount === 1 && firstSuccess
-                ? `${firstSuccess.user.username} had an escalation action applied.`
-                : `${successCount} users had escalation actions applied.`;
+                ? `${firstSuccess.user.username} was muted.`
+                : `${successCount} users were muted.`;
 
             const statusChannel = interaction.channel || (interaction.channelId
                 ? await client.channels.fetch(interaction.channelId).catch(() => null)
