@@ -18,6 +18,23 @@ function parsePrefixPurgeArguments(args) {
     return null;
 }
 
+async function sendPurgeStatusCard(client, channel, text) {
+    if (!channel || !text) return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setDescription(`✅ ${String(text).trim()}`);
+
+    try {
+        const statusMessage = await channel.send({ embeds: [embed] });
+        if (client.prefixCommandReactionEmojiId && statusMessage) {
+            await statusMessage.react(client.prefixCommandReactionEmojiId).catch(() => null);
+        }
+    } catch (error) {
+        console.error('Failed to send purge status card:', error);
+    }
+}
+
 async function fetchPurgeCandidates(channel, subcommand, count, targetUserId = null) {
     const allMessages = new Map();
     let lastId = null;
@@ -137,7 +154,8 @@ module.exports = {
                 : parsed.subcommand === 'bots' ? ' from bots'
                     : parsed.subcommand === 'humans' ? ' from humans'
                         : '';
-            return client.sendPrefixCommandResponse(message.channel, `Purged ${candidates.length} message(s)${subject}.`);
+            await sendPurgeStatusCard(client, message.channel, `Purged ${candidates.length} message(s)${subject}.`);
+            return null;
         } catch (error) {
             console.error('[Purge Error]', error.message || error);
             return message.reply(`Unable to purge messages: ${error.message || 'Unknown error.'}`);
