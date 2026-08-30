@@ -1,5 +1,45 @@
 const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder } = require('discord.js');
 
+function parsePrefixPurgeArguments(args) {
+    const filter = String(args[0] || '').toLowerCase();
+    if (/^\d+$/.test(filter)) {
+        return { subcommand: 'any', count: Number(filter), targetUserId: null };
+    }
+
+    if (filter === 'bots' || filter === 'humans') {
+        return { subcommand: filter, count: Number(args[1]), targetUserId: null };
+    }
+
+    if (filter === 'user') {
+        const targetUserId = String(args[1] || '').replace(/[<@!>]/g, '');
+        return { subcommand: 'user', count: Number(args[2]), targetUserId };
+    }
+
+    return null;
+}
+
+async function fetchPurgeCandidates(channel, subcommand, count, targetUserId = null) {
+    const allMessages = new Map();
+    let lastId = null;
+    const batchSize = 100;
+    const targetFetchSize = Math.min(count * 2, 1000);
+
+    while (allMessages.size < targetFetchSize) {
+        const fetchOptions = { limit: batchSize };
+        if (lastId) fetchOptions.before = lastId;
+        const batch = await channel.messages.fetch(fetchOptions);
+        if (batch.size === 0) break;
+        batch.forEach((message, id) => allMessages.set(id, message));
+        lastId = batch.last().id;
+    }
+
+    const messages = Array.from(allMessages.values());
+    if (subcommand === 'user') return messages.filter(message => message.author.id === targetUserId).slice(0, count);
+    if (subcommand === 'bots') return messages.filter(message => message.author.bot).slice(0, count);
+    if (subcommand === 'humans') return messages.filter(message => !message.author.bot).slice(0, count);
+    return messages.slice(0, count);
+}
+
 module.exports = {
     name: 'purge',
     description: 'Delete messages',
@@ -42,6 +82,67 @@ module.exports = {
                     option.setName('count')
                         .setDescription('Number of messages to delete. Limit 1000')
                         .setRequired(true))),
+    async execute({ client, message, args }) {
+        if (!message.guild) return message.reply('This command must be used in a server channel.');
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+            return message.reply('You need the Manage Messages permission to use this command.');
+        }
+        if (!message.channel.permissionsFor(message.guild.members.me).has(PermissionsBitField.Flags.ManageMessages)) {
+            return message.reply('I need Manage Messages permission to delete messages.');
+        }
+
+        const parsed = parsePrefixPurgeArguments(args);
+        if (!parsed || !Number.isInteger(parsed.count) || parsed.count < 1 || parsed.count > 1000
+            || (parsed.subcommand === 'user' && !/^\d{17,20}$/.test(parsed.targetUserId))) {
+            return message.reply('Usage: `?purge <count>`, `?purge humans <count>`, `?purge bots <count>`, or `?purge user <user mention or ID> <count>`');
+        }
+
+        try {
+            const candidates = await fetchPurgeCandidates(
+                message.channel,
+                parsed.subcommand,
+                parsed.count,
+                parsed.targetUserId
+            );
+            if (!candidates.length) {
+                const noMessagesText = parsed.subcommand === 'user'
+                    ? 'No recent messages from that user were found to delete.'
+                    : parsed.subcommand === 'bots'
+                        ? 'No recent messages from bots were found to delete.'
+                        : parsed.subcommand === 'humans'
+                            ? 'No recent messages from humans were found to delete.'
+                            : 'No recent messages were found to delete.';
+                return message.reply(noMessagesText);
+            }
+
+            await message.channel.bulkDelete(candidates, true);
+
+            const userTag = parsed.subcommand === 'user' ? `<@${parsed.targetUserId}>`
+                : parsed.subcommand === 'bots' ? 'Bots'
+                    : parsed.subcommand === 'humans' ? 'Humans'
+                        : 'Any';
+            await client.addModLog(message.guild.id, {
+                action: 'Purge',
+                userId: parsed.subcommand === 'user' ? parsed.targetUserId : null,
+                userTag,
+                moderatorId: message.author.id,
+                moderatorTag: message.author.tag,
+                reason: `Deleted ${candidates.length} messages`,
+                count: candidates.length,
+                channelId: message.channel.id,
+                timestamp: new Date().toISOString()
+            });
+
+            const subject = parsed.subcommand === 'user' ? ` from <@${parsed.targetUserId}>`
+                : parsed.subcommand === 'bots' ? ' from bots'
+                    : parsed.subcommand === 'humans' ? ' from humans'
+                        : '';
+            return client.sendPrefixCommandResponse(message.channel, `Purged ${candidates.length} message(s)${subject}.`);
+        } catch (error) {
+            console.error('[Purge Error]', error.message || error);
+            return message.reply(`Unable to purge messages: ${error.message || 'Unknown error.'}`);
+        }
+    },
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
