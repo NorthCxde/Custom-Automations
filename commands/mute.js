@@ -257,6 +257,21 @@ function formatEscalationAction(step) {
     return step.type.replace(/_/g, ' ');
 }
 
+async function fetchGuildMemberSafe(guild, userId) {
+    if (!guild || !userId) return null;
+
+    try {
+        return await guild.members.fetch(userId);
+    } catch (error) {
+        const errorCode = Number(error?.code || error?.rawError?.code || 0);
+        const message = String(error?.message || '').toLowerCase();
+        if (errorCode === 10007 || message.includes('unknown member') || message.includes('member not found')) {
+            return null;
+        }
+        throw error;
+    }
+}
+
 function getRuleMuteCount(client, guildId, userId, ruleKey) {
     if (!client.getModLogs) return 0;
     const logs = client.getModLogs(guildId, userId) || [];
@@ -478,7 +493,11 @@ async function applyDecisionAction({ client, guild, decision, action, durationRa
 
         try {
             if (action === 'mute') {
-                const member = await guild.members.fetch(userId);
+                const member = await fetchGuildMemberSafe(guild, userId);
+                if (!member) {
+                    results.push({ userId, success: false, reason: 'Member not found in this guild.' });
+                    continue;
+                }
                 await client.sendModerationDm({
                     user: member.user,
                     guildName: guild.name,
@@ -510,7 +529,11 @@ async function applyDecisionAction({ client, guild, decision, action, durationRa
                     });
                 }
             } else if (action === 'kick') {
-                const member = await guild.members.fetch(userId);
+                const member = await fetchGuildMemberSafe(guild, userId);
+                if (!member) {
+                    results.push({ userId, success: false, reason: 'Member not found in this guild.' });
+                    continue;
+                }
                 await member.kick(reason);
                 if (client.addModLog) {
                     let robloxId = null;
@@ -684,9 +707,9 @@ module.exports = {
 
             const results = await Promise.all(uniqueTargetIds.map(async (targetId) => {
                 try {
-                    const member = await message.guild.members.fetch(targetId);
+                    const member = await fetchGuildMemberSafe(message.guild, targetId);
                     if (!member) {
-                        return { targetId, success: false, reason: 'Member not found' };
+                        return { targetId, success: false, reason: 'Member not found in this guild.' };
                     }
 
                     if (typeof client.isModerationImmuneMember === 'function' && client.isModerationImmuneMember(member)) {
@@ -918,6 +941,8 @@ module.exports = {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
         }
 
+        await interaction.deferReply({ ephemeral: true });
+
         const users = [
             interaction.options.getUser('user'),
             interaction.options.getUser('user2'),
@@ -937,28 +962,28 @@ module.exports = {
         const baseReason = String(interaction.options.getString('reason') || '').trim();
 
         if (!ruleKey && !manualDuration) {
-            return interaction.reply({ content: 'Please provide either a duration or an infraction rule.', ephemeral: true });
+            return interaction.editReply({ content: 'Please provide either a duration or an infraction rule.' });
         }
 
         if (ruleKey && !ruleConfig) {
-            return interaction.reply({ content: 'That rule is not configured yet. Please contact an administrator.', ephemeral: true });
+            return interaction.editReply({ content: 'That rule is not configured yet. Please contact an administrator.' });
         }
 
         const manualDurationMs = manualDuration ? parseDuration(manualDuration) : null;
         if (manualDuration && !manualDurationMs) {
-            return interaction.reply({ content: 'Please provide a valid duration like 1m, 1h, or 1d.', ephemeral: true });
+            return interaction.editReply({ content: 'Please provide a valid duration like 1m, 1h, or 1d.' });
         }
 
         if (!interaction.guild.members.me.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-            return interaction.reply({ content: 'I do not have permission to timeout members.', ephemeral: true });
+            return interaction.editReply({ content: 'I do not have permission to timeout members.' });
         }
 
         const moderatorDecisionTargets = [];
         const results = await Promise.all(users.map(async (user) => {
             try {
-                const member = await interaction.guild.members.fetch(user.id);
+                const member = await fetchGuildMemberSafe(interaction.guild, user.id);
                 if (!member) {
-                    return { user, success: false, reason: 'Member not found' };
+                    return { user, success: false, reason: 'Member not found in this guild.' };
                 }
 
                 if (typeof client.isModerationImmuneMember === 'function' && client.isModerationImmuneMember(member)) {
@@ -1219,7 +1244,7 @@ module.exports = {
             replyComponents.push(decisionRow);
         }
 
-        return interaction.reply({ content: response, embeds: replyEmbeds, components: replyComponents, ephemeral: true });
+        return interaction.editReply({ content: response, embeds: replyEmbeds, components: replyComponents });
     },
     async handleButton({ client, interaction }) {
         if (!interaction.customId.startsWith(MOD_DECISION_PREFIX)) return false;
