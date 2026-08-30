@@ -63,18 +63,31 @@ module.exports = {
         }
 
         try {
-            const messages = await interaction.channel.messages.fetch({ limit: 1000 });
+            let allMessages = new Map();
+            let lastId = null;
+            const batchSize = 100;
+            const targetFetchSize = Math.min(count * 2, 1000);
+            
+            while (allMessages.size < targetFetchSize) {
+                const fetchOptions = { limit: batchSize };
+                if (lastId) fetchOptions.before = lastId;
+                const batch = await interaction.channel.messages.fetch(fetchOptions);
+                if (batch.size === 0) break;
+                batch.forEach((msg, id) => allMessages.set(id, msg));
+                lastId = batch.last().id;
+            }
+
             let candidates = [];
 
             if (subcommand === 'any') {
-                candidates = messages.first(count);
+                candidates = Array.from(allMessages.values()).slice(0, count);
             } else if (subcommand === 'user') {
                 const targetUser = interaction.options.getUser('user');
-                candidates = messages.filter(msg => msg.author.id === targetUser.id).first(count);
+                candidates = Array.from(allMessages.values()).filter(msg => msg.author.id === targetUser.id).slice(0, count);
             } else if (subcommand === 'bots') {
-                candidates = messages.filter(msg => msg.author.bot === true).first(count);
+                candidates = Array.from(allMessages.values()).filter(msg => msg.author.bot === true).slice(0, count);
             } else if (subcommand === 'humans') {
-                candidates = messages.filter(msg => msg.author.bot === false).first(count);
+                candidates = Array.from(allMessages.values()).filter(msg => msg.author.bot === false).slice(0, count);
             }
 
             if (candidates.length === 0) {
