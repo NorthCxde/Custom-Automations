@@ -24,7 +24,11 @@ const {
     RoleSelectMenuBuilder,
     UserSelectMenuBuilder,
     ChannelType,
-    Routes
+    Routes,
+    MessageFlags,
+    CommandInteraction,
+    MessageComponentInteraction,
+    ModalSubmitInteraction
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
@@ -217,6 +221,32 @@ const client = new Client({
         Partials.GuildMember
     ]
 });
+
+function normalizeEphemeralResponseOptions(options) {
+    if (!options || typeof options !== 'object' || typeof options.ephemeral !== 'boolean') return options;
+
+    const { ephemeral, ...normalizedOptions } = options;
+    if (ephemeral) {
+        normalizedOptions.flags = normalizedOptions.flags === undefined
+            ? MessageFlags.Ephemeral
+            : Number(normalizedOptions.flags) | MessageFlags.Ephemeral;
+    }
+    return normalizedOptions;
+}
+
+function patchInteractionResponseOptions(prototype) {
+    for (const method of ['reply', 'deferReply', 'followUp', 'editReply']) {
+        const original = prototype[method];
+        if (typeof original !== 'function') continue;
+        prototype[method] = function patchedInteractionResponse(options, ...args) {
+            return original.call(this, normalizeEphemeralResponseOptions(options), ...args);
+        };
+    }
+}
+
+patchInteractionResponseOptions(CommandInteraction.prototype);
+patchInteractionResponseOptions(MessageComponentInteraction.prototype);
+patchInteractionResponseOptions(ModalSubmitInteraction.prototype);
 
 client.commands = new Map();
 const commandsPath = path.join(__dirname, "commands");
