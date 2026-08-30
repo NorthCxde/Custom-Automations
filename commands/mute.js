@@ -1172,12 +1172,12 @@ module.exports = {
             .setTitle(`Mute Action`)
             .setDescription(`Case by ${interaction.user.tag}`)
             .addFields(
-                { name: 'User(s)', value: mentions || 'None', inline: true },
-                { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
-                { name: 'Duration', value: loggedDuration, inline: true },
-                { name: 'Rule', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
-                { name: 'Evidence', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
-                { name: 'Reason', value: ruleConfig ? ruleConfig.label : (baseReason || 'No reason provided'), inline: false },
+                { name: '**User(s)**', value: mentions || 'None', inline: true },
+                { name: '**Moderator**', value: `<@${interaction.user.id}>`, inline: true },
+                { name: '**Duration**', value: loggedDuration, inline: true },
+                { name: '**Rule**', value: ruleConfig ? ruleConfig.label : 'None', inline: true },
+                { name: '**Evidence**', value: evidenceFiles.length ? `${evidenceFiles.length} attachment(s)` : 'None', inline: true },
+                ...(!ruleConfig ? [{ name: '**Reason**', value: baseReason || 'No reason provided', inline: false }] : []),
                 { name: 'Target IDs', value: users.map(u => u.id).join(', ') || 'None', inline: false }
             )
             .setTimestamp();

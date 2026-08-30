@@ -640,7 +640,11 @@ client.sendModerationDm = async ({ user, userId, guildName, action, duration, re
         const safeReason = reason || 'No reason provided';
 
         if (action === 'mute') {
-            content = `You were muted in ${guildName} for ${duration}. | ${safeReason}`;
+            const formattedReason = safeReason.replace(
+                /\[Rule: ([^\]]+)\] \[Infraction ([^\]]+)\]/,
+                '**[Rule: $1]** **[Infraction $2]**'
+            );
+            content = `You were muted in ${guildName} for **${duration}**. | ${formattedReason}`;
         } else if (action === 'ban') {
             content = `You were banned in ${guildName}. | ${safeReason}`;
         } else if (action === 'kick') {
