@@ -75,6 +75,9 @@ module.exports = {
                 .setRequired(true)),
     async execute({ client, message, args }) {
         if (!message.guild) return message.reply('This command must be used in a server channel.');
+        if (!client.hardcodedAdmins?.has(message.author.id)) {
+            return message.reply('Only hardcoded admins can use this command.');
+        }
         if (!args[0]) {
             await sendUnbanUsageCard(message.channel);
             return null;
@@ -131,8 +134,8 @@ module.exports = {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
         }
-        if (!interaction.memberPermissions || !interaction.memberPermissions.has(PermissionsBitField.Flags.BanMembers)) {
-            return interaction.reply({ content: 'You need Ban Members permission to use this command.', ephemeral: true });
+        if (!client.hardcodedAdmins?.has(interaction.user.id)) {
+            return interaction.reply({ content: 'Only hardcoded admins can use this command.', ephemeral: true });
         }
 
         const user = interaction.options.getUser('user');

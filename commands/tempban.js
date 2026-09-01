@@ -155,8 +155,8 @@ module.exports = {
     },
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
-        if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.BanMembers)) {
-            return interaction.reply({ content: 'You need Ban Members permission to use this command.', ephemeral: true });
+        if (!client.isMemberAllowed(interaction.member)) {
+            return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
         }
 
         const users = ['user', 'user2', 'user3', 'user4'].map(name => interaction.options.getUser(name)).filter(Boolean);
