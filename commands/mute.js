@@ -665,18 +665,21 @@ module.exports = {
                 .setRequired(false)),
     async execute({ client, message, args }) {
         if (!message.guild) return message.reply('This command must be used in a server channel.');
-        if (!args[0] || !args[1]) {
+        if (!args[0]) {
             await sendMuteUsageCard(message.channel);
             return null;
         }
 
         const durationIndex = args.findIndex(arg => parseDuration(arg) !== null);
-        if (durationIndex <= 0) {
+        const targetEndIndex = durationIndex > 0
+            ? durationIndex
+            : args.findIndex(arg => !/^(?:<@!?\d{17,19}>|\d{17,19})$/.test(arg));
+        if (targetEndIndex <= 0) {
             await sendMuteUsageCard(message.channel);
             return null;
         }
 
-        const rawTargets = args.slice(0, durationIndex);
+        const rawTargets = args.slice(0, targetEndIndex);
         const uniqueTargetIds = [...new Set(rawTargets.map(target => target.replace(/[<@!>]/g, '')))].filter(Boolean);
         const invalidTarget = uniqueTargetIds.find(id => !/^[0-9]{17,19}$/.test(id));
         if (invalidTarget) {
@@ -684,16 +687,17 @@ module.exports = {
             return null;
         }
 
-        const duration = args[durationIndex];
-        const durationMs = parseDuration(duration);
-        if (durationMs === null) {
+        const duration = durationIndex > 0 ? args[durationIndex] : null;
+        const durationMs = duration ? parseDuration(duration) : null;
+        const reasonStartIndex = durationIndex > 0 ? durationIndex + 1 : targetEndIndex;
+        const reason = args.slice(reasonStartIndex).join(' ') || 'No reason provided';
+        const guildRules = client.getInfractionRules ? client.getInfractionRules(message.guild.id) : INFRACTION_RULES;
+        const inferredRule = inferInfractionRuleFromReason(reason, guildRules);
+        if (!duration && !inferredRule) {
             await sendMuteUsageCard(message.channel);
             return null;
         }
 
-        const reason = args.slice(durationIndex + 1).join(' ') || 'No reason provided';
-        const guildRules = client.getInfractionRules ? client.getInfractionRules(message.guild.id) : INFRACTION_RULES;
-        const inferredRule = inferInfractionRuleFromReason(reason, guildRules);
         const evidenceFiles = (message.attachments
             ? Array.from(message.attachments.values())
             : [])
