@@ -988,21 +988,13 @@ function buildPermsManagePayload(client, guild, notice, selectedCommandName = nu
 
 function buildAutoresponderManagePayload(client, guildId, notice) {
     const responders = client.getAutoresponders ? client.getAutoresponders(guildId) : [];
-    const responderList = responders.length
-        ? responders.slice(0, 20).map((entry, index) => {
-            const mode = entry.matchType === 'exact' ? 'exact' : 'contains';
-            const status = entry.enabled === false ? 'disabled' : 'enabled';
-            return `${index + 1}. \`${entry.trigger}\` (${mode}, ${status})`;
-        }).join('\n') + (responders.length > 20 ? `\n...and ${responders.length - 20} more.` : '')
-        : 'No autoresponders have been created for this server yet.';
-
     const embed = new EmbedBuilder()
         .setColor(0x000000)
         .setTitle('Manage Panel - Auto Responder')
-        .setDescription('Open the same autoresponder manager used by /autoresponder.')
+        .setDescription('Create automatic replies when members send configured words or phrases.')
         .addFields({
-            name: `Existing Autoresponders (${responders.length})`,
-            value: responderList,
+            name: 'Status',
+            value: `${responders.length} autoresponder${responders.length === 1 ? '' : 's'} configured for this server.`,
             inline: false
         })
         .setTimestamp();
