@@ -166,7 +166,10 @@ module.exports = {
             return null;
         } catch (error) {
             console.error('[Purge Error]', error.message || error);
-            return message.reply(`Unable to purge messages: ${error.message || 'Unknown error.'}`);
+            return client.sendPrefixCommandResponse(
+                message.channel,
+                `Unable to purge messages: ${error.message || 'Unknown error.'}`
+            );
         }
     },
     async executeInteraction({ client, interaction }) {

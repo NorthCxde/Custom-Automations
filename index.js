@@ -6420,7 +6420,7 @@ client.on('messageCreate', async (message) => {
         await command.execute({ client, message, args });
     } catch (err) {
         console.error(err);
-        message.reply('There was an error executing that command.');
+        await client.sendPrefixCommandResponse(message.channel, 'There was an error executing that command.');
     }
 
     if (shouldHideModerationCommand && message.deletable) {
