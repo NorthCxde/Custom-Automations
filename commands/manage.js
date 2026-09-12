@@ -986,14 +986,23 @@ function buildPermsManagePayload(client, guild, notice, selectedCommandName = nu
     return payload;
 }
 
-function buildAutoresponderManagePayload(notice) {
+function buildAutoresponderManagePayload(client, guildId, notice) {
+    const responders = client.getAutoresponders ? client.getAutoresponders(guildId) : [];
+    const responderList = responders.length
+        ? responders.slice(0, 20).map((entry, index) => {
+            const mode = entry.matchType === 'exact' ? 'exact' : 'contains';
+            const status = entry.enabled === false ? 'disabled' : 'enabled';
+            return `${index + 1}. \`${entry.trigger}\` (${mode}, ${status})`;
+        }).join('\n') + (responders.length > 20 ? `\n...and ${responders.length - 20} more.` : '')
+        : 'No autoresponders have been created for this server yet.';
+
     const embed = new EmbedBuilder()
         .setColor(0x000000)
         .setTitle('Manage Panel - Auto Responder')
         .setDescription('Open the same autoresponder manager used by /autoresponder.')
         .addFields({
-            name: 'Launch',
-            value: 'Press the button below to open autoresponder create/edit flow.',
+            name: `Existing Autoresponders (${responders.length})`,
+            value: responderList,
             inline: false
         })
         .setTimestamp();
@@ -2599,7 +2608,7 @@ function buildManagePayload(client, guildId, options = {}) {
     }
 
     if (panel === MANAGE_PANEL_AUTORESPONDER) {
-        return buildAutoresponderManagePayload(notice);
+        return buildAutoresponderManagePayload(client, guildId, notice);
     }
 
     if (panel === MANAGE_PANEL_PERMS) {
