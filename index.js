@@ -5141,7 +5141,7 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: 'You have left this giveaway.', ephemeral: true });
         }
 
-        if (interaction.customId === 'ar_create_start' || interaction.customId === 'ar_toggle_exact' || interaction.customId === 'ar_toggle_enabled' || interaction.customId === 'ar_edit_response' || interaction.customId === 'ar_save' || interaction.customId === 'ar_cancel' || interaction.customId === 'ar_config_users' || interaction.customId === 'ar_delete') {
+        if (interaction.customId.startsWith('ar_page:') || interaction.customId === 'ar_create_start' || interaction.customId === 'ar_toggle_exact' || interaction.customId === 'ar_toggle_enabled' || interaction.customId === 'ar_edit_response' || interaction.customId === 'ar_save' || interaction.customId === 'ar_cancel' || interaction.customId === 'ar_config_users' || interaction.customId === 'ar_delete') {
             if (!interaction.guild) {
                 return interaction.reply({ content: 'This command must be used in a server channel.', ephemeral: true });
             }
@@ -5176,6 +5176,19 @@ client.on('interactionCreate', async (interaction) => {
                 );
 
                 return interaction.showModal(modal);
+            }
+
+            if (interaction.customId.startsWith('ar_page:')) {
+                const page = Number(interaction.customId.split(':')[1]);
+                const autoresponderCommand = client.slashCommands.get('autoresponder');
+                if (!autoresponderCommand?.buildListPayload) {
+                    return interaction.reply({ content: 'Autoresponder list is unavailable in this build.', ephemeral: true });
+                }
+                return interaction.update(autoresponderCommand.buildListPayload({
+                    client,
+                    guildId: interaction.guildId,
+                    page
+                }));
             }
 
             const draftKey = client.getAutoresponderDraftKey(interaction.guildId, interaction.user.id);
