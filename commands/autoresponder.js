@@ -21,18 +21,6 @@ module.exports = {
         const currentPage = Math.min(Math.max(Number(page) || 0, 0), pageCount - 1);
         const pageEntries = responders.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
-        const lines = pageEntries.map((entry, index) => {
-            const mode = entry.matchType === 'exact' ? 'exact' : 'contains';
-            const status = entry.enabled === false ? 'disabled' : 'enabled';
-            return `${currentPage * pageSize + index + 1}. ${entry.trigger} (${mode}, ${status})`;
-        });
-        const listText = [
-            `Existing autoresponders (page ${currentPage + 1}/${pageCount}):`,
-            ...lines,
-            '',
-            `Total: ${responders.length}`
-        ].join('\n');
-
         const options = pageEntries.map((entry, index) => ({
             label: `${currentPage * pageSize + index + 1}. ${entry.trigger}`.slice(0, 100),
             value: entry.id,
@@ -63,7 +51,13 @@ module.exports = {
         ));
 
         return {
-            content: `${listText}\n\nVariables:\n${variableInfo}`,
+            content: [
+                'Autoresponder manager',
+                'Create automatic replies for configured words or phrases, or select one below to edit it.',
+                `Configured: ${responders.length} | Page ${currentPage + 1}/${pageCount}`,
+                '',
+                `Variables:\n${variableInfo}`
+            ].join('\n'),
             components,
             ephemeral: true
         };
