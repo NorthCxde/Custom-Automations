@@ -89,7 +89,9 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'bank',
     'sell',
     'stats',
-    'duel'
+    'duel',
+    'daily',
+    'work'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
 
