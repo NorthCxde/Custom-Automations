@@ -1,9 +1,11 @@
-﻿const path = require('path');
+﻿const fs = require('fs');
+const path = require('path');
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const { SlashCommandBuilder, MessageFlags, AttachmentBuilder } = require('discord.js');
 
 const ASSET_DIR = path.join(__dirname, '..', 'assets', 'profilebeta');
 const BACKGROUND_PATH = path.join(ASSET_DIR, 'background.png');
+const ECONOMY_DATA_FILE = path.join(__dirname, '..', 'data', 'economy.json');
 
 const CARD_LAYOUT = {
     avatar: { x: 111, y: 65, size: 250 },
@@ -171,7 +173,28 @@ function drawContainedImage(ctx, image, x, y, boxSize) {
     ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
 }
 
-async function renderProfileBetaCard({ user, member, debugGrid = false }) {
+function getGuildUserKey(guildId, userId) {
+    return `${String(guildId || 'dm')}:${String(userId || 'unknown')}`;
+}
+
+function getEconomyBalance(guildId, userId) {
+    if (!guildId || !userId) return 0;
+    try {
+        if (!fs.existsSync(ECONOMY_DATA_FILE)) {
+            return 0;
+        }
+
+        const raw = fs.readFileSync(ECONOMY_DATA_FILE, 'utf8') || '{}';
+        const parsed = JSON.parse(raw);
+        const key = getGuildUserKey(guildId, userId);
+        return Number(parsed?.[key]?.balance || 0);
+    } catch (err) {
+        console.error('[profilebeta] Failed to read economy balance:', err);
+        return 0;
+    }
+}
+
+async function renderProfileBetaCard({ user, member, guildId, debugGrid = false }) {
     const background = await loadBackgroundImage();
     const canvas = createCanvas(background.width, background.height);
     const ctx = canvas.getContext('2d');
@@ -214,15 +237,16 @@ async function renderProfileBetaCard({ user, member, debugGrid = false }) {
     const idMaxWidth = Math.max(120, Math.min(CARD_LAYOUT.userId.maxWidth, textRightX - textStartX));
     ctx.fillText(`ID: ${user.id}`, textStartX, CARD_LAYOUT.userId.y, idMaxWidth);
 
-    // Points line
+    // Coins line
     const pointsMaxWidth = Math.max(120, Math.min(CARD_LAYOUT.points.maxWidth, textRightX - textStartX));
     ctx.font = `700 ${CARD_LAYOUT.points.size}px sans-serif`;
     ctx.fillStyle = CARD_LAYOUT.points.labelColor;
-    const pointsLabel = 'Points: ';
+    const pointsLabel = 'Coins: ';
     const pointsLabelWidth = ctx.measureText(pointsLabel).width;
+    const balanceValue = String(getEconomyBalance(guildId, user.id));
     ctx.fillText(pointsLabel, textStartX, CARD_LAYOUT.points.y, pointsMaxWidth);
     ctx.fillStyle = CARD_LAYOUT.points.valueColor;
-    ctx.fillText('Coming Soon', textStartX + pointsLabelWidth, CARD_LAYOUT.points.y, pointsMaxWidth - pointsLabelWidth);
+    ctx.fillText(balanceValue, textStartX + pointsLabelWidth, CARD_LAYOUT.points.y, pointsMaxWidth - pointsLabelWidth);
 
     if (debugGrid) {
         drawDebugGuides(ctx, canvas, {
@@ -284,7 +308,7 @@ module.exports = {
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
 
         try {
-            const cardBuffer = await renderProfileBetaCard({ user, member, debugGrid });
+            const cardBuffer = await renderProfileBetaCard({ user, member, guildId: interaction.guildId, debugGrid });
             const file = new AttachmentBuilder(cardBuffer, { name: 'profilebeta-card.png' });
             return interaction.reply({ files: [file], flags: MessageFlags.Ephemeral });
         } catch (err) {
