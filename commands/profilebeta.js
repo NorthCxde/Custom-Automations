@@ -174,7 +174,7 @@ function drawContainedImage(ctx, image, x, y, boxSize) {
 }
 
 function getGuildUserKey(guildId, userId) {
-    return `${String(guildId || 'dm')}:${String(userId || 'unknown')}`;
+    return String(userId || 'unknown');
 }
 
 function getEconomyBalance(guildId, userId) {

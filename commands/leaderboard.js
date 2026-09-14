@@ -26,23 +26,21 @@ function loadData() {
 }
 
 function getGuildUserKey(guildId, userId) {
-    return `${String(guildId || 'dm')}:${String(userId || 'unknown')}`;
+    return String(userId || 'unknown');
 }
 
 module.exports = {
     name: 'leaderboard',
     data: new SlashCommandBuilder()
         .setName('leaderboard')
-        .setDescription('View the top balances in this server.'),
+        .setDescription('View the top balances globally.'),
     async executeInteraction({ interaction }) {
-        const guildId = interaction.guildId;
         const data = loadData();
         const entries = Object.entries(data)
-            .filter(([key]) => key.startsWith(`${guildId}:`))
-            .map(([key, value]) => {
-                const userId = key.split(':').slice(1).join(':');
-                return { userId, balance: Number(value?.balance || 0) };
-            })
+            .map(([userId, value]) => ({
+                userId,
+                balance: Number(value?.balance || 0)
+            }))
             .sort((a, b) => b.balance - a.balance)
             .slice(0, 10);
 

@@ -26,7 +26,7 @@ function loadData() {
 }
 
 function getGuildUserKey(guildId, userId) {
-    return `${String(guildId || 'dm')}:${String(userId || 'unknown')}`;
+    return String(userId || 'unknown');
 }
 
 function readUser(data, guildId, userId) {
