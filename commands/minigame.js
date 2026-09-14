@@ -115,7 +115,7 @@ module.exports = {
 
         const embed = new EmbedBuilder()
             .setTitle('Minigame')
-            .setDescription(`User played **${selectedGame}** and earned **${earned}** coins.`)
+            .setDescription(`<@${userId}> played **${selectedGame}** and earned **${earned}** coins.`)
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });
