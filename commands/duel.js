@@ -100,7 +100,7 @@ module.exports = {
 
         // Create duel request embed
         const duelEmbed = new EmbedBuilder()
-            .setTitle('⚔️ Duel Request')
+            .setTitle('💣 Duel Request')
             .setDescription(`<@${userId}> challenged <@${opponent.id}> to a duel!\n\n**Bet:** ${betAmount.toLocaleString()} coins`)
             .setTimestamp();
 
@@ -155,7 +155,7 @@ module.exports = {
             // Run duel
             const outcomes = [
                 { text: 'passed a 1 in the duel and won! <@winner> took <coins>!', weight: 15, winner: 'challenger' },
-                { text: 'failed to track and lost the match! <@winner> took <coins>!', weight: 15, winner: 'opponent' },
+                { text: '<@loser> failed to track and lost the match! <@winner> took <coins>!', weight: 15, winner: 'opponent' },
                 { text: 'passed a 2 in the duel and won! <@winner> took <coins>!', weight: 25, winner: 'challenger' },
                 { text: 'passed a 3 in the duel and won by running! <@winner> took <coins>!', weight: 40, winner: 'challenger' },
                 { text: 'passed a 0.5 in the duel and won by running! <@winner> took <coins>!', weight: 4.5, winner: 'challenger' },
@@ -203,11 +203,12 @@ module.exports = {
             // Format outcome
             const outcomeText = chosen.text
                 .replace('<@winner>', `<@${winner}>`)
+                .replace('<@loser>', `<@${loser}>`)
                 .replace('<coins>', `**${(betAmount * 2).toLocaleString()} coins**`);
 
             const resultEmbed = new EmbedBuilder()
-                .setTitle('⚔️ Duel Result')
-                .setDescription(`<@${userId}> vs <@${opponent.id}>\n\n${outcomeText}`)
+                .setTitle('💣 Duel Result')
+                .setDescription(`<@${userId}> vs <@${opponent.id}>\n\n${outcomeText}`))
                 .setTimestamp();
 
             await buttonInteraction.reply({ embeds: [resultEmbed], ephemeral: false });
