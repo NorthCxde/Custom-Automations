@@ -243,7 +243,7 @@ async function renderProfileBetaCard({ user, member, guildId, debugGrid = false 
     ctx.fillStyle = CARD_LAYOUT.points.labelColor;
     const pointsLabel = 'Coins: ';
     const pointsLabelWidth = ctx.measureText(pointsLabel).width;
-    const balanceValue = String(getEconomyBalance(guildId, user.id));
+    const balanceValue = Number(getEconomyBalance(guildId, user.id)).toLocaleString();
     ctx.fillText(pointsLabel, textStartX, CARD_LAYOUT.points.y, pointsMaxWidth);
     ctx.fillStyle = CARD_LAYOUT.points.valueColor;
     ctx.fillText(balanceValue, textStartX + pointsLabelWidth, CARD_LAYOUT.points.y, pointsMaxWidth - pointsLabelWidth);
