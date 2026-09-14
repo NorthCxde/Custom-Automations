@@ -62,13 +62,6 @@ module.exports = {
             .setName('item')
             .setDescription('Item to sell')
             .setRequired(true)
-            .addChoices(
-                { name: 'Golden Sword', value: 'Golden Sword' },
-                { name: 'Diamond Pickaxe', value: 'Diamond Pickaxe' },
-                { name: 'Emerald Amulet', value: 'Emerald Amulet' },
-                { name: 'Crown', value: 'Crown' },
-                { name: 'Legendary Bow', value: 'Legendary Bow' }
-            )
         )
         .addIntegerOption(option => option
             .setName('quantity')
