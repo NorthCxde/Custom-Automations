@@ -208,7 +208,7 @@ module.exports = {
 
             const resultEmbed = new EmbedBuilder()
                 .setTitle('💣 Duel Result')
-                .setDescription(`<@${userId}> vs <@${opponent.id}>\n\n${outcomeText}`))
+                .setDescription(`<@${userId}> vs <@${opponent.id}>\n\n${outcomeText}`)
                 .setTimestamp();
 
             await buttonInteraction.reply({ embeds: [resultEmbed], ephemeral: false });
