@@ -62,7 +62,10 @@ function getGuildUserKey(guildId, userId) {
 function readUser(data, guildId, userId) {
     const key = getGuildUserKey(guildId, userId);
     if (!data[key]) {
-        data[key] = { balance: 0, lastDaily: 0, lastWork: 0, inventory: [] };
+        data[key] = { balance: 0, lastDaily: 0, lastWork: 0, inventory: [], stats: { earned: 0, spent: 0 } };
+    }
+    if (!data[key].stats) {
+        data[key].stats = { earned: 0, spent: 0 };
     }
     return data[key];
 }
@@ -143,15 +146,18 @@ module.exports = {
                 const lostCoins = Math.max(1, Math.floor(basePrize * multiplier));
                 const nextBalance = Math.max(0, Number(user.balance || 0) - lostCoins);
                 user.balance = nextBalance;
+                user.stats.spent = Number(user.stats.spent || 0) + lostCoins;
                 description = `<@${userId}> ${chosen.text.replace('<coins>', `**${lostCoins} coins**`)}`;
             } else {
                 const earnedCoins = Math.max(1, Math.floor(basePrize * multiplier));
                 user.balance = Number(user.balance || 0) + earnedCoins;
+                user.stats.earned = Number(user.stats.earned || 0) + earnedCoins;
                 description = `<@${userId}> ${chosen.text.replace('<coins>', `**${earnedCoins} coins**`)}`;
             }
         } else {
             earned = Math.floor(Math.random() * (rewardConfig.max - rewardConfig.min + 1)) + rewardConfig.min;
             user.balance = Number(user.balance || 0) + earned;
+            user.stats.earned = Number(user.stats.earned || 0) + earned;
             description = `<@${userId}> played **${selectedGame}**. You earned **${earned} coins**.`;
         }
 

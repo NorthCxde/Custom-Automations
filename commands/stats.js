@@ -25,11 +25,6 @@ function loadData() {
     }
 }
 
-function saveData(data) {
-    ensureDataFile();
-    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf8');
-}
-
 function getGuildUserKey(guildId, userId) {
     return `${String(guildId || 'dm')}:${String(userId || 'unknown')}`;
 }
@@ -46,38 +41,37 @@ function readUser(data, guildId, userId) {
 }
 
 module.exports = {
-    name: 'work',
+    name: 'stats',
     data: new SlashCommandBuilder()
-        .setName('work')
-        .setDescription('Do quick work for a payout.'),
+        .setName('stats')
+        .setDescription('View your economy stats.')
+        .addUserOption(option => option
+            .setName('user')
+            .setDescription('View another user\'s stats (optional)')
+            .setRequired(false)
+        ),
     async executeInteraction({ interaction }) {
-        const guildId = interaction.guildId || 'dm';
-        const userId = interaction.user.id;
+        const guildId = interaction.guildId;
+        const targetUser = interaction.options.getUser('user') || interaction.user;
+        const userId = targetUser.id;
+
         const data = loadData();
         const user = readUser(data, guildId, userId);
-        const now = Date.now();
-        const cooldownMs = 10 * 60 * 1000;
 
-        if (user.lastWork && now - Number(user.lastWork) < cooldownMs) {
-            const remainingMs = cooldownMs - (now - Number(user.lastWork));
-            const minutes = Math.ceil(remainingMs / 60000);
-            const embed = new EmbedBuilder()
-                .setTitle('Work')
-                .setDescription(`You need to wait **${minutes}m** before working again.`)
-                .setTimestamp();
-            await interaction.reply({ embeds: [embed], ephemeral: true });
-            return;
-        }
-
-        const payout = Math.floor(Math.random() * 41) + 20;
-        user.balance = Number(user.balance || 0) + payout;
-        user.stats.earned = Number(user.stats.earned || 0) + payout;
-        user.lastWork = now;
-        saveData(data);
+        const balance = Number(user.balance || 0);
+        const earned = Number(user.stats.earned || 0);
+        const spent = Number(user.stats.spent || 0);
+        const net = balance;
 
         const embed = new EmbedBuilder()
-            .setTitle('Work complete')
-            .setDescription(`<@${userId}> earned **${payout}** and now has **${user.balance}** total.`)
+            .setTitle(`💰 Economy Stats`)
+            .setDescription(`Stats for <@${userId}>`)
+            .addFields(
+                { name: 'Current Balance', value: `**${balance} coins**`, inline: true },
+                { name: 'Total Earned', value: `**${earned} coins**`, inline: true },
+                { name: 'Total Spent', value: `**${spent} coins**`, inline: true },
+                { name: 'Net Coins', value: `**${net} coins**`, inline: false }
+            )
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });

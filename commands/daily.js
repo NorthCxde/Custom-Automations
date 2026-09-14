@@ -37,7 +37,10 @@ function getGuildUserKey(guildId, userId) {
 function readUser(data, guildId, userId) {
     const key = getGuildUserKey(guildId, userId);
     if (!data[key]) {
-        data[key] = { balance: 0, lastDaily: 0, lastWork: 0 };
+        data[key] = { balance: 0, lastDaily: 0, lastWork: 0, inventory: [], stats: { earned: 0, spent: 0 } };
+    }
+    if (!data[key].stats) {
+        data[key].stats = { earned: 0, spent: 0 };
     }
     return data[key];
 }
@@ -69,6 +72,7 @@ module.exports = {
         }
 
         user.balance = Number(user.balance || 0) + reward;
+        user.stats.earned = Number(user.stats.earned || 0) + reward;
         user.lastDaily = now;
         saveData(data);
 
