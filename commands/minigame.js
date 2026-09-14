@@ -145,18 +145,18 @@ module.exports = {
                 user.balance = nextBalance;
                 description = chosen.text
                     .replace('<@userId>', `<@${userId}>`)
-                    .replace('<coins>', `**${lostCoins}**`);
+                    .replace('<coins>', `**${lostCoins} coins**`);
             } else {
                 const earnedCoins = Math.max(1, Math.floor(basePrize * multiplier));
                 user.balance = Number(user.balance || 0) + earnedCoins;
                 description = chosen.text
                     .replace('<@userId>', `<@${userId}>`)
-                    .replace('<coins>', `**${earnedCoins}**`);
+                    .replace('<coins>', `**${earnedCoins} coins**`);
             }
         } else {
             earned = Math.floor(Math.random() * (rewardConfig.max - rewardConfig.min + 1)) + rewardConfig.min;
             user.balance = Number(user.balance || 0) + earned;
-            description = `<@${userId}> played **${selectedGame}** and earned **${earned}** coins.`;
+            description = `<@${userId}> played **${selectedGame}** and earned **${earned} coins**.`;
         }
 
         saveData(data);
