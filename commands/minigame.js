@@ -109,13 +109,61 @@ module.exports = {
         const data = loadData();
         const user = readUser(data, guildId, userId);
         const rewardConfig = GAME_REWARDS[selectedGame] || { min: 20, max: 60 };
-        const earned = Math.floor(Math.random() * (rewardConfig.max - rewardConfig.min + 1)) + rewardConfig.min;
-        user.balance = Number(user.balance || 0) + earned;
+
+        let earned = 0;
+        let description = '';
+
+        if (selectedGame === 'Timebomb') {
+            const outcomes = [
+                { text: 'passed a 1 in Timebomb and won the match! <@userId> earned <coins>.', weight: 15, type: 'win', multiplier: [1.5, 2.2] },
+                { text: 'failed to track a player and lost the match. <@userId> lost <coins>.', weight: 15, type: 'loss', multiplier: [0.1, 0.5] },
+                { text: 'passed a 2 in Timebomb and won the match! <@userId> earned <coins>.', weight: 25, type: 'win', multiplier: [1, 1.2] },
+                { text: 'passed a 3 in Timebomb and won the match by running! <@userId> earned <coins>.', weight: 40, type: 'win', multiplier: [1, 1.25] },
+                { text: 'passed a 0.5 in Timebomb and won the match by running! <@userId> earned <coins>.', weight: 4.5, type: 'win', multiplier: [2, 3.2] },
+                { text: 'passed a 0.1 in Timebomb and won the match by running! <@userId> earned <coins>.', weight: 0.5, type: 'win', multiplier: [2.5, 3.8] }
+            ];
+
+            const totalWeight = outcomes.reduce((sum, item) => sum + item.weight, 0);
+            let roll = Math.random() * totalWeight;
+            let chosen = outcomes[0];
+
+            for (const outcome of outcomes) {
+                roll -= outcome.weight;
+                if (roll <= 0) {
+                    chosen = outcome;
+                    break;
+                }
+            }
+
+            const basePrize = Math.floor(Math.random() * (rewardConfig.max - rewardConfig.min + 1)) + rewardConfig.min;
+            const [minMult, maxMult] = chosen.multiplier;
+            const multiplier = Number((Math.random() * (maxMult - minMult) + minMult).toFixed(2));
+
+            if (chosen.type === 'loss') {
+                const lostCoins = Math.max(1, Math.floor(basePrize * multiplier));
+                const nextBalance = Math.max(0, Number(user.balance || 0) - lostCoins);
+                user.balance = nextBalance;
+                description = chosen.text
+                    .replace('<@userId>', `<@${userId}>`)
+                    .replace('<coins>', `**${lostCoins}**`);
+            } else {
+                const earnedCoins = Math.max(1, Math.floor(basePrize * multiplier));
+                user.balance = Number(user.balance || 0) + earnedCoins;
+                description = chosen.text
+                    .replace('<@userId>', `<@${userId}>`)
+                    .replace('<coins>', `**${earnedCoins}**`);
+            }
+        } else {
+            earned = Math.floor(Math.random() * (rewardConfig.max - rewardConfig.min + 1)) + rewardConfig.min;
+            user.balance = Number(user.balance || 0) + earned;
+            description = `<@${userId}> played **${selectedGame}** and earned **${earned}** coins.`;
+        }
+
         saveData(data);
 
         const embed = new EmbedBuilder()
             .setTitle('Minigame')
-            .setDescription(`<@${userId}> played **${selectedGame}** and earned **${earned}** coins.`)
+            .setDescription(description)
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });
