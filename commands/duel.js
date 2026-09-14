@@ -154,12 +154,12 @@ module.exports = {
 
             // Run duel
             const outcomes = [
-                { text: 'passed a 1 in the duel and won! <@winner> took <coins>!', weight: 15, winner: 'challenger' },
+                { text: '<@winner> passed a 1 in the duel and won! <@winner> took <coins>!', weight: 15, winner: 'challenger' },
                 { text: '<@loser> failed to track and lost the match! <@winner> took <coins>!', weight: 15, winner: 'opponent' },
-                { text: 'passed a 2 in the duel and won! <@winner> took <coins>!', weight: 25, winner: 'challenger' },
-                { text: 'passed a 3 in the duel and won by running! <@winner> took <coins>!', weight: 40, winner: 'challenger' },
-                { text: 'passed a 0.5 in the duel and won by running! <@winner> took <coins>!', weight: 4.5, winner: 'challenger' },
-                { text: 'passed a 0.1 in the duel and won by running! <@winner> took <coins>!', weight: 0.5, winner: 'challenger' }
+                { text: '<@winner> passed a 2 in the duel and won! <@winner> took <coins>!', weight: 25, winner: 'challenger' },
+                { text: '<@winner> passed a 3 in the duel and won by running! <@winner> took <coins>!', weight: 40, winner: 'challenger' },
+                { text: '<@winner> passed a 0.5 in the duel and won by running! <@winner> took <coins>!', weight: 4.5, winner: 'challenger' },
+                { text: '<@winner> passed a 0.1 in the duel and won by running! <@winner> took <coins>!', weight: 0.5, winner: 'challenger' }
             ];
 
             const totalWeight = outcomes.reduce((sum, item) => sum + item.weight, 0);
