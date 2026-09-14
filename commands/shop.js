@@ -65,7 +65,6 @@ module.exports = {
 
         if (!selectedItem) {
             const embed = new EmbedBuilder()
-                .setColor('#2b2d31')
                 .setTitle('Shop')
                 .setDescription(shopList)
                 .setTimestamp();
@@ -88,7 +87,6 @@ module.exports = {
         saveData(data);
 
         const embed = new EmbedBuilder()
-            .setColor('#2b2d31')
             .setTitle('Purchase complete')
             .setDescription(`<@${userId}> bought **${item.name}** for **${item.price}**.`)
             .setTimestamp();

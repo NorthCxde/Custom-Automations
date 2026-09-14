@@ -61,7 +61,6 @@ module.exports = {
             const hours = Math.floor(remainingMs / (60 * 60 * 1000));
             const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
             const embed = new EmbedBuilder()
-                .setColor('#2b2d31')
                 .setTitle('Daily Reward')
                 .setDescription(`You already claimed your daily reward. Come back in **${hours}h ${minutes}m**.`)
                 .setTimestamp();
@@ -74,7 +73,6 @@ module.exports = {
         saveData(data);
 
         const embed = new EmbedBuilder()
-            .setColor('#2b2d31')
             .setTitle('Daily Reward')
             .setDescription(`<@${userId}> claimed **${reward}** and now has **${user.balance}** total.`)
             .setTimestamp();

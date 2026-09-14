@@ -55,7 +55,6 @@ module.exports = {
         const balance = Number(user.balance) || 0;
 
         const embed = new EmbedBuilder()
-            .setColor('#2b2d31')
             .setTitle('Balance')
             .setDescription(`<@${userId}> has **${balance}** available.`)
             .setTimestamp();

@@ -79,7 +79,6 @@ module.exports = {
         saveData(data);
 
         const embed = new EmbedBuilder()
-            .setColor('#2b2d31')
             .setTitle('Transfer')
             .setDescription(`<@${fromUserId}> gave <@${targetUser.id}> **${amount}**.`)
             .setTimestamp();

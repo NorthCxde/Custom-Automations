@@ -51,7 +51,6 @@ module.exports = {
             : 'No balances yet.';
 
         const embed = new EmbedBuilder()
-            .setColor('#2b2d31')
             .setTitle('Leaderboard')
             .setDescription(lines)
             .setTimestamp();
