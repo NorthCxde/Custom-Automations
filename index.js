@@ -85,7 +85,8 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'setinvitelogs',
     'infractions',
     'unban',
-    'deletemymessages'
+    'deletemymessages',
+    'bank'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
 
