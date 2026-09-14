@@ -115,12 +115,12 @@ module.exports = {
 
         if (selectedGame === 'Timebomb') {
             const outcomes = [
-                { text: 'passed a 1 in Timebomb and won the match! <@userId> earned <coins>.', weight: 15, type: 'win', multiplier: [1.5, 2.2] },
-                { text: 'failed to track a player and lost the match. <@userId> lost <coins>.', weight: 15, type: 'loss', multiplier: [0.1, 0.5] },
-                { text: 'passed a 2 in Timebomb and won the match! <@userId> earned <coins>.', weight: 25, type: 'win', multiplier: [1, 1.2] },
-                { text: 'passed a 3 in Timebomb and won the match by running! <@userId> earned <coins>.', weight: 40, type: 'win', multiplier: [1, 1.25] },
-                { text: 'passed a 0.5 in Timebomb and won the match by running! <@userId> earned <coins>.', weight: 4.5, type: 'win', multiplier: [2, 3.2] },
-                { text: 'passed a 0.1 in Timebomb and won the match by running! <@userId> earned <coins>.', weight: 0.5, type: 'win', multiplier: [2.5, 3.8] }
+                { text: 'passed a 1 in Timebomb and won the match! You earned <coins>.', weight: 15, type: 'win', multiplier: [1.5, 2.2] },
+                { text: 'failed to track a player and lost the match. You lost <coins>.', weight: 15, type: 'loss', multiplier: [0.1, 0.5] },
+                { text: 'passed a 2 in Timebomb and won the match! You earned <coins>.', weight: 25, type: 'win', multiplier: [1, 1.2] },
+                { text: 'passed a 3 in Timebomb and won the match by running! You earned <coins>.', weight: 40, type: 'win', multiplier: [1, 1.25] },
+                { text: 'passed a 0.5 in Timebomb and won the match by running! You earned <coins>.', weight: 4.5, type: 'win', multiplier: [2, 3.2] },
+                { text: 'passed a 0.1 in Timebomb and won the match by running! You earned <coins>.', weight: 0.5, type: 'win', multiplier: [2.5, 3.8] }
             ];
 
             const totalWeight = outcomes.reduce((sum, item) => sum + item.weight, 0);
@@ -143,20 +143,16 @@ module.exports = {
                 const lostCoins = Math.max(1, Math.floor(basePrize * multiplier));
                 const nextBalance = Math.max(0, Number(user.balance || 0) - lostCoins);
                 user.balance = nextBalance;
-                description = chosen.text
-                    .replace('<@userId>', `<@${userId}>`)
-                    .replace('<coins>', `**${lostCoins} coins**`);
+                description = `<@${userId}> ${chosen.text.replace('<coins>', `**${lostCoins} coins**`)}`;
             } else {
                 const earnedCoins = Math.max(1, Math.floor(basePrize * multiplier));
                 user.balance = Number(user.balance || 0) + earnedCoins;
-                description = chosen.text
-                    .replace('<@userId>', `<@${userId}>`)
-                    .replace('<coins>', `**${earnedCoins} coins**`);
+                description = `<@${userId}> ${chosen.text.replace('<coins>', `**${earnedCoins} coins**`)}`;
             }
         } else {
             earned = Math.floor(Math.random() * (rewardConfig.max - rewardConfig.min + 1)) + rewardConfig.min;
             user.balance = Number(user.balance || 0) + earned;
-            description = `<@${userId}> played **${selectedGame}** and earned **${earned} coins**.`;
+            description = `<@${userId}> played **${selectedGame}**. You earned **${earned} coins**.`;
         }
 
         saveData(data);
