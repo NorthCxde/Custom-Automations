@@ -85,7 +85,7 @@ module.exports = {
 
         const embed = new EmbedBuilder()
             .setTitle('Transfer')
-            .setDescription(`<@${fromUserId}> gave <@${targetUser.id}> **${amount}**.`)
+            .setDescription(`<@${fromUserId}> gave <@${targetUser.id}> **${amount.toLocaleString()}** coins.`)
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });

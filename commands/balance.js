@@ -56,7 +56,7 @@ module.exports = {
 
         const embed = new EmbedBuilder()
             .setTitle('Balance')
-            .setDescription(`<@${userId}> has **${balance}** available.`)
+            .setDescription(`<@${userId}> has **${balance.toLocaleString()}** coins available.`)
             .setTimestamp();
 
         saveData(data);

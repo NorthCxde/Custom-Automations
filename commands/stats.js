@@ -67,10 +67,10 @@ module.exports = {
             .setTitle(`💰 Economy Stats`)
             .setDescription(`Stats for <@${userId}>`)
             .addFields(
-                { name: 'Current Balance', value: `**${balance} coins**`, inline: true },
-                { name: 'Total Earned', value: `**${earned} coins**`, inline: true },
-                { name: 'Total Spent', value: `**${spent} coins**`, inline: true },
-                { name: 'Net Coins', value: `**${net} coins**`, inline: false }
+                { name: 'Current Balance', value: `**${balance.toLocaleString()} coins**`, inline: true },
+                { name: 'Total Earned', value: `**${earned.toLocaleString()} coins**`, inline: true },
+                { name: 'Total Spent', value: `**${spent.toLocaleString()} coins**`, inline: true },
+                { name: 'Net Coins', value: `**${net.toLocaleString()} coins**`, inline: false }
             )
             .setTimestamp();
 

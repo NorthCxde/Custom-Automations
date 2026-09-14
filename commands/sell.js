@@ -106,7 +106,7 @@ module.exports = {
 
         const embed = new EmbedBuilder()
             .setTitle('Item Sold')
-            .setDescription(`<@${userId}> sold **${quantity}x ${itemName}** for **${totalCoins} coins**.`)
+            .setDescription(`<@${userId}> sold **${quantity}x ${itemName}** for **${totalCoins.toLocaleString()}** coins.`)
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });

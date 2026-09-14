@@ -77,7 +77,7 @@ module.exports = {
 
         const embed = new EmbedBuilder()
             .setTitle('Work complete')
-            .setDescription(`<@${userId}> earned **${payout}** and now has **${user.balance}** total.`)
+            .setDescription(`<@${userId}> earned **${payout.toLocaleString()}** coins and now has **${user.balance.toLocaleString()}** total.`)
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });

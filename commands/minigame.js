@@ -147,18 +147,18 @@ module.exports = {
                 const nextBalance = Math.max(0, Number(user.balance || 0) - lostCoins);
                 user.balance = nextBalance;
                 user.stats.spent = Number(user.stats.spent || 0) + lostCoins;
-                description = `<@${userId}> ${chosen.text.replace('<coins>', `**${lostCoins} coins**`)}`;
+                description = `<@${userId}> ${chosen.text.replace('<coins>', `**${lostCoins.toLocaleString()} coins**`)}`;
             } else {
                 const earnedCoins = Math.max(1, Math.floor(basePrize * multiplier));
                 user.balance = Number(user.balance || 0) + earnedCoins;
                 user.stats.earned = Number(user.stats.earned || 0) + earnedCoins;
-                description = `<@${userId}> ${chosen.text.replace('<coins>', `**${earnedCoins} coins**`)}`;
+                description = `<@${userId}> ${chosen.text.replace('<coins>', `**${earnedCoins.toLocaleString()} coins**`)}`;
             }
         } else {
             earned = Math.floor(Math.random() * (rewardConfig.max - rewardConfig.min + 1)) + rewardConfig.min;
             user.balance = Number(user.balance || 0) + earned;
             user.stats.earned = Number(user.stats.earned || 0) + earned;
-            description = `<@${userId}> played **${selectedGame}**. You earned **${earned} coins**.`;
+            description = `<@${userId}> played **${selectedGame}**. You earned **${earned.toLocaleString()} coins**.`;
         }
 
         saveData(data);

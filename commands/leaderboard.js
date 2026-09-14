@@ -47,7 +47,7 @@ module.exports = {
             .slice(0, 10);
 
         const lines = entries.length
-            ? entries.map((entry, index) => `${index + 1}. <@${entry.userId}> — **${entry.balance}**`).join('\n')
+            ? entries.map((entry, index) => `${index + 1}. <@${entry.userId}> — **${entry.balance.toLocaleString()}**`).join('\n')
             : 'No balances yet.';
 
         const embed = new EmbedBuilder()

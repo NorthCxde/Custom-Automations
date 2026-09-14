@@ -61,7 +61,7 @@ module.exports = {
         const data = loadData();
         const user = readUser(data, guildId, userId);
 
-        const shopList = SHOP_ITEMS.map(item => `• ${item.name} — **${item.price}**`).join('\n');
+        const shopList = SHOP_ITEMS.map(item => `• ${item.name} — **${item.price.toLocaleString()}** coins`).join('\n');
 
         if (!selectedItem) {
             const embed = new EmbedBuilder()
