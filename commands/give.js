@@ -43,40 +43,45 @@ function readUser(data, guildId, userId) {
 }
 
 module.exports = {
-    name: 'daily',
+    name: 'give',
     data: new SlashCommandBuilder()
-        .setName('daily')
-        .setDescription('Claim your daily reward.'),
+        .setName('give')
+        .setDescription('Give another user some of your balance.')
+        .addUserOption(option => option.setName('user').setDescription('User to give money to').setRequired(true))
+        .addIntegerOption(option => option.setName('amount').setDescription('Amount to give').setRequired(true).setMinValue(1)),
     async executeInteraction({ interaction }) {
-        const guildId = interaction.guildId || 'dm';
-        const userId = interaction.user.id;
-        const data = loadData();
-        const user = readUser(data, guildId, userId);
-        const now = Date.now();
-        const reward = 100;
-        const cooldownMs = 24 * 60 * 60 * 1000;
+        const guildId = interaction.guildId;
+        const fromUserId = interaction.user.id;
+        const targetUser = interaction.options.getUser('user');
+        const amount = interaction.options.getInteger('amount');
 
-        if (user.lastDaily && now - Number(user.lastDaily) < cooldownMs) {
-            const remainingMs = cooldownMs - (now - Number(user.lastDaily));
-            const hours = Math.floor(remainingMs / (60 * 60 * 1000));
-            const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
-            const embed = new EmbedBuilder()
-                .setColor('#2b2d31')
-                .setTitle('Daily Reward')
-                .setDescription(`You already claimed your daily reward. Come back in **${hours}h ${minutes}m**.`)
-                .setTimestamp();
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+        if (!targetUser || !amount) {
+            await interaction.reply({ content: 'Please choose a valid user and amount.', ephemeral: true });
             return;
         }
 
-        user.balance = Number(user.balance || 0) + reward;
-        user.lastDaily = now;
+        if (targetUser.id === fromUserId) {
+            await interaction.reply({ content: 'You cannot give money to yourself.', ephemeral: true });
+            return;
+        }
+
+        const data = loadData();
+        const sender = readUser(data, guildId, fromUserId);
+        const receiver = readUser(data, guildId, targetUser.id);
+
+        if (Number(sender.balance || 0) < amount) {
+            await interaction.reply({ content: 'You do not have enough balance to give that amount.', ephemeral: true });
+            return;
+        }
+
+        sender.balance = Number(sender.balance || 0) - amount;
+        receiver.balance = Number(receiver.balance || 0) + amount;
         saveData(data);
 
         const embed = new EmbedBuilder()
             .setColor('#2b2d31')
-            .setTitle('Daily Reward')
-            .setDescription(`<@${userId}> claimed **${reward}** and now has **${user.balance}** total.`)
+            .setTitle('Transfer')
+            .setDescription(`<@${fromUserId}> gave <@${targetUser.id}> **${amount}**.`)
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });

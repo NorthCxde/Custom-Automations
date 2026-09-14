@@ -4,6 +4,12 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 const dataFile = path.join(__dirname, '..', 'data', 'economy.json');
 
+const SHOP_ITEMS = [
+    { id: 'coffee', name: 'Coffee', price: 30 },
+    { id: 'boost', name: 'Boost', price: 75 },
+    { id: 'premium', name: 'Premium', price: 150 }
+];
+
 function ensureDataFile() {
     if (!fs.existsSync(path.dirname(dataFile))) {
         fs.mkdirSync(path.dirname(dataFile), { recursive: true });
@@ -43,40 +49,48 @@ function readUser(data, guildId, userId) {
 }
 
 module.exports = {
-    name: 'daily',
+    name: 'shop',
     data: new SlashCommandBuilder()
-        .setName('daily')
-        .setDescription('Claim your daily reward.'),
+        .setName('shop')
+        .setDescription('View and buy simple shop items.')
+        .addStringOption(option => option.setName('item').setDescription('Item to buy').setRequired(false)),
     async executeInteraction({ interaction }) {
-        const guildId = interaction.guildId || 'dm';
+        const guildId = interaction.guildId;
+        const selectedItem = interaction.options.getString('item');
         const userId = interaction.user.id;
         const data = loadData();
         const user = readUser(data, guildId, userId);
-        const now = Date.now();
-        const reward = 100;
-        const cooldownMs = 24 * 60 * 60 * 1000;
 
-        if (user.lastDaily && now - Number(user.lastDaily) < cooldownMs) {
-            const remainingMs = cooldownMs - (now - Number(user.lastDaily));
-            const hours = Math.floor(remainingMs / (60 * 60 * 1000));
-            const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
+        const shopList = SHOP_ITEMS.map(item => `• ${item.name} — **${item.price}**`).join('\n');
+
+        if (!selectedItem) {
             const embed = new EmbedBuilder()
                 .setColor('#2b2d31')
-                .setTitle('Daily Reward')
-                .setDescription(`You already claimed your daily reward. Come back in **${hours}h ${minutes}m**.`)
+                .setTitle('Shop')
+                .setDescription(shopList)
                 .setTimestamp();
             await interaction.reply({ embeds: [embed], ephemeral: true });
             return;
         }
 
-        user.balance = Number(user.balance || 0) + reward;
-        user.lastDaily = now;
+        const item = SHOP_ITEMS.find(entry => entry.id.toLowerCase() === selectedItem.toLowerCase());
+        if (!item) {
+            await interaction.reply({ content: 'That item does not exist in the shop.', ephemeral: true });
+            return;
+        }
+
+        if (Number(user.balance || 0) < item.price) {
+            await interaction.reply({ content: `You do not have enough balance to buy **${item.name}**.`, ephemeral: true });
+            return;
+        }
+
+        user.balance = Number(user.balance || 0) - item.price;
         saveData(data);
 
         const embed = new EmbedBuilder()
             .setColor('#2b2d31')
-            .setTitle('Daily Reward')
-            .setDescription(`<@${userId}> claimed **${reward}** and now has **${user.balance}** total.`)
+            .setTitle('Purchase complete')
+            .setDescription(`<@${userId}> bought **${item.name}** for **${item.price}**.`)
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });

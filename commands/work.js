@@ -59,7 +59,7 @@ module.exports = {
             const remainingMs = cooldownMs - (now - Number(user.lastWork));
             const minutes = Math.ceil(remainingMs / 60000);
             const embed = new EmbedBuilder()
-                .setColor('#FEE75C')
+                .setColor('#2b2d31')
                 .setTitle('Work')
                 .setDescription(`You need to wait **${minutes}m** before working again.`)
                 .setTimestamp();
@@ -73,7 +73,7 @@ module.exports = {
         saveData(data);
 
         const embed = new EmbedBuilder()
-            .setColor('#5865F2')
+            .setColor('#2b2d31')
             .setTitle('Work complete')
             .setDescription(`<@${userId}> earned **${payout}** and now has **${user.balance}** total.`)
             .setTimestamp();

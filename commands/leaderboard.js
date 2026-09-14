@@ -25,42 +25,37 @@ function loadData() {
     }
 }
 
-function saveData(data) {
-    ensureDataFile();
-    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf8');
-}
-
 function getGuildUserKey(guildId, userId) {
     return `${String(guildId || 'dm')}:${String(userId || 'unknown')}`;
 }
 
-function readUser(data, guildId, userId) {
-    const key = getGuildUserKey(guildId, userId);
-    if (!data[key]) {
-        data[key] = { balance: 0, lastDaily: 0, lastWork: 0 };
-    }
-    return data[key];
-}
-
 module.exports = {
-    name: 'balance',
+    name: 'leaderboard',
     data: new SlashCommandBuilder()
-        .setName('balance')
-        .setDescription('Check your current balance.'),
+        .setName('leaderboard')
+        .setDescription('View the top balances in this server.'),
     async executeInteraction({ interaction }) {
-        const guildId = interaction.guildId || 'dm';
-        const userId = interaction.user.id;
+        const guildId = interaction.guildId;
         const data = loadData();
-        const user = readUser(data, guildId, userId);
-        const balance = Number(user.balance) || 0;
+        const entries = Object.entries(data)
+            .filter(([key]) => key.startsWith(`${guildId}:`))
+            .map(([key, value]) => {
+                const userId = key.split(':').slice(1).join(':');
+                return { userId, balance: Number(value?.balance || 0) };
+            })
+            .sort((a, b) => b.balance - a.balance)
+            .slice(0, 10);
+
+        const lines = entries.length
+            ? entries.map((entry, index) => `${index + 1}. <@${entry.userId}> — **${entry.balance}**`).join('\n')
+            : 'No balances yet.';
 
         const embed = new EmbedBuilder()
             .setColor('#2b2d31')
-            .setTitle('Balance')
-            .setDescription(`<@${userId}> has **${balance}** available.`)
+            .setTitle('Leaderboard')
+            .setDescription(lines)
             .setTimestamp();
 
-        saveData(data);
         await interaction.reply({ embeds: [embed], ephemeral: true });
     }
 };
