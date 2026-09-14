@@ -202,9 +202,9 @@ module.exports = {
 
             // Format outcome
             const outcomeText = chosen.text
-                .replace('<@winner>', `<@${winner}>`)
-                .replace('<@loser>', `<@${loser}>`)
-                .replace('<coins>', `**${(betAmount * 2).toLocaleString()} coins**`);
+                .replaceAll('<@winner>', `<@${winner}>`)
+                .replaceAll('<@loser>', `<@${loser}>`)
+                .replaceAll('<coins>', `**${(betAmount * 2).toLocaleString()} coins**`);
 
             const resultEmbed = new EmbedBuilder()
                 .setTitle('💣 Duel Result')
