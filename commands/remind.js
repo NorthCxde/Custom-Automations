@@ -250,12 +250,6 @@ module.exports = {
         )
         .addStringOption(option =>
             option
-                .setName('channels')
-                .setDescription('Channel or user mentions to set the reminder for')
-                .setRequired(false)
-        )
-        .addStringOption(option =>
-            option
                 .setName('interval')
                 .setDescription('Time to wait before repeating the reminder')
                 .setRequired(false)
@@ -289,7 +283,6 @@ module.exports = {
     async executeInteraction({ client, interaction }) {
         const timeRaw = sanitizeText(interaction.options.getString('time'), 120);
         const content = sanitizeText(interaction.options.getString('content'), MAX_REMINDER_TEXT);
-        const channelsRaw = sanitizeText(interaction.options.getString('channels'), 400);
         const intervalRaw = sanitizeText(interaction.options.getString('interval'), 120);
         const expiresRaw = sanitizeText(interaction.options.getString('expires'), 120);
         const timezone = sanitizeText(interaction.options.getString('timezone'), 80);
@@ -338,10 +331,7 @@ module.exports = {
             return interaction.reply({ content: 'The `expires` option requires `interval` (repeating reminder).', ephemeral: true });
         }
 
-        const targets = parseTargets(channelsRaw, interaction);
-        if (!targets || !targets.length) {
-            return interaction.reply({ content: 'Could not parse `channels`. Use mentions like `#channel` or `@user`.', ephemeral: true });
-        }
+        const targets = [{ kind: 'user', id: interaction.user.id }];
 
         // Acknowledge before persistence/follow-up work so Discord does not time out.
         await interaction.deferReply();
