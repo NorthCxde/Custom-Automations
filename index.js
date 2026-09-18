@@ -77,6 +77,7 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'logs',
     'enablecommands',
     'setboostchannel',
+    'setcontentchannel',
     'autoresponder',
     'synccommands',
     'manage',
@@ -261,6 +262,7 @@ const permsFile = path.join(dataPath, "perms.json");
 const logsFile = path.join(dataPath, "logs.json");
 const modLogsFile = path.join(dataPath, "modlogs.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
+const contentReactChannelFile = path.join(dataPath, "contentreactchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
 const hideCommandStateFile = path.join(dataPath, "hidecommand-state.json");
 const autorespondersFile = path.join(dataPath, "autoresponders.json");
@@ -285,6 +287,7 @@ client.allowedRoles = new Map();
 client.logChannels = new Map();
 client.modLogs = new Map();
 client.boostChannels = new Map();
+client.contentReactChannels = new Map();
 client.pendingModerationActions = new Map();
 client.pendingPermsUndoActions = new Map();
 client.pendingGlobalModUndoActions = new Map();
@@ -3109,6 +3112,23 @@ client.saveBoostChannels = () => {
     fs.writeFileSync(boostChannelFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
+client.loadContentReactChannels = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(contentReactChannelFile)) fs.writeFileSync(contentReactChannelFile, '{}', 'utf8');
+    let parsed = {};
+    try { parsed = JSON.parse(fs.readFileSync(contentReactChannelFile, 'utf8') || '{}'); } catch (err) { console.error('Failed to read content reaction channel file:', err); }
+    client.contentReactChannels.clear();
+    for (const [guildId, channelId] of Object.entries(parsed)) {
+        if (typeof channelId === 'string') client.contentReactChannels.set(guildId, channelId);
+    }
+};
+
+client.saveContentReactChannels = () => {
+    const out = {};
+    for (const [guildId, channelId] of client.contentReactChannels.entries()) out[guildId] = channelId;
+    fs.writeFileSync(contentReactChannelFile, JSON.stringify(out, null, 2), 'utf8');
+};
+
 client.loadForumPings = () => {
     if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
     if (!fs.existsSync(forumPingsFile)) fs.writeFileSync(forumPingsFile, '{}', 'utf8');
@@ -3955,6 +3975,7 @@ client.loadPermissions();
 client.loadLogChannels();
 client.loadModLogs();
 client.loadBoostChannels();
+client.loadContentReactChannels();
 client.loadPrefixCommandState();
 client.loadHideCommandState();
 client.loadAutoresponders();
@@ -5980,6 +6001,20 @@ client.on('messageCreate', async (message) => {
                 if (!message.reactions.cache.has('❤️')) await message.react('❤️');
             } catch (err) {
                 console.error('Failed to react to boost message (messageCreate):', err);
+            }
+        }
+    }
+
+    if (message.guild && !message.author?.bot) {
+        const contentReactChannelId = client.contentReactChannels.get(message.guild.id);
+        if (contentReactChannelId && message.channel.id === contentReactChannelId) {
+            const linkMatch = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be|(?:m|www)\.tiktok\.com|vm\.tiktok\.com)\S*/i.test(message.content || '');
+            if (linkMatch && !message.reactions.cache.has('🔥')) {
+                try {
+                    await message.react('🔥');
+                } catch (err) {
+                    console.error('Failed to react with fire emoji to content link:', err);
+                }
             }
         }
     }

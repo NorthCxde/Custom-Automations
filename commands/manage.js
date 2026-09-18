@@ -89,6 +89,7 @@ const ADMIN_SLASH_COMMAND_NAMES = new Set([
     'logs',
     'enablecommands',
     'setboostchannel',
+    'setcontentchannel',
     'autoresponder',
     'synccommands',
     'manage',
