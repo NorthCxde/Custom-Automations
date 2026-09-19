@@ -27,9 +27,15 @@ function formatCountdown(secondsLeft) {
 }
 
 function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
+    const targetMembers = 2000000;
+    const remaining = Math.max(targetMembers - memberCount, 0);
+    const subtitle = memberCount >= targetMembers
+        ? '2 Million Members!'
+        : `${formatCount(remaining)} members left until 2 million!`;
+
     const embed = new EmbedBuilder()
         .setColor(0x000000)
-        .setDescription('Live group member count')
+        .setDescription(subtitle)
         .addFields(
             { name: 'Members', value: `**${formatCount(memberCount)}**`, inline: false }
         )
