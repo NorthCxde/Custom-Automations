@@ -11,7 +11,8 @@ async function fetchGroupData(groupId) {
     const data = await response.json();
     return {
         name: String(data?.name || 'Customs Community'),
-        memberCount: Number(data?.memberCount || 0)
+        memberCount: Number(data?.memberCount || 0),
+        iconUrl: String(data?.icon || '')
     };
 }
 
@@ -19,15 +20,23 @@ function formatCount(value) {
     return Number(value || 0).toLocaleString('en-US');
 }
 
-function buildGroupEmbed(memberCount) {
+function formatCountdown(secondsLeft) {
+    const safe = Math.max(0, Number(secondsLeft) || 0);
+    const mins = String(Math.floor(safe / 60)).padStart(2, '0');
+    const secs = String(safe % 60).padStart(2, '0');
+    return `${mins}:${secs}`;
+}
+
+function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
     return new EmbedBuilder()
         .setColor(0x000000)
         .setTitle('Customs Community')
         .setDescription('Live group member count')
+        .setThumbnail(iconUrl || null)
         .addFields(
             { name: 'Members', value: `**${formatCount(memberCount)}**`, inline: false }
         )
-        .setFooter({ text: 'Updated every 60 seconds' })
+        .setFooter({ text: `Updating in ${formatCountdown(secondsLeft)}` })
         .setTimestamp();
 }
 
@@ -39,19 +48,25 @@ module.exports = {
     async executeInteraction({ interaction }) {
         try {
             await interaction.deferReply();
-            const initialData = await fetchGroupData(GROUP_ID);
-            const embed = buildGroupEmbed(initialData.memberCount);
+            let secondsLeft = 60;
+            let currentData = await fetchGroupData(GROUP_ID);
+            let embed = buildGroupEmbed(currentData.memberCount, currentData.iconUrl, secondsLeft);
             const message = await interaction.editReply({ embeds: [embed] });
 
             const refreshTimer = setInterval(async () => {
                 try {
-                    const freshData = await fetchGroupData(GROUP_ID);
-                    const updatedEmbed = buildGroupEmbed(freshData.memberCount);
+                    secondsLeft -= 1;
+                    if (secondsLeft <= 0) {
+                        currentData = await fetchGroupData(GROUP_ID);
+                        secondsLeft = 60;
+                    }
+
+                    const updatedEmbed = buildGroupEmbed(currentData.memberCount, currentData.iconUrl, secondsLeft);
                     await message.edit({ embeds: [updatedEmbed] });
                 } catch (err) {
                     console.error('Failed to refresh group member count:', err);
                 }
-            }, 60000);
+            }, 1000);
 
             setTimeout(() => {
                 clearInterval(refreshTimer);
