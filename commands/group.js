@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const GROUP_ID = '5783673';
+const FALLBACK_ICON_URL = 'file:///C:/Users/loadi/Downloads/CC%20Icon.webp';
 
 async function fetchGroupData(groupId) {
     const response = await fetch(`https://groups.roblox.com/v1/groups/${groupId}`);
@@ -31,7 +32,7 @@ function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
         .setColor(0x000000)
         .setAuthor({
             name: 'Customs Community',
-            iconURL: iconUrl || undefined
+            iconURL: iconUrl || FALLBACK_ICON_URL
         })
         .setDescription('Live group member count')
         .addFields(
