@@ -23,19 +23,21 @@ function formatCount(value) {
 function formatCountdown(secondsLeft) {
     const safe = Math.max(0, Number(secondsLeft) || 0);
     const displaySeconds = Math.max(1, safe);
-    return `in ${displaySeconds} second${displaySeconds === 1 ? '' : 's'}`;
+    return `Updating in ${displaySeconds} second${displaySeconds === 1 ? '' : 's'} •`;
 }
 
 function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
     return new EmbedBuilder()
         .setColor(0x000000)
-        .setTitle('Customs Community')
+        .setAuthor({
+            name: 'Customs Community',
+            iconURL: iconUrl || undefined
+        })
         .setDescription('Live group member count')
-        .setThumbnail(iconUrl || null)
         .addFields(
             { name: 'Members', value: `**${formatCount(memberCount)}**`, inline: false }
         )
-        .setFooter({ text: `Updating ${formatCountdown(secondsLeft)}` })
+        .setFooter({ text: formatCountdown(secondsLeft) })
         .setTimestamp();
 }
 
