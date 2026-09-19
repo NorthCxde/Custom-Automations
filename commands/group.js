@@ -37,7 +37,9 @@ function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
         .addFields(
             { name: 'Members', value: `**${formatCount(memberCount)}**`, inline: false }
         )
-        .setFooter({ text: formatCountdown(secondsLeft) })
+        .setFooter({
+            text: `${formatCountdown(secondsLeft)} Today at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+        })
         .setTimestamp();
 }
 
