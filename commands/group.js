@@ -31,7 +31,7 @@ function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
     const remaining = Math.max(targetMembers - memberCount, 0);
     const subtitle = memberCount >= targetMembers
         ? '2 Million Members!'
-        : `${formatCount(remaining)} members left until 2 million!`;
+        : `**${formatCount(remaining)}** members left until 2 million!`;
 
     const embed = new EmbedBuilder()
         .setColor(0x000000)
