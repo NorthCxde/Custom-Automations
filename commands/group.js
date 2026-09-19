@@ -1,7 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const GROUP_ID = '5783673';
-const FALLBACK_ICON_URL = 'file:///C:/Users/loadi/Downloads/CC%20Icon.webp';
 
 async function fetchGroupData(groupId) {
     const response = await fetch(`https://groups.roblox.com/v1/groups/${groupId}`);
@@ -13,7 +12,7 @@ async function fetchGroupData(groupId) {
     return {
         name: String(data?.name || 'Customs Community'),
         memberCount: Number(data?.memberCount || 0),
-        iconUrl: String(data?.icon || '')
+        iconUrl: typeof data?.icon === 'string' && data.icon.trim() ? data.icon.trim() : undefined
     };
 }
 
@@ -28,18 +27,25 @@ function formatCountdown(secondsLeft) {
 }
 
 function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setColor(0x000000)
-        .setAuthor({
-            name: 'Customs Community',
-            iconURL: iconUrl || FALLBACK_ICON_URL
-        })
         .setDescription('Live group member count')
         .addFields(
             { name: 'Members', value: `**${formatCount(memberCount)}**`, inline: false }
         )
         .setFooter({ text: formatCountdown(secondsLeft) })
         .setTimestamp();
+
+    if (iconUrl) {
+        embed.setAuthor({
+            name: 'Customs Community',
+            iconURL: iconUrl
+        });
+    } else {
+        embed.setAuthor({ name: 'Customs Community' });
+    }
+
+    return embed;
 }
 
 function buildGroupComponents() {
