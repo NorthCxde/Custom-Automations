@@ -23,7 +23,7 @@ function formatCount(value) {
 function formatCountdown(secondsLeft) {
     const safe = Math.max(0, Number(secondsLeft) || 0);
     const displaySeconds = Math.max(1, safe);
-    return `Updating in ${displaySeconds} second${displaySeconds === 1 ? '' : 's'} •`;
+    return `Updating in ${displaySeconds} second${displaySeconds === 1 ? '' : 's'}`;
 }
 
 function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
@@ -37,9 +37,7 @@ function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
         .addFields(
             { name: 'Members', value: `**${formatCount(memberCount)}**`, inline: false }
         )
-        .setFooter({
-            text: `${formatCountdown(secondsLeft)} Today at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-        })
+        .setFooter({ text: formatCountdown(secondsLeft) })
         .setTimestamp();
 }
 
