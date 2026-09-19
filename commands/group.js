@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const GROUP_ID = '5783673';
 
@@ -22,9 +22,8 @@ function formatCount(value) {
 
 function formatCountdown(secondsLeft) {
     const safe = Math.max(0, Number(secondsLeft) || 0);
-    const mins = String(Math.floor(safe / 60)).padStart(2, '0');
-    const secs = String(safe % 60).padStart(2, '0');
-    return `${mins}:${secs}`;
+    const displaySeconds = Math.max(1, safe);
+    return `in ${displaySeconds} second${displaySeconds === 1 ? '' : 's'}`;
 }
 
 function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
@@ -36,8 +35,17 @@ function buildGroupEmbed(memberCount, iconUrl, secondsLeft) {
         .addFields(
             { name: 'Members', value: `**${formatCount(memberCount)}**`, inline: false }
         )
-        .setFooter({ text: `Updating in ${formatCountdown(secondsLeft)}` })
+        .setFooter({ text: `Updating ${formatCountdown(secondsLeft)}` })
         .setTimestamp();
+}
+
+function buildGroupComponents() {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setLabel('Group')
+            .setStyle(ButtonStyle.Link)
+            .setURL('https://www.roblox.com/communities/5783673/Customs-Community#!/about')
+    );
 }
 
 module.exports = {
@@ -51,18 +59,20 @@ module.exports = {
             let secondsLeft = 60;
             let currentData = await fetchGroupData(GROUP_ID);
             let embed = buildGroupEmbed(currentData.memberCount, currentData.iconUrl, secondsLeft);
-            const message = await interaction.editReply({ embeds: [embed] });
+            const components = [buildGroupComponents()];
+            const message = await interaction.editReply({ embeds: [embed], components });
 
             const refreshTimer = setInterval(async () => {
                 try {
-                    secondsLeft -= 1;
                     if (secondsLeft <= 0) {
                         currentData = await fetchGroupData(GROUP_ID);
                         secondsLeft = 60;
+                    } else {
+                        secondsLeft -= 1;
                     }
 
                     const updatedEmbed = buildGroupEmbed(currentData.memberCount, currentData.iconUrl, secondsLeft);
-                    await message.edit({ embeds: [updatedEmbed] });
+                    await message.edit({ embeds: [updatedEmbed], components });
                 } catch (err) {
                     console.error('Failed to refresh group member count:', err);
                 }
