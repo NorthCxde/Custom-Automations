@@ -6008,7 +6008,7 @@ client.on('messageCreate', async (message) => {
     if (message.guild && !message.author?.bot) {
         const contentReactChannelId = client.contentReactChannels.get(message.guild.id);
         if (contentReactChannelId && message.channel.id === contentReactChannelId) {
-            const linkMatch = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be|(?:m|www)\.tiktok\.com|vm\.tiktok\.com)\S*/i.test(message.content || '');
+            const linkMatch = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be|(?:m|www)\.tiktok\.com|(?:vm|vt)\.tiktok\.com)\S*/i.test(message.content || '');
             if (linkMatch && !message.reactions.cache.has('🔥')) {
                 try {
                     await message.react('🔥');
