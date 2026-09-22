@@ -56,8 +56,7 @@ function formatCreatedDate(value) {
 function formatDescription(description) {
     const text = String(description || '').trim();
     if (!text) return '• None';
-    if (text.length <= 100) return text;
-    return `${text.slice(0, 100)}... and ${text.length - 100} characters more`;
+    return text.slice(0, 100);
 }
 
 function buildInfoEmbed(user, avatarUrl, canViewInventory) {
