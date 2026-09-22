@@ -3,6 +3,8 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const ROBLOX_USERS_API = 'https://users.roblox.com/v1';
 const ROBLOX_THUMBNAILS_API = 'https://thumbnails.roblox.com/v1';
 const ROBLOX_INVENTORY_API = 'https://inventory.roblox.com/v1';
+const TIMEBOMB_BADGE_ID = '2142457718';
+const CUSTOM_MINIGAMES_BADGE_ID = '2124646244';
 
 async function fetchJson(url, options = {}) {
     const response = await fetch(url, options);
@@ -47,6 +49,30 @@ async function fetchInventoryPrivacy(userId) {
     }
 }
 
+async function ownsBadge(userId, badgeId) {
+    try {
+        const result = await fetchJson(`${ROBLOX_INVENTORY_API}/users/${userId}/items/Badge/${badgeId}`);
+        return Array.isArray(result?.data) && result.data.some(item => String(item.id) === badgeId);
+    } catch {
+        return false;
+    }
+}
+
+async function fetchGameActivity(userId) {
+    const canViewInventory = await fetchInventoryPrivacy(userId);
+    if (!canViewInventory) return '🔒Inventory is private';
+
+    const [hasTimebombBadge, hasCustomMinigamesBadge] = await Promise.all([
+        ownsBadge(userId, TIMEBOMB_BADGE_ID),
+        ownsBadge(userId, CUSTOM_MINIGAMES_BADGE_ID)
+    ]);
+
+    const history = [];
+    if (hasTimebombBadge) history.push('✅Has played Timebomb Duels');
+    if (hasCustomMinigamesBadge) history.push('✅ Has played Custom Minigames');
+    return history.length ? history.join('\n') : '❌No game history';
+}
+
 function formatCreatedDate(value) {
     const timestamp = Math.floor(new Date(value).getTime() / 1000);
     if (!Number.isFinite(timestamp)) return 'Unknown';
@@ -59,7 +85,7 @@ function formatDescription(description) {
     return text.slice(0, 100);
 }
 
-function buildInfoEmbed(user, avatarUrl, canViewInventory) {
+function buildInfoEmbed(user, avatarUrl, gameActivity) {
     const username = String(user.name || 'Unknown');
     const displayName = String(user.displayName || username);
     const userId = String(user.id);
@@ -75,7 +101,7 @@ function buildInfoEmbed(user, avatarUrl, canViewInventory) {
         profileDescription,
         '',
         '**Game Activity**',
-        canViewInventory ? 'Inventory is public' : '🔒 Inventory is private',
+        gameActivity,
         '',
         '**Trello Cards**',
         '• None'
@@ -106,13 +132,13 @@ module.exports = {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const input = interaction.options.getString('user', true);
             const user = await resolveUser(input);
-            const [avatarUrl, canViewInventory] = await Promise.all([
+            const [avatarUrl, gameActivity] = await Promise.all([
                 fetchAvatarUrl(user.id),
-                fetchInventoryPrivacy(user.id)
+                fetchGameActivity(user.id)
             ]);
 
             return interaction.editReply({
-                embeds: [buildInfoEmbed(user, avatarUrl, canViewInventory)]
+                embeds: [buildInfoEmbed(user, avatarUrl, gameActivity)]
             });
         } catch (err) {
             console.error('Failed to fetch Roblox user info:', err);
