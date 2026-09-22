@@ -4797,10 +4797,7 @@ client.on('interactionCreate', async (interaction) => {
                     components: [infoCommand.buildInfoComponents(userId)]
                 });
 
-                return interaction.followUp({
-                    content: `Archived **${userId}** from **${listName}**.`,
-                    ephemeral: true
-                });
+                return;
             } catch (err) {
                 console.error('Failed to archive Trello blacklist card:', err);
                 if (cardArchived) {
