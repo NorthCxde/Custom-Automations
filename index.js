@@ -4722,7 +4722,7 @@ client.on('interactionCreate', async (interaction) => {
             );
 
             return interaction.reply({
-                content: 'Choose the Trello list for this Roblox user:',
+                content: `Choose blacklist type for: **${userId}**`,
                 components: [row],
                 ephemeral: true
             });
