@@ -60,7 +60,7 @@ async function ownsBadge(userId, badgeId) {
 
 async function fetchGameActivity(userId) {
     const canViewInventory = await fetchInventoryPrivacy(userId);
-    if (!canViewInventory) return '🔒Inventory is private';
+    if (!canViewInventory) return '🔒 Inventory is private';
 
     const [hasTimebombBadge, hasCustomMinigamesBadge] = await Promise.all([
         ownsBadge(userId, TIMEBOMB_BADGE_ID),
@@ -68,9 +68,9 @@ async function fetchGameActivity(userId) {
     ]);
 
     const history = [];
-    if (hasTimebombBadge) history.push('✅Has played Timebomb Duels');
+    if (hasTimebombBadge) history.push('✅ Has played Timebomb Duels');
     if (hasCustomMinigamesBadge) history.push('✅ Has played Custom Minigames');
-    return history.length ? history.join('\n') : '❌No game history';
+    return history.length ? history.join('\n') : '❌ No game history';
 }
 
 function formatCreatedDate(value) {
