@@ -55,7 +55,9 @@ function formatCreatedDate(value) {
 
 function formatDescription(description) {
     const text = String(description || '').trim();
-    return text ? text.slice(0, 100) : '• None';
+    if (!text) return '• None';
+    if (text.length <= 100) return text;
+    return `${text.slice(0, 100)}... and ${text.length - 100} characters more`;
 }
 
 function buildInfoEmbed(user, avatarUrl, canViewInventory) {
@@ -84,8 +86,7 @@ function buildInfoEmbed(user, avatarUrl, canViewInventory) {
         .setColor(0x36393f)
         .setTitle(`${displayName} (${userId})`)
         .setThumbnail(avatarUrl || null)
-        .setDescription(embedDescription)
-        .setTimestamp();
+        .setDescription(embedDescription);
 
     return embed;
 }
