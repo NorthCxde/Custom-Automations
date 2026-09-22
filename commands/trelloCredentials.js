@@ -7,15 +7,23 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const CREDENTIALS_FILE = path.join(DATA_DIR, 'trello-credentials.json');
 const ENCRYPTION_VERSION = 1;
 
-function getEncryptionKey() {
-    const secret = String(process.env.TRELLO_CREDENTIAL_SECRET || process.env.DISCORD_TOKEN || config.token || '').trim();
-    if (!secret) throw new Error('Credential encryption secret is not configured.');
-    return crypto.createHash('sha256').update(secret).digest();
+function getEncryptionKeys() {
+    const secrets = [
+        process.env.TRELLO_CREDENTIAL_SECRET,
+        process.env.DISCORD_TOKEN,
+        config.token
+    ]
+        .map(value => String(value || '').trim())
+        .filter(Boolean);
+
+    const uniqueSecrets = [...new Set(secrets)];
+    if (!uniqueSecrets.length) throw new Error('Credential encryption secret is not configured.');
+    return uniqueSecrets.map(secret => crypto.createHash('sha256').update(secret).digest());
 }
 
 function encrypt(value) {
     const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', getEncryptionKey(), iv);
+    const cipher = crypto.createCipheriv('aes-256-gcm', getEncryptionKeys()[0], iv);
     const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
     return {
         version: ENCRYPTION_VERSION,
@@ -27,16 +35,21 @@ function encrypt(value) {
 
 function decrypt(payload) {
     if (!payload || payload.version !== ENCRYPTION_VERSION) return null;
-    const decipher = crypto.createDecipheriv(
-        'aes-256-gcm',
-        getEncryptionKey(),
-        Buffer.from(payload.iv, 'base64')
-    );
-    decipher.setAuthTag(Buffer.from(payload.tag, 'base64'));
-    return Buffer.concat([
-        decipher.update(Buffer.from(payload.value, 'base64')),
-        decipher.final()
-    ]).toString('utf8');
+    for (const key of getEncryptionKeys()) {
+        try {
+            const decipher = crypto.createDecipheriv(
+                'aes-256-gcm',
+                key,
+                Buffer.from(payload.iv, 'base64')
+            );
+            decipher.setAuthTag(Buffer.from(payload.tag, 'base64'));
+            return Buffer.concat([
+                decipher.update(Buffer.from(payload.value, 'base64')),
+                decipher.final()
+            ]).toString('utf8');
+        } catch {}
+    }
+    return null;
 }
 
 function readCredentials() {
