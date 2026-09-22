@@ -78,6 +78,7 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'enablecommands',
     'setboostchannel',
     'setcontentchannel',
+    'addmod',
     'autoresponder',
     'synccommands',
     'manage',
@@ -95,6 +96,7 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'work'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
+const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'register']);
 
 function trelloRequestJson(url) {
     return new Promise((resolve, reject) => {
@@ -282,6 +284,7 @@ const inviteMemberStatsFile = path.join(dataPath, "inviteMemberStats.json");
 const revokedInvitesFile = path.join(dataPath, "revokedInvites.json");
 const securityFile = path.join(dataPath, "security.json");
 const commandAccessFile = path.join(dataPath, "commandAccess.json");
+const manualModeratorsFile = path.join(dataPath, "manual-moderators.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -327,6 +330,7 @@ client.recentDeletedInvitesByGuild = new Map();
 client.revokedInvites = new Map();
 client.securitySettings = new Map();
 client.commandAccessLevels = new Map();
+client.manualModerators = new Set();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.hideCommandState = new Map(); // per-guild set of userIds for deleting their moderation prefix command messages
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
@@ -374,6 +378,41 @@ client.applyHardcodedAdmins = (ids = []) => {
     client.hardcodedAdmins = new Set(merged);
     HARD_CODED_ADMINS.splice(0, HARD_CODED_ADMINS.length, ...merged);
     return merged;
+};
+
+client.loadManualModerators = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(manualModeratorsFile)) fs.writeFileSync(manualModeratorsFile, '[]', 'utf8');
+
+    let parsed = [];
+    try {
+        parsed = JSON.parse(fs.readFileSync(manualModeratorsFile, 'utf8') || '[]');
+    } catch (err) {
+        console.error('Failed to read manual moderators file:', err);
+    }
+
+    client.manualModerators = new Set(
+        Array.isArray(parsed)
+            ? parsed.map(String).filter(id => /^\d{17,20}$/.test(id))
+            : []
+    );
+};
+
+client.saveManualModerators = () => {
+    fs.writeFileSync(manualModeratorsFile, `${JSON.stringify([...client.manualModerators], null, 2)}\n`, 'utf8');
+};
+
+client.addManualModerator = (userId) => {
+    const normalized = String(userId || '').trim();
+    if (!/^\d{17,20}$/.test(normalized)) return false;
+    client.manualModerators.add(normalized);
+    client.saveManualModerators();
+    return true;
+};
+
+client.isManuallyAddedModerator = (userId) => {
+    const normalized = String(userId || '').trim();
+    return client.hardcodedAdmins?.has(normalized) || client.manualModerators.has(normalized);
 };
 
 client.applyModeratorLevelPermRoleNames = (names = []) => {
@@ -3971,6 +4010,7 @@ client.resetInfractionRule = (guildId, ruleKey) => {
 
 client.loadCommands();
 client.loadCommandAccessLevels();
+client.loadManualModerators();
 client.loadPermissions();
 client.loadLogChannels();
 client.loadModLogs();
@@ -4360,6 +4400,15 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         const isDmCommand = !interaction.guildId;
+        if (MANUAL_MODERATOR_COMMAND_NAMES.has(String(interaction.commandName || '').toLowerCase())
+            && !client.isManuallyAddedModerator(interaction.user.id)) {
+            await interaction.reply({
+                content: 'You must be manually added as a moderator before using this command.',
+                ephemeral: true
+            }).catch(() => null);
+            return;
+        }
+
         const commandLevel = typeof client.getCommandAccessLevel === 'function'
             ? client.getCommandAccessLevel(interaction.commandName)
             : 'moderator';

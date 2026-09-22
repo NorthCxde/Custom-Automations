@@ -129,7 +129,7 @@ function buildInfoComponents(userId) {
         new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId(`info_blacklist_menu:${userId}`)
-                .setLabel('Blacklist')
+                .setLabel('Ban')
                 .setStyle(ButtonStyle.Danger)
         )
     ];
