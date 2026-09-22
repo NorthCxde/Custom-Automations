@@ -10,6 +10,8 @@ const {
 const ROBLOX_USERS_API = 'https://users.roblox.com/v1';
 const ROBLOX_THUMBNAILS_API = 'https://thumbnails.roblox.com/v1';
 const ROBLOX_INVENTORY_API = 'https://inventory.roblox.com/v1';
+const TRELLO_BOARD_ID = 'QpzzqyE8';
+const TRELLO_LIST_NAMES = ['Blacklist', 'TB Duels Blacklist'];
 const TIMEBOMB_BADGE_ID = '2142457718';
 const CUSTOM_MINIGAMES_BADGE_ID = '2124646244';
 
@@ -80,6 +82,35 @@ async function fetchGameActivity(userId) {
     return history.length ? history.join('\n') : '❌ No game history';
 }
 
+async function fetchExistingTrelloCards(userId, discordUserId) {
+    const { getRegisteredCredentials } = require('./trelloCredentials');
+    const credentials = getRegisteredCredentials(discordUserId);
+    if (!credentials) return [];
+
+    const auth = new URLSearchParams({ key: credentials.key, token: credentials.token });
+    const listsResponse = await fetch(`https://api.trello.com/1/boards/${TRELLO_BOARD_ID}/lists?fields=id,name&${auth}`);
+    if (!listsResponse.ok) throw new Error(`Trello list lookup failed with status ${listsResponse.status}`);
+
+    const lists = await listsResponse.json();
+    const matchingCards = [];
+    for (const listName of TRELLO_LIST_NAMES) {
+        const list = lists.find(entry => String(entry.name || '').trim().toLowerCase() === listName.toLowerCase());
+        if (!list) continue;
+
+        const cardsResponse = await fetch(`https://api.trello.com/1/lists/${list.id}/cards?fields=id,name,shortUrl,url&${auth}`);
+        if (!cardsResponse.ok) throw new Error(`Trello card lookup failed with status ${cardsResponse.status}`);
+
+        const cards = await cardsResponse.json();
+        for (const card of cards) {
+            if (String(card.name || '').trim() !== String(userId)) continue;
+            const url = String(card.shortUrl || card.url || '').trim();
+            if (url) matchingCards.push({ listName, url });
+        }
+    }
+
+    return matchingCards;
+}
+
 function formatCreatedDate(value) {
     const timestamp = Math.floor(new Date(value).getTime() / 1000);
     if (!Number.isFinite(timestamp)) return 'Unknown';
@@ -93,11 +124,14 @@ function formatDescription(description) {
     return `${text.slice(0, 100)}...`;
 }
 
-function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCardUrl = null) {
+function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
     const username = String(user.name || 'Unknown');
     const displayName = String(user.displayName || username);
     const userId = String(user.id);
     const profileDescription = formatDescription(user.description);
+    const trelloCardLines = trelloCards.length
+        ? trelloCards.map(card => `• [${userId}](${card.url}) (${card.listName})`).join('\n')
+        : '• None';
     const embedDescription = [
         '**Roblox Information**',
         `@${username}`,
@@ -112,7 +146,7 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCardUrl = null) {
         gameActivity,
         '',
         '**Trello Cards**',
-        trelloCardUrl ? `• [${userId}](${trelloCardUrl})` : '• None'
+        trelloCardLines
     ].join('\n');
 
     const embed = new EmbedBuilder()
@@ -124,13 +158,14 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCardUrl = null) {
     return embed;
 }
 
-async function fetchInfoData(userId) {
+async function fetchInfoData(userId, discordUserId) {
     const user = await fetchJson(`${ROBLOX_USERS_API}/users/${userId}`);
-    const [avatarUrl, gameActivity] = await Promise.all([
+    const [avatarUrl, gameActivity, trelloCards] = await Promise.all([
         fetchAvatarUrl(user.id),
-        fetchGameActivity(user.id)
+        fetchGameActivity(user.id),
+        fetchExistingTrelloCards(user.id, discordUserId)
     ]);
-    return { user, avatarUrl, gameActivity };
+    return { user, avatarUrl, gameActivity, trelloCards };
 }
 
 function buildInfoComponents(userId) {
@@ -160,10 +195,10 @@ module.exports = {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const input = interaction.options.getString('user', true);
             const user = await resolveUser(input);
-            const { avatarUrl, gameActivity } = await fetchInfoData(user.id);
+            const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, interaction.user.id);
 
             return interaction.editReply({
-                embeds: [buildInfoEmbed(user, avatarUrl, gameActivity)],
+                embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards)],
                 components: buildInfoComponents(user.id)
             });
         } catch (err) {

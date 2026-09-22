@@ -4768,12 +4768,12 @@ client.on('interactionCreate', async (interaction) => {
                 if (!cardUrl) throw new Error('Trello did not return a card URL');
 
                 const infoCommand = client.slashCommands.get('info') || require('./commands/info');
-                const infoData = await infoCommand.fetchInfoData(userId);
+                const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
                 const duplicateEmbed = infoCommand.buildInfoEmbed(
                     infoData.user,
                     infoData.avatarUrl,
                     infoData.gameActivity,
-                    cardUrl
+                    [{ listName, url: cardUrl }]
                 );
                 await interaction.followUp({
                     embeds: [duplicateEmbed],
