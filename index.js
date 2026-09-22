@@ -4763,6 +4763,25 @@ client.on('interactionCreate', async (interaction) => {
                 const cardResponse = await fetch(`https://api.trello.com/1/cards?${cardParams}`, { method: 'POST' });
                 if (!cardResponse.ok) throw new Error(`Trello card creation failed with status ${cardResponse.status}`);
 
+                const card = await cardResponse.json();
+                const cardUrl = String(card?.shortUrl || card?.url || '').trim();
+                if (!cardUrl) throw new Error('Trello did not return a card URL');
+
+                const originalEmbed = interaction.message?.embeds?.[0];
+                if (originalEmbed) {
+                    const duplicateEmbed = EmbedBuilder.from(originalEmbed);
+                    const originalDescription = String(originalEmbed.description || '');
+                    const updatedDescription = originalDescription.replace(
+                        /\*\*Trello Cards\*\*\n• None$/,
+                        `**Trello Cards**\n• [${userId}](${cardUrl})`
+                    );
+                    duplicateEmbed.setDescription(updatedDescription);
+                    await interaction.followUp({
+                        embeds: [duplicateEmbed],
+                        ephemeral: true
+                    });
+                }
+
                 return interaction.editReply(`Added **${userId}** to **${listName}**. Due <t:${Math.floor(new Date(dueDate).getTime() / 1000)}:D>.`);
             } catch (err) {
                 console.error('Failed to create Trello blacklist card:', err);
