@@ -4840,7 +4840,8 @@ client.on('interactionCreate', async (interaction) => {
                 }
 
                 const infoCommand = client.slashCommands.get('info') || require('./commands/info');
-                const existingCards = await infoCommand.fetchExistingTrelloCards(userId, interaction.user.id);
+                const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
+                const existingCards = infoData.trelloCards || [];
                 if (existingCards.some(card => card.listName.toLowerCase() === listName.toLowerCase())) {
                     return interaction.editReply(`**${userId}** has already been blacklisted in **${listName}**.`);
                 }
@@ -4860,7 +4861,6 @@ client.on('interactionCreate', async (interaction) => {
                 if (!cardUrl) throw new Error('Trello did not return a card URL');
                 cardCreated = true;
 
-                const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
                 const allTrelloCards = [...(infoData.trelloCards || []), { listName, url: cardUrl }]
                     .filter((card, index, cards) => cards.findIndex(existing =>
                         existing.listName === card.listName && existing.url === card.url
