@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 
 const ROBLOX_USERS_API = 'https://users.roblox.com/v1';
 const ROBLOX_THUMBNAILS_API = 'https://thumbnails.roblox.com/v1';
@@ -55,25 +55,36 @@ function formatCreatedDate(value) {
 
 function formatDescription(description) {
     const text = String(description || '').trim();
-    return text ? text.slice(0, 1024) : '• None';
+    return text ? text.slice(0, 100) : '• None';
 }
 
 function buildInfoEmbed(user, avatarUrl, canViewInventory) {
     const username = String(user.name || 'Unknown');
     const displayName = String(user.displayName || username);
     const userId = String(user.id);
+    const profileDescription = formatDescription(user.description);
+    const embedDescription = [
+        '**Roblox Information**',
+        `@${username}`,
+        '',
+        '**Account Created**',
+        formatCreatedDate(user.created),
+        '',
+        '**Description**',
+        profileDescription,
+        '',
+        '**Game Activity**',
+        canViewInventory ? 'Inventory is public' : '🔒 Inventory is private',
+        '',
+        '**Trello Cards**',
+        '• None'
+    ].join('\n');
 
     const embed = new EmbedBuilder()
         .setColor(0x36393f)
         .setTitle(`${displayName} (${userId})`)
         .setThumbnail(avatarUrl || null)
-        .addFields(
-            { name: 'Roblox Information', value: `@${username}`, inline: false },
-            { name: 'Account Created', value: formatCreatedDate(user.created), inline: false },
-            { name: 'Description', value: formatDescription(user.description), inline: false },
-            { name: 'Game Activity', value: canViewInventory ? 'Inventory is public' : '🔒 Inventory is private', inline: false },
-            { name: 'Trello Cards', value: '• None', inline: false }
-        )
+        .setDescription(embedDescription)
         .setTimestamp();
 
     return embed;
@@ -92,7 +103,7 @@ module.exports = {
         ),
     async executeInteraction({ interaction }) {
         try {
-            await interaction.deferReply();
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const input = interaction.options.getString('user', true);
             const user = await resolveUser(input);
             const [avatarUrl, canViewInventory] = await Promise.all([
