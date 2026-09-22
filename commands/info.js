@@ -82,7 +82,8 @@ function formatCreatedDate(value) {
 function formatDescription(description) {
     const text = String(description || '').trim();
     if (!text) return '• None';
-    return text.slice(0, 100);
+    if (text.length <= 100) return text;
+    return `${text.slice(0, 100)}...`;
 }
 
 function buildInfoEmbed(user, avatarUrl, gameActivity) {
