@@ -4767,20 +4767,19 @@ client.on('interactionCreate', async (interaction) => {
                 const cardUrl = String(card?.shortUrl || card?.url || '').trim();
                 if (!cardUrl) throw new Error('Trello did not return a card URL');
 
-                const originalEmbed = interaction.message?.embeds?.[0];
-                if (originalEmbed) {
-                    const duplicateEmbed = EmbedBuilder.from(originalEmbed);
-                    const originalDescription = String(originalEmbed.description || '');
-                    const updatedDescription = originalDescription.replace(
-                        /\*\*Trello Cards\*\*\n• None$/,
-                        `**Trello Cards**\n• [${userId}](${cardUrl})`
-                    );
-                    duplicateEmbed.setDescription(updatedDescription);
-                    await interaction.followUp({
-                        embeds: [duplicateEmbed],
-                        ephemeral: true
-                    });
-                }
+                const infoCommand = client.slashCommands.get('info') || require('./commands/info');
+                const infoData = await infoCommand.fetchInfoData(userId);
+                const duplicateEmbed = infoCommand.buildInfoEmbed(
+                    infoData.user,
+                    infoData.avatarUrl,
+                    infoData.gameActivity,
+                    cardUrl
+                );
+                await interaction.followUp({
+                    embeds: [duplicateEmbed],
+                    components: [],
+                    ephemeral: true
+                });
 
                 return interaction.editReply(`Added **${userId}** to **${listName}**. Due <t:${Math.floor(new Date(dueDate).getTime() / 1000)}:D>.`);
             } catch (err) {

@@ -93,7 +93,7 @@ function formatDescription(description) {
     return `${text.slice(0, 100)}...`;
 }
 
-function buildInfoEmbed(user, avatarUrl, gameActivity) {
+function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCardUrl = null) {
     const username = String(user.name || 'Unknown');
     const displayName = String(user.displayName || username);
     const userId = String(user.id);
@@ -112,7 +112,7 @@ function buildInfoEmbed(user, avatarUrl, gameActivity) {
         gameActivity,
         '',
         '**Trello Cards**',
-        '• None'
+        trelloCardUrl ? `• [${userId}](${trelloCardUrl})` : '• None'
     ].join('\n');
 
     const embed = new EmbedBuilder()
@@ -122,6 +122,15 @@ function buildInfoEmbed(user, avatarUrl, gameActivity) {
         .setDescription(embedDescription);
 
     return embed;
+}
+
+async function fetchInfoData(userId) {
+    const user = await fetchJson(`${ROBLOX_USERS_API}/users/${userId}`);
+    const [avatarUrl, gameActivity] = await Promise.all([
+        fetchAvatarUrl(user.id),
+        fetchGameActivity(user.id)
+    ]);
+    return { user, avatarUrl, gameActivity };
 }
 
 function buildInfoComponents(userId) {
@@ -151,10 +160,7 @@ module.exports = {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const input = interaction.options.getString('user', true);
             const user = await resolveUser(input);
-            const [avatarUrl, gameActivity] = await Promise.all([
-                fetchAvatarUrl(user.id),
-                fetchGameActivity(user.id)
-            ]);
+            const { avatarUrl, gameActivity } = await fetchInfoData(user.id);
 
             return interaction.editReply({
                 embeds: [buildInfoEmbed(user, avatarUrl, gameActivity)],
@@ -171,5 +177,7 @@ module.exports = {
             }
             return interaction.editReply({ content: message });
         }
-    }
+    },
+    fetchInfoData,
+    buildInfoEmbed
 };
