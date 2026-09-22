@@ -4775,13 +4775,16 @@ client.on('interactionCreate', async (interaction) => {
                     infoData.gameActivity,
                     [{ listName, url: cardUrl }]
                 );
-                await interaction.followUp({
+                await interaction.editReply({
                     embeds: [duplicateEmbed],
                     components: [],
                     ephemeral: true
                 });
 
-                return interaction.editReply(`Added **${userId}** to **${listName}**. Due <t:${Math.floor(new Date(dueDate).getTime() / 1000)}:D>.`);
+                return interaction.followUp({
+                    content: `Added **${userId}** to **${listName}**. Due <t:${Math.floor(new Date(dueDate).getTime() / 1000)}:D>.`,
+                    ephemeral: true
+                });
             } catch (err) {
                 console.error('Failed to create Trello blacklist card:', err);
                 return interaction.editReply('I could not create the Trello card. Check your registered credentials and board access.');
