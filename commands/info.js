@@ -214,5 +214,6 @@ module.exports = {
         }
     },
     fetchInfoData,
-    buildInfoEmbed
+    buildInfoEmbed,
+    buildInfoComponents
 };

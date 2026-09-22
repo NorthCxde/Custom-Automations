@@ -4769,15 +4769,19 @@ client.on('interactionCreate', async (interaction) => {
 
                 const infoCommand = client.slashCommands.get('info') || require('./commands/info');
                 const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
+                const allTrelloCards = [...(infoData.trelloCards || []), { listName, url: cardUrl }]
+                    .filter((card, index, cards) => cards.findIndex(existing =>
+                        existing.listName === card.listName && existing.url === card.url
+                    ) === index);
                 const duplicateEmbed = infoCommand.buildInfoEmbed(
                     infoData.user,
                     infoData.avatarUrl,
                     infoData.gameActivity,
-                    [{ listName, url: cardUrl }]
+                    allTrelloCards
                 );
                 await interaction.editReply({
                     embeds: [duplicateEmbed],
-                    components: [],
+                    components: [infoCommand.buildInfoComponents(userId)],
                     ephemeral: true
                 });
 
