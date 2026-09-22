@@ -4764,7 +4764,8 @@ client.on('interactionCreate', async (interaction) => {
 
             try {
                 const infoCommand = client.slashCommands.get('info') || require('./commands/info');
-                const existingCards = await infoCommand.fetchExistingTrelloCards(userId, interaction.user.id);
+                const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
+                const existingCards = infoData.trelloCards || [];
                 const targetCard = existingCards.find(card => card.listName.toLowerCase() === listName.toLowerCase());
                 if (!targetCard?.id) {
                     return interaction.editReply(`No active card for **${userId}** was found in **${listName}**.`);
@@ -4774,12 +4775,11 @@ client.on('interactionCreate', async (interaction) => {
                 const archiveResponse = await fetch(`https://api.trello.com/1/cards/${targetCard.id}/closed?${auth}`, { method: 'PUT' });
                 if (!archiveResponse.ok) throw new Error(`Trello card archive failed with status ${archiveResponse.status}`);
 
-                const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
                 const duplicateEmbed = infoCommand.buildInfoEmbed(
                     infoData.user,
                     infoData.avatarUrl,
                     infoData.gameActivity,
-                    infoData.trelloCards
+                    existingCards.filter(card => card.id !== targetCard.id)
                 );
                 await interaction.editReply({
                     embeds: [duplicateEmbed],
