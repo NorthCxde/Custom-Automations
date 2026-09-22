@@ -4728,6 +4728,74 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
+        if (interaction.customId.startsWith('info_unban_menu:')) {
+            const userId = interaction.customId.slice('info_unban_menu:'.length);
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`info_unban_archive:${userId}:Blacklist`)
+                    .setLabel('Blacklist')
+                    .setStyle(ButtonStyle.Danger),
+                new ButtonBuilder()
+                    .setCustomId(`info_unban_archive:${userId}:TB Duels Blacklist`)
+                    .setLabel('TB Duels Blacklist')
+                    .setStyle(ButtonStyle.Danger)
+            );
+
+            return interaction.reply({
+                content: `Choose blacklist type to unban: **${userId}**`,
+                components: [row],
+                ephemeral: true
+            });
+        }
+
+        if (interaction.customId.startsWith('info_unban_archive:')) {
+            const [, userId, listName] = interaction.customId.split(':');
+            const { getRegisteredCredentials } = require('./commands/trelloCredentials');
+            const credentials = getRegisteredCredentials(interaction.user.id);
+
+            if (!credentials) {
+                return interaction.reply({
+                    content: 'Register your Trello account with /register before archiving blacklist cards.',
+                    ephemeral: true
+                });
+            }
+
+            await interaction.deferReply({ ephemeral: true });
+
+            try {
+                const infoCommand = client.slashCommands.get('info') || require('./commands/info');
+                const existingCards = await infoCommand.fetchExistingTrelloCards(userId, interaction.user.id);
+                const targetCard = existingCards.find(card => card.listName.toLowerCase() === listName.toLowerCase());
+                if (!targetCard?.id) {
+                    return interaction.editReply(`No active card for **${userId}** was found in **${listName}**.`);
+                }
+
+                const auth = new URLSearchParams({ key: credentials.key, token: credentials.token, value: 'true' });
+                const archiveResponse = await fetch(`https://api.trello.com/1/cards/${targetCard.id}/closed?${auth}`, { method: 'PUT' });
+                if (!archiveResponse.ok) throw new Error(`Trello card archive failed with status ${archiveResponse.status}`);
+
+                const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
+                const duplicateEmbed = infoCommand.buildInfoEmbed(
+                    infoData.user,
+                    infoData.avatarUrl,
+                    infoData.gameActivity,
+                    infoData.trelloCards
+                );
+                await interaction.editReply({
+                    embeds: [duplicateEmbed],
+                    components: [infoCommand.buildInfoComponents(userId)]
+                });
+
+                return interaction.followUp({
+                    content: `Archived **${userId}** from **${listName}**.`,
+                    ephemeral: true
+                });
+            } catch (err) {
+                console.error('Failed to archive Trello blacklist card:', err);
+                return interaction.editReply('I could not archive the Trello card. Check your registered credentials and board access.');
+            }
+        }
+
         if (interaction.customId.startsWith('info_blacklist_add:')) {
             const [, userId, listName] = interaction.customId.split(':');
             const { getRegisteredCredentials } = require('./commands/trelloCredentials');
@@ -4753,6 +4821,12 @@ client.on('interactionCreate', async (interaction) => {
                     return interaction.editReply(`The Trello list "${listName}" was not found on the configured board.`);
                 }
 
+                const infoCommand = client.slashCommands.get('info') || require('./commands/info');
+                const existingCards = await infoCommand.fetchExistingTrelloCards(userId, interaction.user.id);
+                if (existingCards.some(card => card.listName.toLowerCase() === listName.toLowerCase())) {
+                    return interaction.editReply(`**${userId}** has already been blacklisted in **${listName}**.`);
+                }
+
                 const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
                 const cardParams = new URLSearchParams({
                     idList: targetList.id,
@@ -4767,7 +4841,6 @@ client.on('interactionCreate', async (interaction) => {
                 const cardUrl = String(card?.shortUrl || card?.url || '').trim();
                 if (!cardUrl) throw new Error('Trello did not return a card URL');
 
-                const infoCommand = client.slashCommands.get('info') || require('./commands/info');
                 const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
                 const allTrelloCards = [...(infoData.trelloCards || []), { listName, url: cardUrl }]
                     .filter((card, index, cards) => cards.findIndex(existing =>

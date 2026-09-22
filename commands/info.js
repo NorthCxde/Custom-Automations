@@ -104,7 +104,11 @@ async function fetchExistingTrelloCards(userId, discordUserId) {
         for (const card of cards) {
             if (String(card.name || '').trim() !== String(userId)) continue;
             const url = String(card.shortUrl || card.url || '').trim();
-            if (url) matchingCards.push({ listName, url });
+            if (url) matchingCards.push({
+                id: String(card.id || ''),
+                listName,
+                url
+            });
         }
     }
 
@@ -174,7 +178,11 @@ function buildInfoComponents(userId) {
             new ButtonBuilder()
                 .setCustomId(`info_blacklist_menu:${userId}`)
                 .setLabel('Ban')
-                .setStyle(ButtonStyle.Danger)
+                .setStyle(ButtonStyle.Danger),
+            new ButtonBuilder()
+                .setCustomId(`info_unban_menu:${userId}`)
+                .setLabel('Unban')
+                .setStyle(ButtonStyle.Secondary)
         )
     ];
 }
@@ -215,5 +223,6 @@ module.exports = {
     },
     fetchInfoData,
     buildInfoEmbed,
-    buildInfoComponents
+    buildInfoComponents,
+    fetchExistingTrelloCards
 };
