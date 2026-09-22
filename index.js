@@ -4659,6 +4659,68 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('info_blacklist_menu:')) {
+            const userId = interaction.customId.slice('info_blacklist_menu:'.length);
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`info_blacklist_add:${userId}:Blacklist`)
+                    .setLabel('Blacklist')
+                    .setStyle(ButtonStyle.Danger),
+                new ButtonBuilder()
+                    .setCustomId(`info_blacklist_add:${userId}:TB Duels Blacklist`)
+                    .setLabel('TB Duels Blacklist')
+                    .setStyle(ButtonStyle.Danger)
+            );
+
+            return interaction.reply({
+                content: 'Choose the Trello list for this Roblox user:',
+                components: [row],
+                ephemeral: true
+            });
+        }
+
+        if (interaction.customId.startsWith('info_blacklist_add:')) {
+            const [, userId, listName] = interaction.customId.split(':');
+            const { getRegisteredCredentials } = require('./commands/trelloCredentials');
+            const credentials = getRegisteredCredentials(interaction.user.id);
+
+            if (!credentials) {
+                return interaction.reply({
+                    content: 'Register your Trello account with /register before adding blacklist cards.',
+                    ephemeral: true
+                });
+            }
+
+            await interaction.deferReply({ ephemeral: true });
+
+            try {
+                const auth = new URLSearchParams({ key: credentials.key, token: credentials.token });
+                const listsResponse = await fetch(`https://api.trello.com/1/boards/QpzzqyE8/lists?fields=id,name&${auth}`);
+                if (!listsResponse.ok) throw new Error(`Trello list lookup failed with status ${listsResponse.status}`);
+
+                const lists = await listsResponse.json();
+                const targetList = lists.find(list => String(list.name || '').trim().toLowerCase() === listName.toLowerCase());
+                if (!targetList) {
+                    return interaction.editReply(`The Trello list "${listName}" was not found on the configured board.`);
+                }
+
+                const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+                const cardParams = new URLSearchParams({
+                    idList: targetList.id,
+                    name: userId,
+                    due: dueDate,
+                    ...Object.fromEntries(auth)
+                });
+                const cardResponse = await fetch(`https://api.trello.com/1/cards?${cardParams}`, { method: 'POST' });
+                if (!cardResponse.ok) throw new Error(`Trello card creation failed with status ${cardResponse.status}`);
+
+                return interaction.editReply(`Added **${userId}** to **${listName}**. Due <t:${Math.floor(new Date(dueDate).getTime() / 1000)}:D>.`);
+            } catch (err) {
+                console.error('Failed to create Trello blacklist card:', err);
+                return interaction.editReply('I could not create the Trello card. Check your registered credentials and board access.');
+            }
+        }
+
         if (interaction.customId.startsWith('forumping_close:') || interaction.customId.startsWith('forumping_close_reason:')) {
             if (!interaction.guild || !interaction.channel?.isThread()) {
                 return interaction.reply({ content: 'This action must be used inside a forum post.', ephemeral: true });

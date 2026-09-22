@@ -1,4 +1,11 @@
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const {
+    SlashCommandBuilder,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    MessageFlags
+} = require('discord.js');
 
 const ROBLOX_USERS_API = 'https://users.roblox.com/v1';
 const ROBLOX_THUMBNAILS_API = 'https://thumbnails.roblox.com/v1';
@@ -117,6 +124,17 @@ function buildInfoEmbed(user, avatarUrl, gameActivity) {
     return embed;
 }
 
+function buildInfoComponents(userId) {
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`info_blacklist_menu:${userId}`)
+                .setLabel('Blacklist')
+                .setStyle(ButtonStyle.Danger)
+        )
+    ];
+}
+
 module.exports = {
     name: 'info',
     data: new SlashCommandBuilder()
@@ -139,7 +157,8 @@ module.exports = {
             ]);
 
             return interaction.editReply({
-                embeds: [buildInfoEmbed(user, avatarUrl, gameActivity)]
+                embeds: [buildInfoEmbed(user, avatarUrl, gameActivity)],
+                components: buildInfoComponents(user.id)
             });
         } catch (err) {
             console.error('Failed to fetch Roblox user info:', err);
