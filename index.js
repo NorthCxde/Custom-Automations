@@ -4709,6 +4709,9 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton()) {
         if (interaction.customId.startsWith('info_blacklist_menu:')) {
+            if (!client.isManuallyAddedModerator(interaction.user.id)) {
+                return interaction.reply({ content: 'You must be manually added as a moderator before using this action.', ephemeral: true });
+            }
             const userId = interaction.customId.slice('info_blacklist_menu:'.length);
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
@@ -4729,6 +4732,9 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (interaction.customId.startsWith('info_unban_menu:')) {
+            if (!client.isManuallyAddedModerator(interaction.user.id)) {
+                return interaction.reply({ content: 'You must be manually added as a moderator before using this action.', ephemeral: true });
+            }
             const userId = interaction.customId.slice('info_unban_menu:'.length);
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
@@ -4749,6 +4755,9 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (interaction.customId.startsWith('info_unban_archive:')) {
+            if (!client.isManuallyAddedModerator(interaction.user.id)) {
+                return interaction.reply({ content: 'You must be manually added as a moderator before using this action.', ephemeral: true });
+            }
             const [, userId, listName] = interaction.customId.split(':');
             const { getRegisteredCredentials } = require('./commands/trelloCredentials');
             const credentials = getRegisteredCredentials(interaction.user.id);
@@ -4762,6 +4771,7 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.deferReply({ ephemeral: true });
 
+            let cardArchived = false;
             try {
                 const infoCommand = client.slashCommands.get('info') || require('./commands/info');
                 const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
@@ -4774,6 +4784,7 @@ client.on('interactionCreate', async (interaction) => {
                 const auth = new URLSearchParams({ key: credentials.key, token: credentials.token, value: 'true' });
                 const archiveResponse = await fetch(`https://api.trello.com/1/cards/${targetCard.id}/closed?${auth}`, { method: 'PUT' });
                 if (!archiveResponse.ok) throw new Error(`Trello card archive failed with status ${archiveResponse.status}`);
+                cardArchived = true;
 
                 const duplicateEmbed = infoCommand.buildInfoEmbed(
                     infoData.user,
@@ -4792,11 +4803,17 @@ client.on('interactionCreate', async (interaction) => {
                 });
             } catch (err) {
                 console.error('Failed to archive Trello blacklist card:', err);
+                if (cardArchived) {
+                    return interaction.editReply('The Trello card was archived, but the refreshed info embed could not be displayed.');
+                }
                 return interaction.editReply('I could not archive the Trello card. Check your registered credentials and board access.');
             }
         }
 
         if (interaction.customId.startsWith('info_blacklist_add:')) {
+            if (!client.isManuallyAddedModerator(interaction.user.id)) {
+                return interaction.reply({ content: 'You must be manually added as a moderator before using this action.', ephemeral: true });
+            }
             const [, userId, listName] = interaction.customId.split(':');
             const { getRegisteredCredentials } = require('./commands/trelloCredentials');
             const credentials = getRegisteredCredentials(interaction.user.id);
@@ -4810,6 +4827,7 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.deferReply({ ephemeral: true });
 
+            let cardCreated = false;
             try {
                 const auth = new URLSearchParams({ key: credentials.key, token: credentials.token });
                 const listsResponse = await fetch(`https://api.trello.com/1/boards/QpzzqyE8/lists?fields=id,name&${auth}`);
@@ -4840,6 +4858,7 @@ client.on('interactionCreate', async (interaction) => {
                 const card = await cardResponse.json();
                 const cardUrl = String(card?.shortUrl || card?.url || '').trim();
                 if (!cardUrl) throw new Error('Trello did not return a card URL');
+                cardCreated = true;
 
                 const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
                 const allTrelloCards = [...(infoData.trelloCards || []), { listName, url: cardUrl }]
@@ -4864,6 +4883,9 @@ client.on('interactionCreate', async (interaction) => {
                 });
             } catch (err) {
                 console.error('Failed to create Trello blacklist card:', err);
+                if (cardCreated) {
+                    return interaction.editReply('The Trello card was added, but the refreshed info embed could not be displayed.');
+                }
                 return interaction.editReply('I could not create the Trello card. Check your registered credentials and board access.');
             }
         }
