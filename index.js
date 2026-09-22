@@ -4793,8 +4793,7 @@ client.on('interactionCreate', async (interaction) => {
                     existingCards.filter(card => card.id !== targetCard.id)
                 );
                 await interaction.editReply({
-                    embeds: [duplicateEmbed],
-                    components: [infoCommand.buildInfoComponents(userId)]
+                    embeds: [duplicateEmbed]
                 });
 
                 return;
@@ -4869,9 +4868,7 @@ client.on('interactionCreate', async (interaction) => {
                     allTrelloCards
                 );
                 await interaction.editReply({
-                    embeds: [duplicateEmbed],
-                    components: [infoCommand.buildInfoComponents(userId)],
-                    ephemeral: true
+                    embeds: [duplicateEmbed]
                 });
 
                 return interaction.followUp({
