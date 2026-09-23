@@ -133,8 +133,15 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
     const displayName = String(user.displayName || username);
     const userId = String(user.id);
     const profileDescription = formatDescription(user.description);
+    const gameNameMap = {
+        blacklist: 'Custom Minigames',
+        'tb duels blacklist': 'Timebomb Duels'
+    };
     const trelloCardLines = trelloCards.length
-        ? trelloCards.map(card => `• [${userId}](${card.url}) (${card.listName})`).join('\n')
+        ? trelloCards.map(card => {
+            const gameName = gameNameMap[String(card.listName || '').trim().toLowerCase()] || card.listName;
+            return `• [${gameName}](${card.url})`;
+        }).join('\n')
         : '• None';
     const embedDescription = [
         '**Roblox Information**',
