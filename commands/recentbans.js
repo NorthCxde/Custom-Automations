@@ -19,10 +19,9 @@ function buildRecentBansPayload(logs, count) {
         .slice(0, count);
 
     const embed = new EmbedBuilder()
-        .setColor(0x000000)
+        .setColor(0x36393f)
         .setTitle('Recent actions')
-        .setDescription(recentBans.length ? recentBans.map(formatRecentBan).join('\n') : 'No recent bans are available.')
-        .setTimestamp();
+        .setDescription(recentBans.length ? recentBans.map(formatRecentBan).join('\n') : 'No recent bans are available.');
 
     return { embeds: [embed] };
 }
