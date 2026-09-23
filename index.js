@@ -4858,6 +4858,19 @@ client.on('interactionCreate', async (interaction) => {
                 if (!cardUrl) throw new Error('Trello did not return a card URL');
                 cardCreated = true;
 
+                if (typeof client.addModLog === 'function' && interaction.guild) {
+                    client.addModLog(interaction.guild.id, {
+                        action: 'Ban',
+                        source: 'trello_blacklist',
+                        blacklistType: listName,
+                        userId: String(userId),
+                        userTag: String(infoData?.user?.name || userId),
+                        moderatorId: interaction.user.id,
+                        moderatorTag: interaction.user.tag,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+
                 const allTrelloCards = [...(infoData.trelloCards || []), { listName, url: cardUrl, due: dueDate }]
                     .filter((card, index, cards) => cards.findIndex(existing =>
                         existing.listName === card.listName && existing.url === card.url
