@@ -4879,7 +4879,7 @@ client.on('interactionCreate', async (interaction) => {
                 };
                 const gameName = gameNameMap[String(listName || '').trim().toLowerCase()] || String(listName || 'the selected game');
                 const reportedUsername = String(infoData?.user?.name || userId);
-                const moderatorReport = `Thank you for reporting ${reportedUsername} - ${userId}. They have been banned from ${gameName}.`;
+                const moderatorReport = `\`\`\`\nThank you for reporting ${reportedUsername} - ${userId}. They have been banned from ${gameName}.\n\`\`\``;
 
                 return interaction.followUp({
                     content: moderatorReport,
