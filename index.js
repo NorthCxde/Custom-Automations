@@ -4858,7 +4858,7 @@ client.on('interactionCreate', async (interaction) => {
                 if (!cardUrl) throw new Error('Trello did not return a card URL');
                 cardCreated = true;
 
-                const allTrelloCards = [...(infoData.trelloCards || []), { listName, url: cardUrl }]
+                const allTrelloCards = [...(infoData.trelloCards || []), { listName, url: cardUrl, due: dueDate }]
                     .filter((card, index, cards) => cards.findIndex(existing =>
                         existing.listName === card.listName && existing.url === card.url
                     ) === index);

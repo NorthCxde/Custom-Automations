@@ -97,7 +97,7 @@ async function fetchExistingTrelloCards(userId, discordUserId) {
         const list = lists.find(entry => String(entry.name || '').trim().toLowerCase() === listName.toLowerCase());
         if (!list) continue;
 
-        const cardsResponse = await fetch(`https://api.trello.com/1/lists/${list.id}/cards?fields=id,name,shortUrl,url&${auth}`);
+        const cardsResponse = await fetch(`https://api.trello.com/1/lists/${list.id}/cards?fields=id,name,shortUrl,url,due&${auth}`);
         if (!cardsResponse.ok) throw new Error(`Trello card lookup failed with status ${cardsResponse.status}`);
 
         const cards = await cardsResponse.json();
@@ -107,7 +107,8 @@ async function fetchExistingTrelloCards(userId, discordUserId) {
             if (url) matchingCards.push({
                 id: String(card.id || ''),
                 listName,
-                url
+                url,
+                due: card.due || null
             });
         }
     }
@@ -128,6 +129,15 @@ function formatDescription(description) {
     return `${text.slice(0, 100)}...`;
 }
 
+function formatDueCountdown(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const remainingDays = Math.ceil((date.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+    if (remainingDays <= 0) return 'Ended';
+    return `Ends in ${remainingDays} day${remainingDays === 1 ? '' : 's'}`;
+}
+
 function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
     const username = String(user.name || 'Unknown');
     const displayName = String(user.displayName || username);
@@ -140,7 +150,8 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
     const trelloCardLines = trelloCards.length
         ? trelloCards.map(card => {
             const gameName = gameNameMap[String(card.listName || '').trim().toLowerCase()] || card.listName;
-            return `• [${gameName}](${card.url})`;
+            const dueDate = formatDueCountdown(card.due);
+            return `• [${gameName}](${card.url})${dueDate ? ` (${dueDate})` : ''}`;
         }).join('\n')
         : '• None';
     const embedDescription = [
