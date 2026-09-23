@@ -173,6 +173,7 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
     const embed = new EmbedBuilder()
         .setColor(0x36393f)
         .setTitle(`${displayName} (${userId})`)
+        .setURL(`https://www.roblox.com/users/${userId}/profile`)
         .setThumbnail(avatarUrl || null)
         .setDescription(embedDescription);
 
