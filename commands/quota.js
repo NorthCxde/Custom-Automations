@@ -13,7 +13,7 @@ function buildQuotaEmbed(user, logs) {
     const monthLabel = now.toLocaleDateString('en-US', {
         month: 'long',
         year: 'numeric',
-        timeZone: 'UTC'
+        timeZone: 'America/New_York'
     });
     const standing = share >= quota
         ? `✅ Above quota (${share.toFixed(1)}%)`

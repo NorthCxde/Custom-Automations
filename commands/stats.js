@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 
 const QUOTA_PERCENT = 8;
+const QUOTA_TIME_ZONE = 'America/New_York';
 
 function isBanEntry(entry) {
     const action = String(entry?.action || '').trim().toLowerCase();
@@ -8,10 +9,50 @@ function isBanEntry(entry) {
         && entry?.source === 'trello_blacklist';
 }
 
+function getTimeZoneParts(date) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: QUOTA_TIME_ZONE,
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric'
+    }).formatToParts(date);
+    return Object.fromEntries(parts
+        .filter(part => part.type !== 'literal')
+        .map(part => [part.type, Number(part.value)]));
+}
+
+function getTimeZoneOffsetMs(date) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: QUOTA_TIME_ZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23'
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts
+        .filter(part => part.type !== 'literal')
+        .map(part => [part.type, Number(part.value)]));
+    return Date.UTC(values.year, values.month - 1, values.day, values.hour, values.minute, values.second) - date.getTime();
+}
+
+function getEasternMidnightUtc(year, month) {
+    let timestamp = Date.UTC(year, month, 1);
+    timestamp -= getTimeZoneOffsetMs(new Date(timestamp));
+    timestamp -= getTimeZoneOffsetMs(new Date(timestamp));
+    return timestamp;
+}
+
 function getMonthRange(date = new Date()) {
-    const year = date.getUTCFullYear();
-    const month = date.getUTCMonth();
-    return { year, month, start: Date.UTC(year, month, 1), end: Date.UTC(year, month + 1, 1) };
+    const { year, month } = getTimeZoneParts(date);
+    return {
+        year,
+        month: month - 1,
+        start: getEasternMidnightUtc(year, month - 1),
+        end: getEasternMidnightUtc(year, month)
+    };
 }
 
 function getCurrentMonthBans(logs, date = new Date()) {
@@ -34,10 +75,10 @@ function getCurrentMonthBans(logs, date = new Date()) {
 }
 
 function formatMonth(year, month) {
-    return new Date(Date.UTC(year, month, 1)).toLocaleDateString('en-US', {
+    return new Date(getEasternMidnightUtc(year, month)).toLocaleDateString('en-US', {
         month: 'long',
         year: 'numeric',
-        timeZone: 'UTC'
+        timeZone: QUOTA_TIME_ZONE
     });
 }
 
