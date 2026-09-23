@@ -4,7 +4,8 @@ const QUOTA_PERCENT = 8;
 
 function isBanEntry(entry) {
     const action = String(entry?.action || '').trim().toLowerCase();
-    return action === 'ban' || action === 'blacklist';
+    return (action === 'ban' || action === 'blacklist')
+        && entry?.source === 'trello_blacklist';
 }
 
 function getMonthRange(date = new Date()) {
@@ -15,11 +16,21 @@ function getMonthRange(date = new Date()) {
 
 function getCurrentMonthBans(logs, date = new Date()) {
     const { start, end } = getMonthRange(date);
-    return logs.filter(entry => {
+    const currentMonthBans = logs.filter(entry => {
         if (!isBanEntry(entry)) return false;
         const timestamp = new Date(entry.timestamp || '').getTime();
         return Number.isFinite(timestamp) && timestamp >= start && timestamp < end;
     });
+    const uniqueBans = new Map();
+    for (const entry of currentMonthBans) {
+        const userId = String(entry.userId || '').trim();
+        const blacklistType = String(entry.blacklistType || '').trim().toLowerCase();
+        const key = `${userId}:${blacklistType}`;
+        if (userId && blacklistType && !uniqueBans.has(key)) {
+            uniqueBans.set(key, entry);
+        }
+    }
+    return Array.from(uniqueBans.values());
 }
 
 function formatMonth(year, month) {
