@@ -4873,8 +4873,16 @@ client.on('interactionCreate', async (interaction) => {
                     components: infoCommand.buildInfoComponents(userId)
                 });
 
+                const gameNameMap = {
+                    blacklist: 'Custom Minigames',
+                    'tb duels blacklist': 'Timebomb Duels'
+                };
+                const gameName = gameNameMap[String(listName || '').trim().toLowerCase()] || String(listName || 'the selected game');
+                const reportedUsername = String(infoData?.user?.name || userId);
+                const moderatorReport = `Thank you for reporting ${reportedUsername} - ${userId}. They have been banned from ${gameName}.`;
+
                 return interaction.followUp({
-                    content: `Added **${userId}** to **${listName}**. Due <t:${Math.floor(new Date(dueDate).getTime() / 1000)}:D>.`,
+                    content: moderatorReport,
                     ephemeral: true
                 });
             } catch (err) {
