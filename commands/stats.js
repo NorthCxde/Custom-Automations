@@ -103,12 +103,7 @@ async function buildStatsEmbed(client, guild, logs) {
         member: await guild.members.fetch(moderatorId).catch(() => null)
     })));
 
-    rows.sort((left, right) => {
-        const leftPosition = left.member?.roles?.highest?.position ?? 0;
-        const rightPosition = right.member?.roles?.highest?.position ?? 0;
-        if (leftPosition !== rightPosition) return rightPosition - leftPosition;
-        return left.moderatorId.localeCompare(right.moderatorId);
-    });
+    rows.sort((left, right) => right.count - left.count || left.moderatorId.localeCompare(right.moderatorId));
 
     const lines = rows.length
         ? rows.map(row => {
