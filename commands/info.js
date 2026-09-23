@@ -133,9 +133,8 @@ function formatDueCountdown(value) {
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
-    const remainingDays = Math.ceil((date.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
-    if (remainingDays <= 0) return 'Ended';
-    return `Ends in ${remainingDays} day${remainingDays === 1 ? '' : 's'}`;
+    const timestamp = Math.floor(date.getTime() / 1000);
+    return `Ends <t:${timestamp}:R>`;
 }
 
 function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
