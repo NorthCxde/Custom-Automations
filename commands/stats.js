@@ -88,6 +88,10 @@ async function buildStatsEmbed(client, guild, logs) {
     const bans = getCurrentMonthBans(logs, now);
     const counts = new Map();
 
+    for (const moderatorId of client.manualModerators || []) {
+        counts.set(String(moderatorId), 0);
+    }
+
     for (const entry of bans) {
         const moderatorId = String(entry.moderatorId || '').trim();
         if (moderatorId) counts.set(moderatorId, (counts.get(moderatorId) || 0) + 1);
