@@ -154,6 +154,8 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
         }).join('\n')
         : '• None';
     const embedDescription = [
+        `(${userId})`,
+        '',
         '**Roblox Information**',
         `@${username}`,
         '',
@@ -172,7 +174,8 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
 
     const embed = new EmbedBuilder()
         .setColor(0x36393f)
-        .setTitle(`[${displayName}](https://www.roblox.com/users/${userId}/profile) (${userId})`)
+        .setTitle(displayName)
+        .setURL(`https://www.roblox.com/users/${userId}/profile`)
         .setThumbnail(avatarUrl || null)
         .setDescription(embedDescription);
 
