@@ -159,6 +159,7 @@ function formatDueCountdown(value) {
 
 function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
     const username = String(user.name || 'Unknown');
+    const displayName = String(user.displayName || username);
     const userId = String(user.id);
     const profileUrl = `https://www.roblox.com/users/${userId}/profile`;
     const profileDescription = formatDescription(user.description);
@@ -173,9 +174,10 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
             return `• [${gameName}](${card.url})${dueDate ? ` (${dueDate})` : ''}`;
         }).join('\n')
         : '• None';
+    const usernameLink = `[${username}](${profileUrl})`;
     const embedDescription = [
         '**Roblox Information**',
-        `@${username}`,
+        `${usernameLink} (${userId})`,
         '',
         '**Account Created**',
         formatCreatedDate(user.created),
@@ -192,7 +194,7 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
 
     const embed = new EmbedBuilder()
         .setColor(0x36393f)
-        .setTitle(`[${username}](${profileUrl}) (${userId})`)
+        .setTitle(displayName)
         .setThumbnail(avatarUrl || null)
         .setDescription(embedDescription);
 
