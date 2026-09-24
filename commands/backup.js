@@ -6,12 +6,29 @@ const BACKUP_ADMIN_ID = '1486503754617323530';
 
 function copyDirectory(source, destination) {
     fs.mkdirSync(destination, { recursive: true });
+    let fileCount = 0;
+    let totalBytes = 0;
     for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
         const sourcePath = path.join(source, entry.name);
         const destinationPath = path.join(destination, entry.name);
-        if (entry.isDirectory()) copyDirectory(sourcePath, destinationPath);
-        else fs.copyFileSync(sourcePath, destinationPath);
+        if (entry.isDirectory()) {
+            const nested = copyDirectory(sourcePath, destinationPath);
+            fileCount += nested.fileCount;
+            totalBytes += nested.totalBytes;
+        } else {
+            fs.copyFileSync(sourcePath, destinationPath);
+            fileCount++;
+            totalBytes += fs.statSync(sourcePath).size;
+        }
     }
+    return { fileCount, totalBytes };
+}
+
+function formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+    return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 module.exports = {
@@ -39,8 +56,14 @@ module.exports = {
                 return interaction.reply({ content: 'The bot data directory does not exist.', flags: MessageFlags.Ephemeral });
             }
 
-            copyDirectory(dataDirectory, backupDirectory);
-            const locationMessage = `Manual backup location:\n\`${backupDirectory}\``;
+            const stats = copyDirectory(dataDirectory, backupDirectory);
+            const locationMessage = [
+                'Manual backup details:',
+                `Location: \`${backupDirectory}\``,
+                `Files copied: **${stats.fileCount}**`,
+                `Data size: **${formatBytes(stats.totalBytes)}**`,
+                `Created: **${new Date().toISOString()}**`
+            ].join('\n');
             const dmSent = await interaction.user.send(locationMessage).then(() => true).catch(() => false);
 
             return interaction.reply({
