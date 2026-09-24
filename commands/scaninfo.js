@@ -23,10 +23,10 @@ module.exports = {
         }
 
         await interaction.deferReply({ ephemeral: true });
-        const result = await client.scanTicketThread(interaction.channel, { force: true });
+        const result = await client.scanTicketThread(interaction.channel, { force: true, interaction });
 
         if (result?.sentCount) {
-            return interaction.editReply(`Scanned this ticket and sent **${result.sentCount}** Roblox info embed${result.sentCount === 1 ? '' : 's'}.`);
+            return interaction.editReply(`Scanned this ticket and sent **${result.sentCount}** private Roblox info embed${result.sentCount === 1 ? '' : 's'}.`);
         }
 
         return interaction.editReply('No valid Roblox usernames or numeric IDs were found in this ticket questionnaire.');

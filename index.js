@@ -4514,7 +4514,7 @@ function getTicketQuestionnaireValues(messages) {
     };
 }
 
-client.scanTicketThread = async (thread, { force = false } = {}) => {
+client.scanTicketThread = async (thread, { force = false, interaction = null } = {}) => {
     if (!thread?.guildId || thread.parentId !== '964450684613328916') return { sentCount: 0 };
     if (!force && (!client.ticketScanEnabled || client.ticketScanHandledThreads.has(thread.id))) return { sentCount: 0 };
 
@@ -4598,7 +4598,11 @@ client.scanTicketThread = async (thread, { force = false } = {}) => {
                 let sent = false;
                 for (let attempt = 1; attempt <= 3; attempt++) {
                     try {
-                        await thread.send(payload);
+                        if (interaction) {
+                            await interaction.followUp({ ...payload, ephemeral: true });
+                        } else {
+                            await thread.send(payload);
+                        }
                         sent = true;
                         break;
                     } catch (err) {
