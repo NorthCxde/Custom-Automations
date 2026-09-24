@@ -103,8 +103,11 @@ async function buildStatsEmbed(client, guild, logs) {
         if (moderatorId) counts.set(moderatorId, (counts.get(moderatorId) || 0) + 1);
     }
 
+    // Overrides are an additive baseline (e.g. lost log data), not a replacement,
+    // so bans logged after the override was set still increment the total.
     for (const [moderatorId, count] of overrides.entries()) {
-        counts.set(String(moderatorId), Number(count) || 0);
+        const key = String(moderatorId);
+        counts.set(key, (counts.get(key) || 0) + (Number(count) || 0));
     }
 
     const totalBans = Array.from(counts.values()).reduce((total, count) => total + count, 0);
