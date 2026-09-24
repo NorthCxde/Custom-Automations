@@ -64,7 +64,18 @@ module.exports = {
                 `Data size: **${formatBytes(stats.totalBytes)}**`,
                 `Created: **${new Date().toISOString()}**`
             ].join('\n');
-            const dmSent = await interaction.user.send(locationMessage).then(() => true).catch(() => false);
+            const statsCommand = interaction.client.slashCommands.get('stats') || require('./stats');
+            const statsEmbed = interaction.guild
+                ? await statsCommand.buildStatsEmbed(
+                    interaction.client,
+                    interaction.guild,
+                    interaction.client.getModLogs(interaction.guild.id)
+                )
+                : null;
+            const dmSent = await interaction.user.send({
+                content: locationMessage,
+                embeds: statsEmbed ? [statsEmbed] : []
+            }).then(() => true).catch(() => false);
 
             return interaction.reply({
                 content: dmSent

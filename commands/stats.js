@@ -152,5 +152,6 @@ module.exports = {
     isBanEntry,
     getCurrentMonthBans,
     getMonthRange,
+    buildStatsEmbed,
     QUOTA_PERCENT
 };
