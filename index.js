@@ -4453,11 +4453,11 @@ client.on('threadCreate', async (thread) => {
 
                 let user = null;
                 try {
-                    user = await resolveUser(usernameValue || userIdValue);
+                    user = await resolveUser(userIdValue || usernameValue);
                 } catch (err) {
-                    if (usernameValue && userIdValue) {
+                    if (userIdValue && usernameValue) {
                         try {
-                            user = await resolveUser(userIdValue);
+                            user = await resolveUser(usernameValue);
                         } catch (fallbackErr) {
                             return;
                         }
