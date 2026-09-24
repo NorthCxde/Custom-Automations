@@ -82,11 +82,17 @@ function formatMonth(year, month) {
     });
 }
 
+function getMonthKey(year, month) {
+    return `${year}-${String(month + 1).padStart(2, '0')}`;
+}
+
 async function buildStatsEmbed(client, guild, logs) {
     const now = new Date();
     const { year, month } = getMonthRange(now);
     const bans = getCurrentMonthBans(logs, now);
     const counts = new Map();
+    const monthKey = getMonthKey(year, month);
+    const overrides = client.statsOverrides?.get(guild.id)?.get(monthKey) || new Map();
 
     for (const moderatorId of client.manualModerators || []) {
         counts.set(String(moderatorId), 0);
@@ -96,6 +102,12 @@ async function buildStatsEmbed(client, guild, logs) {
         const moderatorId = String(entry.moderatorId || '').trim();
         if (moderatorId) counts.set(moderatorId, (counts.get(moderatorId) || 0) + 1);
     }
+
+    for (const [moderatorId, count] of overrides.entries()) {
+        counts.set(String(moderatorId), Number(count) || 0);
+    }
+
+    const totalBans = Array.from(counts.values()).reduce((total, count) => total + count, 0);
 
     const rows = await Promise.all(Array.from(counts.entries()).map(async ([moderatorId, count]) => ({
         moderatorId,
@@ -107,7 +119,7 @@ async function buildStatsEmbed(client, guild, logs) {
 
     const lines = rows.length
         ? rows.map(row => {
-            const percentage = bans.length ? (row.count / bans.length) * 100 : 0;
+            const percentage = totalBans ? (row.count / totalBans) * 100 : 0;
             const indicator = percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
             return `${indicator} <@${row.moderatorId}> — ${row.count} bans (${percentage.toFixed(1)}%)`;
         })
@@ -116,7 +128,7 @@ async function buildStatsEmbed(client, guild, logs) {
     return new EmbedBuilder()
         .setColor(0x36393f)
         .setTitle(`Mod quota standings — ${formatMonth(year, month)}`)
-        .setDescription([`Total bans: **${bans.length}**`, '', ...lines].join('\n'));
+        .setDescription([`Total bans: **${totalBans}**`, '', ...lines].join('\n'));
 }
 
 module.exports = {
@@ -139,5 +151,6 @@ module.exports = {
     },
     isBanEntry,
     getCurrentMonthBans,
+    getMonthRange,
     QUOTA_PERCENT
 };

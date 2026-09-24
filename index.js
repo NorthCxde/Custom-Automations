@@ -92,6 +92,7 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'bank',
     'sell',
     'stats',
+    'statsoverride',
     'duel',
     'daily',
     'work'
@@ -287,6 +288,7 @@ const revokedInvitesFile = path.join(dataPath, "revokedInvites.json");
 const securityFile = path.join(dataPath, "security.json");
 const commandAccessFile = path.join(dataPath, "commandAccess.json");
 const manualModeratorsFile = path.join(dataPath, "manual-moderators.json");
+const statsOverridesFile = path.join(dataPath, "stats-overrides.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -334,6 +336,7 @@ client.revokedInvites = new Map();
 client.securitySettings = new Map();
 client.commandAccessLevels = new Map();
 client.manualModerators = new Set();
+client.statsOverrides = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.ticketScanEnabled = false; // default; can be changed with /ticketscan and is persisted
 client.ticketScanHandledThreads = new Set();
@@ -403,6 +406,48 @@ client.loadManualModerators = () => {
             : []
     );
 };
+
+client.loadStatsOverrides = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(statsOverridesFile)) fs.writeFileSync(statsOverridesFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(statsOverridesFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read stats overrides file:', err);
+    }
+
+    client.statsOverrides.clear();
+    for (const [guildId, months] of Object.entries(parsed || {})) {
+        const monthMap = new Map();
+        for (const [monthKey, users] of Object.entries(months || {})) {
+            const userMap = new Map();
+            for (const [userId, count] of Object.entries(users || {})) {
+                const normalizedCount = Number(count);
+                if (/^\d{17,20}$/.test(userId) && Number.isInteger(normalizedCount) && normalizedCount >= 0) {
+                    userMap.set(userId, normalizedCount);
+                }
+            }
+            if (userMap.size) monthMap.set(monthKey, userMap);
+        }
+        if (monthMap.size) client.statsOverrides.set(guildId, monthMap);
+    }
+};
+
+client.saveStatsOverrides = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    const output = {};
+    for (const [guildId, months] of client.statsOverrides.entries()) {
+        output[guildId] = {};
+        for (const [monthKey, users] of months.entries()) {
+            output[guildId][monthKey] = Object.fromEntries(users.entries());
+        }
+    }
+    fs.writeFileSync(statsOverridesFile, JSON.stringify(output, null, 2), 'utf8');
+};
+
+client.loadStatsOverrides();
 
 client.saveManualModerators = () => {
     fs.writeFileSync(manualModeratorsFile, `${JSON.stringify([...client.manualModerators], null, 2)}\n`, 'utf8');
