@@ -4471,9 +4471,41 @@ client.scanTicketThread = async (thread, { force = false } = {}) => {
         const { resolveUser, fetchInfoData, buildInfoEmbed, buildInfoComponents } = require('./commands/info');
         const resolvedUsers = new Map();
 
-        for (const candidate of [...userIdCandidates, ...usernameCandidates]) {
+        for (const userId of userIdCandidates) {
             try {
-                const user = await resolveUser(candidate);
+                const user = await resolveUser(userId);
+                resolvedUsers.set(String(user.id), user);
+            } catch (err) {
+                continue;
+            }
+        }
+
+        const resolvedUsernameCandidates = new Set();
+        if (usernameCandidates.length) {
+            try {
+                const response = await fetch('https://users.roblox.com/v1/usernames/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usernames: usernameCandidates, excludeBannedUsers: false })
+                });
+                if (!response.ok) throw new Error(`Roblox username lookup failed with status ${response.status}`);
+
+                const result = await response.json();
+                for (const match of result?.data || []) {
+                    if (!match?.id) continue;
+                    const user = await resolveUser(String(match.id));
+                    resolvedUsers.set(String(user.id), user);
+                    resolvedUsernameCandidates.add(String(match.requestedUsername || match.name || '').toLowerCase());
+                }
+            } catch (err) {
+                console.error(`Failed bulk Roblox username lookup for ticket thread ${thread.id}:`, err);
+            }
+        }
+
+        for (const username of usernameCandidates) {
+            if (resolvedUsernameCandidates.has(username.toLowerCase())) continue;
+            try {
+                const user = await resolveUser(username);
                 resolvedUsers.set(String(user.id), user);
             } catch (err) {
                 continue;
