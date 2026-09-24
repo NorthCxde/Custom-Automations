@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 
+const BACKUP_ADMIN_ID = '1486503754617323530';
+
 function copyDirectory(source, destination) {
     fs.mkdirSync(destination, { recursive: true });
     for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
@@ -18,6 +20,13 @@ module.exports = {
         .setName('backup')
         .setDescription('Create an immediate backup of the bot data.'),
     async executeInteraction({ interaction }) {
+        if (interaction.user.id !== BACKUP_ADMIN_ID) {
+            return interaction.reply({
+                content: 'Only the designated backup administrator can use this command.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
         const dataDirectory = path.join(__dirname, '..', 'data');
         const backupRoot = process.env.BACKUP_DIR
             ? path.resolve(process.env.BACKUP_DIR)
@@ -31,8 +40,13 @@ module.exports = {
             }
 
             copyDirectory(dataDirectory, backupDirectory);
+            const locationMessage = `Manual backup location:\n\`${backupDirectory}\``;
+            const dmSent = await interaction.user.send(locationMessage).then(() => true).catch(() => false);
+
             return interaction.reply({
-                content: `Manual backup completed successfully.\nLocation: \`${backupDirectory}\``,
+                content: dmSent
+                    ? 'Manual backup completed successfully.'
+                    : 'Manual backup completed successfully, but I could not send the backup location by DM. Please enable DMs from server members.',
                 flags: MessageFlags.Ephemeral
             });
         } catch (error) {
