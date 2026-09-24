@@ -4438,6 +4438,33 @@ function isTicketQuestionnaireMessage(message) {
         && /what is the user id of the exploiter/i.test(text);
 }
 
+function getTicketQuestionnaireValues(messages) {
+    const usernames = [];
+    const userIds = [];
+
+    for (const message of messages) {
+        for (const embed of message?.embeds || []) {
+            for (const field of embed.fields || []) {
+                const fieldName = String(field.name || '');
+                const fieldValue = String(field.value || '').trim();
+                if (!fieldValue) continue;
+
+                if (/what is the roblox username of the exploiter/i.test(fieldName)) {
+                    usernames.push(...fieldValue.split(/[\s,]+/));
+                }
+                if (/what is the user id of the exploiter/i.test(fieldName)) {
+                    userIds.push(...(fieldValue.match(/\d+/g) || []));
+                }
+            }
+        }
+    }
+
+    return {
+        usernames: [...new Set(usernames.map(value => value.replace(/^@/, '').trim()).filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value)))],
+        userIds: [...new Set(userIds.map(String))]
+    };
+}
+
 client.scanTicketThread = async (thread, { force = false } = {}) => {
     if (!thread?.guildId || thread.parentId !== '964450684613328916') return { sentCount: 0 };
     if (!force && (!client.ticketScanEnabled || client.ticketScanHandledThreads.has(thread.id))) return { sentCount: 0 };
@@ -4454,12 +4481,17 @@ client.scanTicketThread = async (thread, { force = false } = {}) => {
         if (!ticketContent) return { sentCount: 0 };
 
         const parsed = parseTicketThreadContent(ticketContent);
+        const questionnaireValues = getTicketQuestionnaireValues(questionnaireMessages);
         const usernameValue = parsed.username ? String(parsed.username).trim() : null;
         const reportedUserId = parsed.userId ? String(parsed.userId).trim() : null;
-        const userIdCandidates = reportedUserId?.match(/\d+/g) || [];
-        const usernameCandidates = usernameValue
-            ? usernameValue.split(/[\s,]+/).map(value => value.replace(/^@/, '').trim()).filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value))
-            : [];
+        const userIdCandidates = questionnaireValues.userIds.length
+            ? questionnaireValues.userIds
+            : (reportedUserId?.match(/\d+/g) || []);
+        const usernameCandidates = questionnaireValues.usernames.length
+            ? questionnaireValues.usernames
+            : (usernameValue
+                ? usernameValue.split(/[\s,]+/).map(value => value.replace(/^@/, '').trim()).filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value))
+                : []);
 
         if (!usernameCandidates.length && !userIdCandidates.length) return { sentCount: 0 };
 
