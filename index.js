@@ -4422,21 +4422,32 @@ function getTicketMessageSearchText(message) {
     const parts = [message?.content || ''];
 
     for (const embed of message?.embeds || []) {
-        parts.push(embed.title || '', embed.description || '', embed.author?.name || '', embed.footer?.text || '');
-        for (const field of embed.fields || []) {
-            parts.push(field.name || '', field.value || '');
-        }
+        parts.push(getTicketEmbedSearchText(embed));
     }
 
     return parts.filter(Boolean).join('\n');
 }
 
+function getTicketEmbedSearchText(embed) {
+    const parts = [embed?.title || '', embed?.description || '', embed?.author?.name || '', embed?.footer?.text || ''];
+    for (const field of embed?.fields || []) {
+        parts.push(field.name || '', field.value || '');
+    }
+    return parts.filter(Boolean).join('\n');
+}
+
+function getTicketQuestionnaireEmbeds(message) {
+    return (message?.embeds || []).filter(embed => {
+        const text = getTicketEmbedSearchText(embed);
+        return /what is the roblox username of the exploiter/i.test(text)
+            && /what is the user id of the exploiter/i.test(text);
+    });
+}
+
 function isTicketQuestionnaireMessage(message) {
     if (message?.author?.id !== TICKET_REPORTS_BOT_ID) return false;
 
-    const text = getTicketMessageSearchText(message);
-    return /what is the roblox username of the exploiter/i.test(text)
-        && /what is the user id of the exploiter/i.test(text);
+    return getTicketQuestionnaireEmbeds(message).length > 0;
 }
 
     function normalizeTicketUsername(value) {
@@ -4457,7 +4468,7 @@ function getTicketQuestionnaireValues(messages) {
     const userIds = [];
 
     for (const message of messages) {
-        for (const embed of message?.embeds || []) {
+        for (const embed of getTicketQuestionnaireEmbeds(message)) {
             for (const field of embed.fields || []) {
                 const fieldName = String(field.name || '');
                 const fieldValue = String(field.value || '').trim();
@@ -4472,19 +4483,21 @@ function getTicketQuestionnaireValues(messages) {
             }
         }
 
-        const lines = getTicketMessageSearchText(message)
-            .replace(/\r/g, '')
-            .split('\n')
-            .map(line => line.trim())
-            .filter(Boolean);
+        for (const embed of getTicketQuestionnaireEmbeds(message)) {
+            const lines = getTicketEmbedSearchText(embed)
+                .replace(/\r/g, '')
+                .split('\n')
+                .map(line => line.trim())
+                .filter(Boolean);
 
-        for (let index = 0; index < lines.length; index++) {
-            const nextLine = lines[index + 1] || '';
-            if (/what is the roblox username of the exploiter/i.test(lines[index])) {
-                usernames.push(...extractTicketUsernames(nextLine));
-            }
-            if (/what is the user id of the exploiter/i.test(lines[index])) {
-                userIds.push(...(nextLine.match(/\d+/g) || []));
+            for (let index = 0; index < lines.length; index++) {
+                const nextLine = lines[index + 1] || '';
+                if (/what is the roblox username of the exploiter/i.test(lines[index])) {
+                    usernames.push(...extractTicketUsernames(nextLine));
+                }
+                if (/what is the user id of the exploiter/i.test(lines[index])) {
+                    userIds.push(...(nextLine.match(/\d+/g) || []));
+                }
             }
         }
     }
