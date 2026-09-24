@@ -2726,7 +2726,8 @@ client.addModLog = (guildId, entry) => {
     client.modLogs.set(guildId, logs);
     client.saveModLogs();
 
-    if (typeof client.logGlobalModerationAudit === 'function') {
+    // Trello blacklist actions are game bans, not Discord server bans, so keep them out of the cross-server audit log.
+    if (newEntry.source !== 'trello_blacklist' && typeof client.logGlobalModerationAudit === 'function') {
         client.logGlobalModerationAudit(guildId, newEntry)
             .catch(err => console.error('[GlobalAudit] Failed to write moderation audit log:', err));
     }
