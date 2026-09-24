@@ -4445,7 +4445,8 @@ client.on('threadCreate', async (thread) => {
                     : getTicketMessageSearchText(await thread.fetchStarterMessage().catch(() => null));
                 const parsed = parseTicketThreadContent(ticketContent);
                 const usernameValue = parsed.username ? String(parsed.username).trim() : null;
-                const userIdValue = parsed.userId ? String(parsed.userId).trim() : null;
+                const reportedUserId = parsed.userId ? String(parsed.userId).trim() : null;
+                const userIdValue = /^\d+$/.test(reportedUserId || '') ? reportedUserId : null;
 
                 if (!usernameValue && !userIdValue) return;
 
