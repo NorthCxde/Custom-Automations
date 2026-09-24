@@ -4435,9 +4435,9 @@ function isTicketQuestionnaireMessage(message) {
         && /what is the user id of the exploiter/i.test(text);
 }
 
-client.scanTicketThread = async (thread) => {
-    if (!thread?.guildId || thread.parentId !== '964450684613328916') return;
-    if (!client.ticketScanEnabled || client.ticketScanHandledThreads.has(thread.id)) return;
+client.scanTicketThread = async (thread, { force = false } = {}) => {
+    if (!thread?.guildId || thread.parentId !== '964450684613328916') return { sentCount: 0 };
+    if (!force && (!client.ticketScanEnabled || client.ticketScanHandledThreads.has(thread.id))) return { sentCount: 0 };
 
     try {
         const messages = await thread.messages.fetch({ limit: 25 }).catch(() => null);
@@ -4448,7 +4448,7 @@ client.scanTicketThread = async (thread) => {
             .map(getTicketMessageSearchText)
             .join('\n');
 
-        if (!ticketContent) return;
+        if (!ticketContent) return { sentCount: 0 };
 
         const parsed = parseTicketThreadContent(ticketContent);
         const usernameValue = parsed.username ? String(parsed.username).trim() : null;
@@ -4458,10 +4458,12 @@ client.scanTicketThread = async (thread) => {
             ? usernameValue.split(/[\s,]+/).map(value => value.replace(/^@/, '').trim()).filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value))
             : [];
 
-        if (!usernameCandidates.length && !userIdCandidates.length) return;
+        if (!usernameCandidates.length && !userIdCandidates.length) return { sentCount: 0 };
 
-        client.ticketScanHandledThreads.add(thread.id);
-        client.saveTicketScanState();
+        if (!force) {
+            client.ticketScanHandledThreads.add(thread.id);
+            client.saveTicketScanState();
+        }
 
         const { resolveUser, fetchInfoData, buildInfoEmbed, buildInfoComponents } = require('./commands/info');
         const resolvedUsers = new Map();
@@ -4475,6 +4477,7 @@ client.scanTicketThread = async (thread) => {
             }
         }
 
+        let sentCount = 0;
         for (const user of resolvedUsers.values()) {
             try {
                 const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, thread.ownerId || '0');
@@ -4496,12 +4499,16 @@ client.scanTicketThread = async (thread) => {
                 }
 
                 if (!sent) continue;
+                sentCount++;
             } catch (err) {
                 console.error(`Failed to send scanned ticket info for Roblox user ${user.id}:`, err);
             }
         }
+
+        return { sentCount };
     } catch (err) {
         console.error(`Failed to scan ticket thread ${thread?.id || 'unknown'}:`, err);
+        return { sentCount: 0 };
     }
 };
 
