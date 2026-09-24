@@ -95,7 +95,8 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'statsoverride',
     'duel',
     'daily',
-    'work'
+    'work',
+    'backup'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
 const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'recentbans', 'quota', 'register']);
