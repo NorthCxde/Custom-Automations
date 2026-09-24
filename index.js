@@ -4535,11 +4535,15 @@ client.scanTicketThread = async (thread, { force = false } = {}) => {
 
                 if (!sent) continue;
                 sentCount++;
+                if (sentCount < resolvedUsers.size) {
+                    await new Promise(resolve => setTimeout(resolve, 1200));
+                }
             } catch (err) {
                 console.error(`Failed to send scanned ticket info for Roblox user ${user.id}:`, err);
             }
         }
 
+        console.log(`Ticket scan ${thread.id}: resolved ${resolvedUsers.size} Roblox user(s), sent ${sentCount} info embed(s).`);
         return { sentCount };
     } catch (err) {
         console.error(`Failed to scan ticket thread ${thread?.id || 'unknown'}:`, err);
