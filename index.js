@@ -4478,10 +4478,24 @@ client.scanTicketThread = async (thread) => {
         for (const user of resolvedUsers.values()) {
             try {
                 const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, thread.ownerId || '0');
-                await thread.send({
+                const payload = {
                     embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards)],
                     components: buildInfoComponents(user.id)
-                });
+                };
+
+                let sent = false;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        await thread.send(payload);
+                        sent = true;
+                        break;
+                    } catch (err) {
+                        if (attempt === 3) throw err;
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+
+                if (!sent) continue;
             } catch (err) {
                 console.error(`Failed to send scanned ticket info for Roblox user ${user.id}:`, err);
             }
