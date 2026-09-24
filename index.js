@@ -4458,9 +4458,12 @@ function isTicketQuestionnaireMessage(message) {
     }
 
     function extractTicketUsernames(value) {
-        return String(value || '')
+        const rawValue = String(value || '')
         .replace(/[\u200B-\u200D\uFEFF]/g, '')
-        .match(/[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*/g) || [];
+            .trim();
+        const explicitUnderscoreNames = rawValue.match(/[A-Za-z0-9]+_[A-Za-z0-9_]+/g) || [];
+        if (explicitUnderscoreNames.length) return explicitUnderscoreNames;
+        return rawValue.match(/[A-Za-z0-9]+/g) || [];
     }
 
 function getTicketQuestionnaireValues(messages) {
