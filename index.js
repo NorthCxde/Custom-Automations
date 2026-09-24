@@ -336,6 +336,7 @@ client.manualModerators = new Set();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.ticketScanEnabled = false; // default; can be changed with /ticketscan and is persisted
 client.ticketScanHandledThreads = new Set();
+client.ticketScanTimers = new Map();
 client.hideCommandState = new Map(); // per-guild set of userIds for deleting their moderation prefix command messages
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
@@ -4583,6 +4584,20 @@ client.scanTicketThread = async (thread, { force = false } = {}) => {
     }
 };
 
+client.scheduleTicketThreadScan = (thread) => {
+    if (!thread?.id || client.ticketScanHandledThreads.has(thread.id)) return;
+
+    const existingTimer = client.ticketScanTimers.get(thread.id);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(async () => {
+        client.ticketScanTimers.delete(thread.id);
+        await client.scanTicketThread(thread);
+    }, 5000);
+
+    client.ticketScanTimers.set(thread.id, timer);
+};
+
 client.on('threadCreate', async (thread) => {
     try {
         if (!thread || thread.joined) return;
@@ -4595,7 +4610,7 @@ client.on('threadCreate', async (thread) => {
         if (!thread?.guildId || !thread.parentId) return;
         if (thread.parentId !== '964450684613328916') return;
         if (!client.ticketScanEnabled) return;
-        setTimeout(() => client.scanTicketThread(thread), 3000);
+        client.scheduleTicketThreadScan(thread);
 
         const roleId = client.getForumPingRoleId(thread.guildId, thread.parentId);
         if (!roleId) return;
@@ -4632,7 +4647,16 @@ client.on('messageCreate', async (message) => {
     if (!message.channel?.isThread?.() || message.channel.parentId !== '964450684613328916') return;
     if (!isTicketQuestionnaireMessage(message)) return;
 
-    await client.scanTicketThread(message.channel);
+    client.scheduleTicketThreadScan(message.channel);
+});
+
+client.on('messageUpdate', async (oldMessage, newMessage) => {
+    const message = newMessage.partial ? await newMessage.fetch().catch(() => null) : newMessage;
+    if (!message?.author?.bot || message.author.id !== TICKET_REPORTS_BOT_ID) return;
+    if (!message.channel?.isThread?.() || message.channel.parentId !== '964450684613328916') return;
+    if (!isTicketQuestionnaireMessage(message)) return;
+
+    client.scheduleTicketThreadScan(message.channel);
 });
 
 client.on('interactionCreate', async (interaction) => {
