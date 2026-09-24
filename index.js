@@ -4441,9 +4441,15 @@ client.scanTicketThread = async (thread) => {
 
     try {
         const messages = await thread.messages.fetch({ limit: 25 }).catch(() => null);
-        const ticketContent = messages
-            ? [...messages.values()].map(getTicketMessageSearchText).join('\n')
-            : getTicketMessageSearchText(await thread.fetchStarterMessage().catch(() => null));
+        const questionnaireMessages = messages
+            ? [...messages.values()].filter(isTicketQuestionnaireMessage)
+            : [];
+        const ticketContent = questionnaireMessages
+            .map(getTicketMessageSearchText)
+            .join('\n');
+
+        if (!ticketContent) return;
+
         const parsed = parseTicketThreadContent(ticketContent);
         const usernameValue = parsed.username ? String(parsed.username).trim() : null;
         const reportedUserId = parsed.userId ? String(parsed.userId).trim() : null;
