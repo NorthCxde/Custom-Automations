@@ -27,7 +27,27 @@ async function resolveUser(input) {
     const value = String(input || '').trim();
     if (!value) throw new Error('A Roblox username or user ID is required.');
 
-    if (/^\d+$/.test(value)) {
+    const isNumeric = /^\d+$/.test(value);
+
+    if (isNumeric) {
+        try {
+            const usernameResult = await fetchJson(`${ROBLOX_USERS_API}/usernames/users`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ usernames: [value], excludeBannedUsers: false })
+            });
+
+            const usernameMatch = usernameResult?.data?.find(user =>
+                typeof user?.name === 'string' && user.name.toLowerCase() === value.toLowerCase()
+            );
+
+            if (usernameMatch?.id) {
+                return fetchJson(`${ROBLOX_USERS_API}/users/${usernameMatch.id}`);
+            }
+        } catch (error) {
+            // Fall through to numeric ID lookup if the username endpoint rejects the input.
+        }
+
         return fetchJson(`${ROBLOX_USERS_API}/users/${value}`);
     }
 
