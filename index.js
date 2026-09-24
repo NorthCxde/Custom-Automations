@@ -316,6 +316,7 @@ client.tempBanTimers = new Map();
 client.afkStates = new Map();
 client.afkSetCooldowns = new Map();
 client.afkUserSettings = new Map();
+client.processedMessageIds = new Set();
 client.entryRoles = new Map();
 client.infractionRules = new Map();
 client.modStatsOverrides = new Map();
@@ -6571,6 +6572,13 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
 // Fallback: also catch boost system messages directly via messageCreate
 client.on('messageCreate', async (message) => {
+    if (!message?.id || client.processedMessageIds.has(message.id)) return;
+    client.processedMessageIds.add(message.id);
+    if (client.processedMessageIds.size > 10000) {
+        const oldestMessageId = client.processedMessageIds.values().next().value;
+        client.processedMessageIds.delete(oldestMessageId);
+    }
+
     if (BOOST_MESSAGE_TYPES.has(message.type) && message.guild) {
         const boostChannelId = client.boostChannels.get(message.guild.id);
         if (boostChannelId && message.channel.id === boostChannelId) {
