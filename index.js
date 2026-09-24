@@ -4458,6 +4458,22 @@ function getTicketQuestionnaireValues(messages) {
                 }
             }
         }
+
+        const lines = getTicketMessageSearchText(message)
+            .replace(/\r/g, '')
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean);
+
+        for (let index = 0; index < lines.length; index++) {
+            const nextLine = lines[index + 1] || '';
+            if (/what is the roblox username of the exploiter/i.test(lines[index])) {
+                usernames.push(...nextLine.split(/[\s,]+/));
+            }
+            if (/what is the user id of the exploiter/i.test(lines[index])) {
+                userIds.push(...(nextLine.match(/\d+/g) || []));
+            }
+        }
     }
 
     return {
@@ -4481,18 +4497,9 @@ client.scanTicketThread = async (thread, { force = false } = {}) => {
 
         if (!ticketContent) return { sentCount: 0 };
 
-        const parsed = parseTicketThreadContent(ticketContent);
         const questionnaireValues = getTicketQuestionnaireValues(questionnaireMessages);
-        const usernameValue = parsed.username ? String(parsed.username).trim() : null;
-        const reportedUserId = parsed.userId ? String(parsed.userId).trim() : null;
-        const userIdCandidates = questionnaireValues.userIds.length
-            ? questionnaireValues.userIds
-            : (reportedUserId?.match(/\d+/g) || []);
-        const usernameCandidates = questionnaireValues.usernames.length
-            ? questionnaireValues.usernames
-            : (usernameValue
-                ? usernameValue.split(/[\s,]+/).map(value => value.replace(/^@/, '').trim()).filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value))
-                : []);
+        const userIdCandidates = questionnaireValues.userIds;
+        const usernameCandidates = questionnaireValues.usernames;
 
         if (!usernameCandidates.length && !userIdCandidates.length) return { sentCount: 0 };
 
@@ -4593,7 +4600,7 @@ client.scheduleTicketThreadScan = (thread) => {
     const timer = setTimeout(async () => {
         client.ticketScanTimers.delete(thread.id);
         await client.scanTicketThread(thread);
-    }, 5000);
+    }, 3000);
 
     client.ticketScanTimers.set(thread.id, timer);
 };
@@ -4644,15 +4651,6 @@ client.on('threadCreate', async (thread) => {
 client.on('messageCreate', async (message) => {
     if (!message?.author?.bot || message.author.id === client.user?.id) return;
     if (message.author.id !== TICKET_REPORTS_BOT_ID) return;
-    if (!message.channel?.isThread?.() || message.channel.parentId !== '964450684613328916') return;
-    if (!isTicketQuestionnaireMessage(message)) return;
-
-    client.scheduleTicketThreadScan(message.channel);
-});
-
-client.on('messageUpdate', async (oldMessage, newMessage) => {
-    const message = newMessage.partial ? await newMessage.fetch().catch(() => null) : newMessage;
-    if (!message?.author?.bot || message.author.id !== TICKET_REPORTS_BOT_ID) return;
     if (!message.channel?.isThread?.() || message.channel.parentId !== '964450684613328916') return;
     if (!isTicketQuestionnaireMessage(message)) return;
 
