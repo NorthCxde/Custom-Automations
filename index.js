@@ -4467,8 +4467,6 @@ client.scanTicketThread = async (thread) => {
         const resolvedUsers = new Map();
 
         for (const candidate of [...userIdCandidates, ...usernameCandidates]) {
-            if (resolvedUsers.size >= 2) break;
-
             try {
                 const user = await resolveUser(candidate);
                 resolvedUsers.set(String(user.id), user);
