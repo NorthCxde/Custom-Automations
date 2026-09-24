@@ -4453,6 +4453,7 @@ function isTicketQuestionnaireMessage(message) {
     function normalizeTicketUsername(value) {
         return String(value || '')
         .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            .replace(/\\_/g, '_')
         .replace(/^[@`*_~<>()\[\]{}]+|[@`*_~<>()\[\]{}.,!?]+$/g, '')
         .trim();
     }
@@ -4460,6 +4461,7 @@ function isTicketQuestionnaireMessage(message) {
     function extractTicketUsernames(value) {
         const rawValue = String(value || '')
         .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            .replace(/\\_/g, '_')
             .trim();
         const explicitUnderscoreNames = rawValue.match(/[A-Za-z0-9]+_[A-Za-z0-9_]+/g) || [];
         if (explicitUnderscoreNames.length) return explicitUnderscoreNames;
