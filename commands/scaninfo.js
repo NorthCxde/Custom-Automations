@@ -23,7 +23,11 @@ module.exports = {
         }
 
         await interaction.deferReply({ ephemeral: true });
-        const result = await client.scanTicketThread(interaction.channel, { force: true, interaction });
+        const result = await client.scanTicketThread(interaction.channel, {
+            force: true,
+            interaction,
+            trelloUserId: interaction.user.id
+        });
 
         if (result?.sentCount) {
             return interaction.editReply(`Scanned this ticket and sent **${result.sentCount}** private Roblox info embed${result.sentCount === 1 ? '' : 's'}.`);

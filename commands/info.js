@@ -157,7 +157,7 @@ function formatDueCountdown(value) {
     return `Ends <t:${timestamp}:R>`;
 }
 
-function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
+function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = [], { showTrelloCards = true } = {}) {
     const username = String(user.name || 'Unknown');
     const displayName = String(user.displayName || '').trim();
     const titleName = displayName && displayName !== username ? `${displayName} (@${username})` : username;
@@ -187,17 +187,18 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = []) {
         profileDescription,
         '',
         '**Game Activity**',
-        gameActivity,
-        '',
-        '**Trello Cards**',
-        trelloCardLines
+        gameActivity
     ].join('\n');
+
+    const description = showTrelloCards
+        ? `${embedDescription}\n\n**Trello Cards**\n${trelloCardLines}`
+        : embedDescription;
 
     const embed = new EmbedBuilder()
         .setColor(0x36393f)
         .setTitle(titleName)
         .setThumbnail(avatarUrl || null)
-        .setDescription(embedDescription);
+        .setDescription(description);
 
     return embed;
 }
