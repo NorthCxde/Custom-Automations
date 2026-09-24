@@ -266,6 +266,7 @@ const modLogsFile = path.join(dataPath, "modlogs.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
 const contentReactChannelFile = path.join(dataPath, "contentreactchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
+const ticketScanStateFile = path.join(dataPath, "ticket-scan-state.json");
 const hideCommandStateFile = path.join(dataPath, "hidecommand-state.json");
 const autorespondersFile = path.join(dataPath, "autoresponders.json");
 const automodFile = path.join(dataPath, "automod.json");
@@ -332,6 +333,8 @@ client.securitySettings = new Map();
 client.commandAccessLevels = new Map();
 client.manualModerators = new Set();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
+client.ticketScanEnabled = false; // default; can be changed with /ticketscan and is persisted
+client.ticketScanHandledThreads = new Set();
 client.hideCommandState = new Map(); // per-guild set of userIds for deleting their moderation prefix command messages
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
@@ -757,6 +760,31 @@ client.savePrefixCommandState = () => {
         fs.mkdirSync(dataPath, { recursive: true });
     }
     fs.writeFileSync(prefixStateFile, JSON.stringify({ enabled: Boolean(client.prefixCommandsEnabled) }, null, 2), 'utf8');
+};
+
+client.loadTicketScanState = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    if (!fs.existsSync(ticketScanStateFile)) {
+        fs.writeFileSync(ticketScanStateFile, JSON.stringify({ enabled: false }, null, 2), 'utf8');
+    }
+
+    let parsed = { enabled: false };
+    try {
+        parsed = JSON.parse(fs.readFileSync(ticketScanStateFile, 'utf8') || '{"enabled":false}');
+    } catch (err) {
+        console.error('Failed to read ticket scan state file:', err);
+    }
+
+    client.ticketScanEnabled = Boolean(parsed.enabled);
+};
+
+client.saveTicketScanState = () => {
+    if (!fs.existsSync(dataPath)) {
+        fs.mkdirSync(dataPath, { recursive: true });
+    }
+    fs.writeFileSync(ticketScanStateFile, JSON.stringify({ enabled: Boolean(client.ticketScanEnabled) }, null, 2), 'utf8');
 };
 
 client.loadHideCommandState = () => {
@@ -4017,6 +4045,7 @@ client.loadModLogs();
 client.loadBoostChannels();
 client.loadContentReactChannels();
 client.loadPrefixCommandState();
+client.loadTicketScanState();
 client.loadHideCommandState();
 client.loadAutoresponders();
 client.loadAutomodRules();
@@ -4334,6 +4363,51 @@ client.on('inviteDelete', async (invite) => {
     existing.delete(invite.code);
 });
 
+function parseTicketThreadContent(content) {
+    if (!content || typeof content !== 'string') return { username: null, userId: null, game: null };
+
+    const lines = content
+        .replace(/\r/g, '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+
+    let username = null;
+    let userId = null;
+    let game = null;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (!username && /what is the roblox username of the exploiter/i.test(line)) {
+            const next = lines[i + 1] || '';
+            username = String(next || '').replace(/^[:\-]\s*/, '').trim();
+        }
+
+        if (!userId && /what is the user id of the exploiter/i.test(line)) {
+            const next = lines[i + 1] || '';
+            userId = String(next || '').replace(/^[:\-]\s*/, '').trim();
+        }
+
+        if (!game && /what game did this happen on/i.test(line)) {
+            const next = lines[i + 1] || '';
+            game = String(next || '').replace(/^[:\-]\s*/, '').trim();
+        }
+    }
+
+    if (!username && content) {
+        const usernameMatch = content.match(/Roblox Username\s*[:\-]?\s*([^\n]+)/i);
+        if (usernameMatch?.[1]) username = usernameMatch[1].trim();
+    }
+
+    if (!userId && content) {
+        const userIdMatch = content.match(/User ID\s*[:\-]?\s*(\d+)/i);
+        if (userIdMatch?.[1]) userId = userIdMatch[1].trim();
+    }
+
+    return { username: username || null, userId: userId || null, game: game || null };
+}
+
 client.on('threadCreate', async (thread) => {
     try {
         if (!thread || thread.joined) return;
@@ -4344,6 +4418,49 @@ client.on('threadCreate', async (thread) => {
 
     try {
         if (!thread?.guildId || !thread.parentId) return;
+        if (thread.parentId !== '964450684613328916') return;
+        if (!client.ticketScanEnabled) return;
+        if (client.ticketScanHandledThreads.has(thread.id)) return;
+
+        client.ticketScanHandledThreads.add(thread.id);
+
+        setTimeout(async () => {
+            try {
+                const starterMessage = await thread.fetchStarterMessage().catch(() => null);
+                const ticketContent = starterMessage?.content || '';
+                const parsed = parseTicketThreadContent(ticketContent);
+                const usernameValue = parsed.username ? String(parsed.username).trim() : null;
+                const userIdValue = parsed.userId ? String(parsed.userId).trim() : null;
+
+                if (!usernameValue && !userIdValue) return;
+
+                const { resolveUser, fetchInfoData, buildInfoEmbed, buildInfoComponents } = require('./commands/info');
+
+                let user = null;
+                try {
+                    user = await resolveUser(usernameValue || userIdValue);
+                } catch (err) {
+                    if (usernameValue && userIdValue) {
+                        try {
+                            user = await resolveUser(userIdValue);
+                        } catch (fallbackErr) {
+                            return;
+                        }
+                    } else {
+                        return;
+                    }
+                }
+
+                const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, thread.ownerId || '0');
+                await thread.send({
+                    embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards)],
+                    components: buildInfoComponents(user.id)
+                });
+            } catch (err) {
+                console.error(`Failed to scan ticket thread ${thread?.id || 'unknown'}:`, err);
+            }
+        }, 2000);
+
         const roleId = client.getForumPingRoleId(thread.guildId, thread.parentId);
         if (!roleId) return;
 

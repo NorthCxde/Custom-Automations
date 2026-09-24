@@ -261,6 +261,7 @@ module.exports = {
             return interaction.editReply({ content: message });
         }
     },
+    resolveUser,
     fetchInfoData,
     buildInfoEmbed,
     buildInfoComponents,
