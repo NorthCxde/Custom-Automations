@@ -4563,7 +4563,9 @@ function getTicketQuestionnaireValues(messages) {
 }
 
 client.scanTicketThread = async (thread, { force = false, interaction = null, trelloUserId = null } = {}) => {
-    if (!thread?.guildId || thread.parentId !== '964450684613328916') return { sentCount: 0 };
+    const isAutomaticTicket = thread?.parentId === '964450684613328916';
+    const isWhitelistedScanThread = thread?.parentId === '1406849874925719583';
+    if (!thread?.guildId || (!isAutomaticTicket && !(force && isWhitelistedScanThread))) return { sentCount: 0 };
     if (!force && (!client.ticketScanEnabled || client.ticketScanHandledThreads.has(thread.id))) return { sentCount: 0 };
 
     try {

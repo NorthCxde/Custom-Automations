@@ -11,10 +11,11 @@ module.exports = {
     async executeInteraction({ client, interaction }) {
         const isTicketThread = interaction.channel?.isThread?.()
             && interaction.channel.parentId === TICKET_PARENT_CHANNEL_ID;
-        const isWhitelistedChannel = interaction.channelId === SCANINFO_WHITELIST_CHANNEL_ID;
+        const isWhitelistedChannel = interaction.channelId === SCANINFO_WHITELIST_CHANNEL_ID
+            || (interaction.channel?.isThread?.() && interaction.channel.parentId === SCANINFO_WHITELIST_CHANNEL_ID);
         if (!isTicketThread && !isWhitelistedChannel) {
             return interaction.reply({
-                content: 'Use this command inside an exploit-report ticket thread or the approved scan channel.',
+                content: 'Use this command inside an exploiter report ticket.',
                 ephemeral: true
             });
         }
