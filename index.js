@@ -4463,9 +4463,10 @@ function isTicketQuestionnaireMessage(message) {
         .replace(/[\u200B-\u200D\uFEFF]/g, '')
             .replace(/\\_/g, '_')
             .trim();
-        const explicitUnderscoreNames = rawValue.match(/[A-Za-z0-9]+_[A-Za-z0-9_]+/g) || [];
-        if (explicitUnderscoreNames.length) return explicitUnderscoreNames;
-        return rawValue.match(/[A-Za-z0-9]+/g) || [];
+        return rawValue
+            .split(/[\s,]+/)
+            .map(normalizeTicketUsername)
+            .filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value));
     }
 
 function getTicketQuestionnaireValues(messages) {
