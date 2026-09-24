@@ -4439,6 +4439,13 @@ function isTicketQuestionnaireMessage(message) {
         && /what is the user id of the exploiter/i.test(text);
 }
 
+    function normalizeTicketUsername(value) {
+        return String(value || '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/^[@`*_~<>()\[\]{}]+|[@`*_~<>()\[\]{}.,!?]+$/g, '')
+        .trim();
+    }
+
 function getTicketQuestionnaireValues(messages) {
     const usernames = [];
     const userIds = [];
@@ -4477,7 +4484,7 @@ function getTicketQuestionnaireValues(messages) {
     }
 
     return {
-        usernames: [...new Set(usernames.map(value => value.replace(/^@/, '').trim()).filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value)))],
+        usernames: [...new Set(usernames.map(normalizeTicketUsername).filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value)))],
         userIds: [...new Set(userIds.map(String))]
     };
 }
@@ -4510,6 +4517,8 @@ client.scanTicketThread = async (thread, { force = false } = {}) => {
 
         const { resolveUser, fetchInfoData, buildInfoEmbed, buildInfoComponents } = require('./commands/info');
         const resolvedUsers = new Map();
+
+        console.log(`Ticket scan ${thread.id}: username candidates [${usernameCandidates.join(', ')}], ID candidates [${userIdCandidates.join(', ')}].`);
 
         for (const userId of userIdCandidates) {
             try {
@@ -4583,7 +4592,7 @@ client.scanTicketThread = async (thread, { force = false } = {}) => {
             }
         }
 
-        console.log(`Ticket scan ${thread.id}: resolved ${resolvedUsers.size} Roblox user(s), sent ${sentCount} info embed(s).`);
+        console.log(`Ticket scan ${thread.id}: resolved [${[...resolvedUsers.values()].map(user => `${user.name}:${user.id}`).join(', ')}], sent ${sentCount} info embed(s).`);
         return { sentCount };
     } catch (err) {
         console.error(`Failed to scan ticket thread ${thread?.id || 'unknown'}:`, err);
