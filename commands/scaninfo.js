@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 
 const TICKET_PARENT_CHANNEL_ID = '964450684613328916';
+const SCANINFO_WHITELIST_CHANNEL_ID = '1406849874925719583';
 
 module.exports = {
     name: 'scaninfo',
@@ -8,9 +9,12 @@ module.exports = {
         .setName('scaninfo')
         .setDescription('Scan this ticket for Roblox user information.'),
     async executeInteraction({ client, interaction }) {
-        if (!interaction.channel?.isThread?.() || interaction.channel.parentId !== TICKET_PARENT_CHANNEL_ID) {
+        const isTicketThread = interaction.channel?.isThread?.()
+            && interaction.channel.parentId === TICKET_PARENT_CHANNEL_ID;
+        const isWhitelistedChannel = interaction.channelId === SCANINFO_WHITELIST_CHANNEL_ID;
+        if (!isTicketThread && !isWhitelistedChannel) {
             return interaction.reply({
-                content: 'Use this command inside an exploit-report ticket thread.',
+                content: 'Use this command inside an exploit-report ticket thread or the approved scan channel.',
                 ephemeral: true
             });
         }
