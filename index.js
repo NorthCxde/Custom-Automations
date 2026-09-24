@@ -44,6 +44,7 @@ if (envToken && configToken && envToken !== configToken) {
 }
 
 const prefix = "?";
+const TICKET_REPORTS_BOT_ID = '1325579039888511056';
 const HARD_CODED_ADMINS = [
     // Put your user IDs here. Only these users will be able to see /perms and /logs.
     '1486503754617323530',
@@ -4430,6 +4431,8 @@ function getTicketMessageSearchText(message) {
 }
 
 function isTicketQuestionnaireMessage(message) {
+    if (message?.author?.id !== TICKET_REPORTS_BOT_ID) return false;
+
     const text = getTicketMessageSearchText(message);
     return /what is the roblox username of the exploiter/i.test(text)
         && /what is the user id of the exploiter/i.test(text);
@@ -4557,6 +4560,7 @@ client.on('threadCreate', async (thread) => {
 
 client.on('messageCreate', async (message) => {
     if (!message?.author?.bot || message.author.id === client.user?.id) return;
+    if (message.author.id !== TICKET_REPORTS_BOT_ID) return;
     if (!message.channel?.isThread?.() || message.channel.parentId !== '964450684613328916') return;
     if (!isTicketQuestionnaireMessage(message)) return;
 
