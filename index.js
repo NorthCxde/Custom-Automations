@@ -4421,6 +4421,51 @@ function getTicketMessageSearchText(message) {
     return parts.filter(Boolean).join('\n');
 }
 
+client.scanTicketThread = async (thread) => {
+    if (!thread?.guildId || thread.parentId !== '964450684613328916') return;
+    if (!client.ticketScanEnabled || client.ticketScanHandledThreads.has(thread.id)) return;
+
+    try {
+        const messages = await thread.messages.fetch({ limit: 25 }).catch(() => null);
+        const ticketContent = messages
+            ? [...messages.values()].map(getTicketMessageSearchText).join('\n')
+            : getTicketMessageSearchText(await thread.fetchStarterMessage().catch(() => null));
+        const parsed = parseTicketThreadContent(ticketContent);
+        const usernameValue = parsed.username ? String(parsed.username).trim() : null;
+        const reportedUserId = parsed.userId ? String(parsed.userId).trim() : null;
+        const userIdValue = /^\d+$/.test(reportedUserId || '') ? reportedUserId : null;
+
+        if (!usernameValue && !userIdValue) return;
+
+    client.ticketScanHandledThreads.add(thread.id);
+
+        const { resolveUser, fetchInfoData, buildInfoEmbed, buildInfoComponents } = require('./commands/info');
+
+        let user = null;
+        try {
+            user = await resolveUser(userIdValue || usernameValue);
+        } catch (err) {
+            if (userIdValue && usernameValue) {
+                try {
+                    user = await resolveUser(usernameValue);
+                } catch (fallbackErr) {
+                    return;
+                }
+            } else {
+                return;
+            }
+        }
+
+        const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, thread.ownerId || '0');
+        await thread.send({
+            embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards)],
+            components: buildInfoComponents(user.id)
+        });
+    } catch (err) {
+        console.error(`Failed to scan ticket thread ${thread?.id || 'unknown'}:`, err);
+    }
+};
+
 client.on('threadCreate', async (thread) => {
     try {
         if (!thread || thread.joined) return;
@@ -4433,49 +4478,7 @@ client.on('threadCreate', async (thread) => {
         if (!thread?.guildId || !thread.parentId) return;
         if (thread.parentId !== '964450684613328916') return;
         if (!client.ticketScanEnabled) return;
-        if (client.ticketScanHandledThreads.has(thread.id)) return;
-
-        client.ticketScanHandledThreads.add(thread.id);
-
-        setTimeout(async () => {
-            try {
-                const messages = await thread.messages.fetch({ limit: 25 }).catch(() => null);
-                const ticketContent = messages
-                    ? [...messages.values()].map(getTicketMessageSearchText).join('\n')
-                    : getTicketMessageSearchText(await thread.fetchStarterMessage().catch(() => null));
-                const parsed = parseTicketThreadContent(ticketContent);
-                const usernameValue = parsed.username ? String(parsed.username).trim() : null;
-                const reportedUserId = parsed.userId ? String(parsed.userId).trim() : null;
-                const userIdValue = /^\d+$/.test(reportedUserId || '') ? reportedUserId : null;
-
-                if (!usernameValue && !userIdValue) return;
-
-                const { resolveUser, fetchInfoData, buildInfoEmbed, buildInfoComponents } = require('./commands/info');
-
-                let user = null;
-                try {
-                    user = await resolveUser(userIdValue || usernameValue);
-                } catch (err) {
-                    if (userIdValue && usernameValue) {
-                        try {
-                            user = await resolveUser(usernameValue);
-                        } catch (fallbackErr) {
-                            return;
-                        }
-                    } else {
-                        return;
-                    }
-                }
-
-                const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, thread.ownerId || '0');
-                await thread.send({
-                    embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards)],
-                    components: buildInfoComponents(user.id)
-                });
-            } catch (err) {
-                console.error(`Failed to scan ticket thread ${thread?.id || 'unknown'}:`, err);
-            }
-        }, 2000);
+        setTimeout(() => client.scanTicketThread(thread), 3000);
 
         const roleId = client.getForumPingRoleId(thread.guildId, thread.parentId);
         if (!roleId) return;
@@ -4504,6 +4507,13 @@ client.on('threadCreate', async (thread) => {
     } catch (err) {
         console.error(`Failed to process forum ping for thread ${thread?.id || 'unknown'}:`, err);
     }
+});
+
+client.on('messageCreate', async (message) => {
+    if (!message?.author?.bot || message.author.id === client.user?.id) return;
+    if (!message.channel?.isThread?.() || message.channel.parentId !== '964450684613328916') return;
+
+    await client.scanTicketThread(message.channel);
 });
 
 client.on('interactionCreate', async (interaction) => {
