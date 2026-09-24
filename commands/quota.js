@@ -1,11 +1,10 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const statsCommand = require('./stats');
 
-function buildQuotaEmbed(user, logs) {
+function buildQuotaEmbed(client, guildId, user, logs) {
     const now = new Date();
-    const bans = statsCommand.getCurrentMonthBans(logs, now);
-    const userBans = bans.filter(entry => String(entry.moderatorId) === String(user.id)).length;
-    const totalBans = bans.length;
+    const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guildId, logs, now);
+    const userBans = counts.get(String(user.id)) || 0;
     const share = totalBans > 0 ? (userBans / totalBans) * 100 : 0;
     const quota = statsCommand.QUOTA_PERCENT;
     const targetBans = Math.floor(totalBans * (quota / 100));
@@ -39,14 +38,14 @@ module.exports = {
         .setDescription('View your current-month moderation quota standing.'),
     async execute({ client, message }) {
         if (!message.guild) return null;
-        return message.reply({ embeds: [buildQuotaEmbed(message.author, client.getModLogs(message.guild.id))] });
+        return message.reply({ embeds: [buildQuotaEmbed(client, message.guild.id, message.author, client.getModLogs(message.guild.id))] });
     },
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server.', flags: MessageFlags.Ephemeral });
         }
         return interaction.reply({
-            embeds: [buildQuotaEmbed(interaction.user, client.getModLogs(interaction.guild.id))],
+            embeds: [buildQuotaEmbed(client, interaction.guild.id, interaction.user, client.getModLogs(interaction.guild.id))],
             flags: MessageFlags.Ephemeral
         });
     }

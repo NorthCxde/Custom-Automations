@@ -426,7 +426,7 @@ client.loadStatsOverrides = () => {
             const userMap = new Map();
             for (const [userId, count] of Object.entries(users || {})) {
                 const normalizedCount = Number(count);
-                if (/^\d{17,20}$/.test(userId) && Number.isInteger(normalizedCount) && normalizedCount >= 0) {
+                if (/^\d{17,20}$/.test(userId) && Number.isInteger(normalizedCount)) {
                     userMap.set(userId, normalizedCount);
                 }
             }

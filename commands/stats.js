@@ -86,13 +86,12 @@ function getMonthKey(year, month) {
     return `${year}-${String(month + 1).padStart(2, '0')}`;
 }
 
-async function buildStatsEmbed(client, guild, logs) {
-    const now = new Date();
-    const { year, month } = getMonthRange(now);
-    const bans = getCurrentMonthBans(logs, now);
+function getModeratorBanCounts(client, guildId, logs, date = new Date()) {
+    const { year, month } = getMonthRange(date);
+    const bans = getCurrentMonthBans(logs, date);
     const counts = new Map();
     const monthKey = getMonthKey(year, month);
-    const overrides = client.statsOverrides?.get(guild.id)?.get(monthKey) || new Map();
+    const overrides = client.statsOverrides?.get(guildId)?.get(monthKey) || new Map();
 
     for (const moderatorId of client.manualModerators || []) {
         counts.set(String(moderatorId), 0);
@@ -103,14 +102,21 @@ async function buildStatsEmbed(client, guild, logs) {
         if (moderatorId) counts.set(moderatorId, (counts.get(moderatorId) || 0) + 1);
     }
 
-    // Overrides are an additive baseline (e.g. lost log data), not a replacement,
-    // so bans logged after the override was set still increment the total.
+    // Overrides store the gap between real logs and the desired total at set-time,
+    // so bans logged after the override was set still increment the total correctly.
     for (const [moderatorId, count] of overrides.entries()) {
         const key = String(moderatorId);
-        counts.set(key, (counts.get(key) || 0) + (Number(count) || 0));
+        counts.set(key, Math.max(0, (counts.get(key) || 0) + (Number(count) || 0)));
     }
 
     const totalBans = Array.from(counts.values()).reduce((total, count) => total + count, 0);
+    return { counts, totalBans };
+}
+
+async function buildStatsEmbed(client, guild, logs) {
+    const now = new Date();
+    const { year, month } = getMonthRange(now);
+    const { counts, totalBans } = getModeratorBanCounts(client, guild.id, logs, now);
 
     const rows = await Promise.all(Array.from(counts.entries()).map(async ([moderatorId, count]) => ({
         moderatorId,
@@ -155,6 +161,7 @@ module.exports = {
     isBanEntry,
     getCurrentMonthBans,
     getMonthRange,
+    getModeratorBanCounts,
     buildStatsEmbed,
     QUOTA_PERCENT
 };

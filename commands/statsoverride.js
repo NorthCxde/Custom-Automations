@@ -40,8 +40,16 @@ module.exports = {
         const guildOverrides = client.statsOverrides.get(interaction.guildId) || new Map();
         const monthOverrides = guildOverrides.get(monthKey) || new Map();
 
-        if (action === 'remove') monthOverrides.delete(moderatorId);
-        else monthOverrides.set(moderatorId, bans);
+        if (action === 'remove') {
+            monthOverrides.delete(moderatorId);
+        } else {
+            // Store the gap between the real logged count and the desired total, so the
+            // override lands on "bans" right now and still grows as new bans are logged.
+            const logs = client.getModLogs(interaction.guildId) || [];
+            const currentRealCount = statsCommand.getCurrentMonthBans(logs)
+                .filter(entry => String(entry.moderatorId || '').trim() === moderatorId).length;
+            monthOverrides.set(moderatorId, bans - currentRealCount);
+        }
 
         if (monthOverrides.size) guildOverrides.set(monthKey, monthOverrides);
         else guildOverrides.delete(monthKey);
