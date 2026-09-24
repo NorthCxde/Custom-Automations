@@ -4408,6 +4408,19 @@ function parseTicketThreadContent(content) {
     return { username: username || null, userId: userId || null, game: game || null };
 }
 
+function getTicketMessageSearchText(message) {
+    const parts = [message?.content || ''];
+
+    for (const embed of message?.embeds || []) {
+        parts.push(embed.title || '', embed.description || '', embed.author?.name || '', embed.footer?.text || '');
+        for (const field of embed.fields || []) {
+            parts.push(field.name || '', field.value || '');
+        }
+    }
+
+    return parts.filter(Boolean).join('\n');
+}
+
 client.on('threadCreate', async (thread) => {
     try {
         if (!thread || thread.joined) return;
@@ -4426,8 +4439,10 @@ client.on('threadCreate', async (thread) => {
 
         setTimeout(async () => {
             try {
-                const starterMessage = await thread.fetchStarterMessage().catch(() => null);
-                const ticketContent = starterMessage?.content || '';
+                const messages = await thread.messages.fetch({ limit: 25 }).catch(() => null);
+                const ticketContent = messages
+                    ? [...messages.values()].map(getTicketMessageSearchText).join('\n')
+                    : getTicketMessageSearchText(await thread.fetchStarterMessage().catch(() => null));
                 const parsed = parseTicketThreadContent(ticketContent);
                 const usernameValue = parsed.username ? String(parsed.username).trim() : null;
                 const userIdValue = parsed.userId ? String(parsed.userId).trim() : null;
