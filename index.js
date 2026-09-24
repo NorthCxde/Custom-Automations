@@ -4446,6 +4446,12 @@ function isTicketQuestionnaireMessage(message) {
         .trim();
     }
 
+    function extractTicketUsernames(value) {
+        return String(value || '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .match(/[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*/g) || [];
+    }
+
 function getTicketQuestionnaireValues(messages) {
     const usernames = [];
     const userIds = [];
@@ -4458,7 +4464,7 @@ function getTicketQuestionnaireValues(messages) {
                 if (!fieldValue) continue;
 
                 if (/what is the roblox username of the exploiter/i.test(fieldName)) {
-                    usernames.push(...fieldValue.split(/[\s,]+/));
+                    usernames.push(...extractTicketUsernames(fieldValue));
                 }
                 if (/what is the user id of the exploiter/i.test(fieldName)) {
                     userIds.push(...(fieldValue.match(/\d+/g) || []));
@@ -4475,7 +4481,7 @@ function getTicketQuestionnaireValues(messages) {
         for (let index = 0; index < lines.length; index++) {
             const nextLine = lines[index + 1] || '';
             if (/what is the roblox username of the exploiter/i.test(lines[index])) {
-                usernames.push(...nextLine.split(/[\s,]+/));
+                usernames.push(...extractTicketUsernames(nextLine));
             }
             if (/what is the user id of the exploiter/i.test(lines[index])) {
                 userIds.push(...(nextLine.match(/\d+/g) || []));
