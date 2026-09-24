@@ -5161,8 +5161,15 @@ client.on('interactionCreate', async (interaction) => {
                 const infoCommand = client.slashCommands.get('info') || require('./commands/info');
                 const infoData = await infoCommand.fetchInfoData(userId, interaction.user.id);
                 const existingCards = infoData.trelloCards || [];
-                if (existingCards.some(card => card.listName.toLowerCase() === listName.toLowerCase())) {
-                    return interaction.editReply(`**${userId}** has already been blacklisted in **${listName}**.`);
+                const existingCard = existingCards.find(card => card.listName.toLowerCase() === listName.toLowerCase());
+                if (existingCard) {
+                    const dueTimestamp = existingCard.due
+                        ? Math.floor(new Date(existingCard.due).getTime() / 1000)
+                        : null;
+                    const endMessage = dueTimestamp
+                        ? ` Ban ends <t:${dueTimestamp}:F> (<t:${dueTimestamp}:R>).`
+                        : ' The ban end date is unavailable.';
+                    return interaction.editReply(`**${userId}** has already been blacklisted in **${listName}**.${endMessage}`);
                 }
 
                 const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
