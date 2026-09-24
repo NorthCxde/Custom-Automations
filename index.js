@@ -770,21 +770,29 @@ client.loadTicketScanState = () => {
         fs.writeFileSync(ticketScanStateFile, JSON.stringify({ enabled: false }, null, 2), 'utf8');
     }
 
-    let parsed = { enabled: false };
+    let parsed = { enabled: false, scannedThreadIds: [] };
     try {
-        parsed = JSON.parse(fs.readFileSync(ticketScanStateFile, 'utf8') || '{"enabled":false}');
+        parsed = JSON.parse(fs.readFileSync(ticketScanStateFile, 'utf8') || '{"enabled":false,"scannedThreadIds":[]}');
     } catch (err) {
         console.error('Failed to read ticket scan state file:', err);
     }
 
     client.ticketScanEnabled = Boolean(parsed.enabled);
+    client.ticketScanHandledThreads = new Set(
+        Array.isArray(parsed.scannedThreadIds)
+            ? parsed.scannedThreadIds.map(String).filter(id => /^\d{17,20}$/.test(id))
+            : []
+    );
 };
 
 client.saveTicketScanState = () => {
     if (!fs.existsSync(dataPath)) {
         fs.mkdirSync(dataPath, { recursive: true });
     }
-    fs.writeFileSync(ticketScanStateFile, JSON.stringify({ enabled: Boolean(client.ticketScanEnabled) }, null, 2), 'utf8');
+    fs.writeFileSync(ticketScanStateFile, JSON.stringify({
+        enabled: Boolean(client.ticketScanEnabled),
+        scannedThreadIds: [...client.ticketScanHandledThreads]
+    }, null, 2), 'utf8');
 };
 
 client.loadHideCommandState = () => {
@@ -4421,6 +4429,12 @@ function getTicketMessageSearchText(message) {
     return parts.filter(Boolean).join('\n');
 }
 
+function isTicketQuestionnaireMessage(message) {
+    const text = getTicketMessageSearchText(message);
+    return /what is the roblox username of the exploiter/i.test(text)
+        && /what is the user id of the exploiter/i.test(text);
+}
+
 client.scanTicketThread = async (thread) => {
     if (!thread?.guildId || thread.parentId !== '964450684613328916') return;
     if (!client.ticketScanEnabled || client.ticketScanHandledThreads.has(thread.id)) return;
@@ -4433,34 +4447,41 @@ client.scanTicketThread = async (thread) => {
         const parsed = parseTicketThreadContent(ticketContent);
         const usernameValue = parsed.username ? String(parsed.username).trim() : null;
         const reportedUserId = parsed.userId ? String(parsed.userId).trim() : null;
-        const userIdValue = /^\d+$/.test(reportedUserId || '') ? reportedUserId : null;
+        const userIdCandidates = reportedUserId?.match(/\d+/g) || [];
+        const usernameCandidates = usernameValue
+            ? usernameValue.split(/[\s,]+/).map(value => value.replace(/^@/, '').trim()).filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value))
+            : [];
 
-        if (!usernameValue && !userIdValue) return;
+        if (!usernameCandidates.length && !userIdCandidates.length) return;
 
-    client.ticketScanHandledThreads.add(thread.id);
+        client.ticketScanHandledThreads.add(thread.id);
+        client.saveTicketScanState();
 
         const { resolveUser, fetchInfoData, buildInfoEmbed, buildInfoComponents } = require('./commands/info');
+        const resolvedUsers = new Map();
 
-        let user = null;
-        try {
-            user = await resolveUser(userIdValue || usernameValue);
-        } catch (err) {
-            if (userIdValue && usernameValue) {
-                try {
-                    user = await resolveUser(usernameValue);
-                } catch (fallbackErr) {
-                    return;
-                }
-            } else {
-                return;
+        for (const candidate of [...userIdCandidates, ...usernameCandidates]) {
+            if (resolvedUsers.size >= 2) break;
+
+            try {
+                const user = await resolveUser(candidate);
+                resolvedUsers.set(String(user.id), user);
+            } catch (err) {
+                continue;
             }
         }
 
-        const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, thread.ownerId || '0');
-        await thread.send({
-            embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards)],
-            components: buildInfoComponents(user.id)
-        });
+        for (const user of resolvedUsers.values()) {
+            try {
+                const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, thread.ownerId || '0');
+                await thread.send({
+                    embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards)],
+                    components: buildInfoComponents(user.id)
+                });
+            } catch (err) {
+                console.error(`Failed to send scanned ticket info for Roblox user ${user.id}:`, err);
+            }
+        }
     } catch (err) {
         console.error(`Failed to scan ticket thread ${thread?.id || 'unknown'}:`, err);
     }
@@ -4512,6 +4533,7 @@ client.on('threadCreate', async (thread) => {
 client.on('messageCreate', async (message) => {
     if (!message?.author?.bot || message.author.id === client.user?.id) return;
     if (!message.channel?.isThread?.() || message.channel.parentId !== '964450684613328916') return;
+    if (!isTicketQuestionnaireMessage(message)) return;
 
     await client.scanTicketThread(message.channel);
 });
