@@ -94,18 +94,22 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date()) {
     const overrides = client.statsOverrides?.get(guildId)?.get(monthKey) || new Map();
 
     for (const moderatorId of client.manualModerators || []) {
-        counts.set(String(moderatorId), 0);
+        const normalizedId = String(moderatorId);
+        if (client.whitelistedModeratorIds?.has(normalizedId)) continue;
+        counts.set(normalizedId, 0);
     }
 
     for (const entry of bans) {
         const moderatorId = String(entry.moderatorId || '').trim();
-        if (moderatorId) counts.set(moderatorId, (counts.get(moderatorId) || 0) + 1);
+        if (!moderatorId || client.whitelistedModeratorIds?.has(moderatorId)) continue;
+        counts.set(moderatorId, (counts.get(moderatorId) || 0) + 1);
     }
 
     // Overrides store the gap between real logs and the desired total at set-time,
     // so bans logged after the override was set still increment the total correctly.
     for (const [moderatorId, count] of overrides.entries()) {
         const key = String(moderatorId);
+        if (client.whitelistedModeratorIds?.has(key)) continue;
         counts.set(key, Math.max(0, (counts.get(key) || 0) + (Number(count) || 0)));
     }
 

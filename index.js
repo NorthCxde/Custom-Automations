@@ -55,6 +55,7 @@ const HARD_CODED_ADMINS = [
     '582686715702018078',
     '1335476704407191563'
 ];
+const MODERATOR_WHITELIST = new Set([...HARD_CODED_ADMINS]);
 const TRUSTED_TRELLO_USER_IDS = new Set([...HARD_CODED_ADMINS]);
 const STATIC_HARD_CODED_ADMINS = [...HARD_CODED_ADMINS];
 const configuredGlobalSlashCommands = Array.isArray(config.globalSlashCommands)
@@ -342,6 +343,7 @@ client.revokedInvites = new Map();
 client.securitySettings = new Map();
 client.commandAccessLevels = new Map();
 client.manualModerators = new Set();
+client.whitelistedModeratorIds = new Set(MODERATOR_WHITELIST);
 client.statsOverrides = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.ticketScanEnabled = false; // default; can be changed with /ticketscan and is persisted
@@ -471,7 +473,9 @@ client.addManualModerator = (userId) => {
 
 client.isManuallyAddedModerator = (userId) => {
     const normalized = String(userId || '').trim();
-    return client.hardcodedAdmins?.has(normalized) || client.manualModerators.has(normalized);
+    return client.hardcodedAdmins?.has(normalized)
+        || client.manualModerators.has(normalized)
+        || client.whitelistedModeratorIds?.has(normalized);
 };
 
 client.applyModeratorLevelPermRoleNames = (names = []) => {
