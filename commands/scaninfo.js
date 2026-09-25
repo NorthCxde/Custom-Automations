@@ -39,8 +39,11 @@ module.exports = {
                 return interaction.editReply('Use this command inside an Appeals thread so the same questionnaire detection applies.');
             }
 
-            await client.scanAppealsThread(interaction.channel);
-            return interaction.editReply('Appeals thread scan completed using the Appeals questionnaire detection.');
+            const result = await client.scanAppealsThread(interaction.channel, { interaction });
+            if (result?.sentCount) {
+                return interaction.editReply(`Appeals thread scan completed and sent **${result.sentCount}** Roblox info embed${result.sentCount === 1 ? '' : 's'}.`);
+            }
+            return interaction.editReply('Appeals thread scan completed using the Appeals questionnaire detection, but no valid Roblox user was found.');
         }
 
         const result = await client.scanTicketThread(interaction.channel, {

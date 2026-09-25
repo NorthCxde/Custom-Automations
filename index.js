@@ -4559,6 +4559,28 @@ function getTicketQuestionnaireValues(messages) {
     const userIds = [];
 
     for (const message of messages) {
+        const plainLines = String(message?.content || '')
+            .replace(/\r/g, '')
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean);
+
+        for (let index = 0; index < plainLines.length; index++) {
+            const line = plainLines[index];
+            const nextLine = plainLines[index + 1] || '';
+            if (/what is the roblox username of the exploiter/i.test(line)) {
+                usernames.push(...extractTicketUsernames(nextLine));
+            }
+            if (/what is the user id of the exploiter/i.test(line)) {
+                const numericMatches = nextLine.match(/\d+/g) || [];
+                if (numericMatches.length) {
+                    userIds.push(...numericMatches);
+                } else {
+                    usernames.push(...extractTicketUsernames(nextLine));
+                }
+            }
+        }
+
         for (const embed of getTicketQuestionnaireEmbeds(message)) {
             for (const field of embed.fields || []) {
                 const fieldName = String(field.name || '');
@@ -4751,6 +4773,26 @@ function getAppealsQuestionnaireValues(messages) {
     const usernames = [];
     const userIds = [];
     for (const message of messages) {
+        const plainLines = String(message?.content || '')
+            .replace(/\r/g, '')
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean);
+
+        for (let index = 0; index < plainLines.length; index++) {
+            const line = plainLines[index];
+            const nextLine = plainLines[index + 1] || '';
+            if (/what is your roblox username/i.test(line)) usernames.push(...extractTicketUsernames(nextLine));
+            if (/what is your roblox user id/i.test(line)) {
+                const numericMatches = nextLine.match(/\d+/g) || [];
+                if (numericMatches.length) {
+                    userIds.push(...numericMatches);
+                } else {
+                    usernames.push(...extractTicketUsernames(nextLine));
+                }
+            }
+        }
+
         for (const embed of message?.embeds || []) {
             const embedText = getTicketEmbedSearchText(embed);
             if (!/what is your roblox username/i.test(embedText) || !/what is your roblox user id/i.test(embedText)) continue;
@@ -4803,19 +4845,19 @@ client.scheduleAppealsThreadScan = (thread) => {
     client.appealsScanTimers.set(thread.id, timer);
 };
 
-client.scanAppealsThread = async (thread) => {
-    if (!thread?.guildId || thread.parentId !== APPEALS_PARENT_CHANNEL_ID) return;
-    if (client.appealsScanHandledThreads.has(thread.id)) return;
+client.scanAppealsThread = async (thread, { interaction = null } = {}) => {
+    if (!thread?.guildId || thread.parentId !== APPEALS_PARENT_CHANNEL_ID) return { sentCount: 0 };
+    if (client.appealsScanHandledThreads.has(thread.id) && !interaction) return { sentCount: 0 };
 
     try {
         const messages = await thread.messages.fetch({ limit: 25 }).catch(() => null);
         const questionnaireMessages = messages
             ? [...messages.values()].filter(isAppealsQuestionnaireMessage)
             : [];
-        if (!questionnaireMessages.length) return;
+        if (!questionnaireMessages.length) return { sentCount: 0 };
 
         const values = getAppealsQuestionnaireValues(questionnaireMessages);
-        const { resolveUser, fetchInfoData } = require('./commands/info');
+        const { resolveUser, fetchInfoData, buildInfoEmbed, buildInfoComponents } = require('./commands/info');
         const resolvedUsers = new Map();
 
         for (const userId of values.userIds) {
@@ -4838,64 +4880,88 @@ client.scanAppealsThread = async (thread) => {
             }
         }
 
-        const logChannel = await client.channels.fetch(APPEALS_LOG_CHANNEL_ID).catch(() => null);
-        if (!logChannel?.isTextBased?.()) return;
+        if (!resolvedUsers.size) return { sentCount: 0 };
 
+        let sentCount = 0;
         for (const user of resolvedUsers.values()) {
-            const infoData = await fetchInfoData(user.id, APPEALS_TRELLO_USER_ID);
-            const matchingCards = (infoData.trelloCards || []).filter(card =>
-                ['blacklist', 'tb duels blacklist'].includes(String(card.listName || '').trim().toLowerCase())
-            );
-            if (!matchingCards.length) continue;
-
-            const cardLines = matchingCards.map(card => {
-                const due = card.due ? new Date(card.due) : null;
-                const dueTimestamp = due && !Number.isNaN(due.getTime()) ? Math.floor(due.getTime() / 1000) : null;
-                return `• [${card.listName}](${card.url})${dueTimestamp ? ` — Ends <t:${dueTimestamp}:F> (<t:${dueTimestamp}:R>)` : ''}`;
-            }).join('\n');
-            const matchingListNames = new Set(matchingCards.map(card => String(card.listName || '').trim().toLowerCase()));
-            const moderatorLog = (client.getModLogs(thread.guildId) || []).find(entry =>
-                entry?.source === 'trello_blacklist'
-                && String(entry.userId || '') === String(user.id)
-                && matchingListNames.has(String(entry.blacklistType || '').trim().toLowerCase())
-            );
-            const moderatorText = moderatorLog?.moderatorId
-                ? `<@${moderatorLog.moderatorId}> (${moderatorLog.moderatorTag || moderatorLog.moderatorId})`
-                : 'Unknown moderator';
-
-            const logEmbed = new EmbedBuilder()
-                .setColor(0xED4245)
-                .setTitle(`${user.displayName || user.name} (@${user.name})`)
-                .setThumbnail(infoData.avatarUrl || null)
-                .setFooter({ text: `appeal-thread:${thread.id}` })
-                .addFields(
-                    { name: 'Roblox Username', value: user.name, inline: true },
-                    { name: 'Roblox User ID', value: String(user.id), inline: true },
-                    { name: 'Account Created', value: `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:F>`, inline: false },
-                    { name: 'Banned By', value: moderatorText, inline: false },
-                    { name: 'Matching Trello Cards', value: cardLines, inline: false },
-                    { name: 'Status', value: '❌ **Pending**', inline: false },
+            try {
+                const infoData = await fetchInfoData(user.id, interaction?.user?.id || APPEALS_TRELLO_USER_ID);
+                const matchingCards = (infoData.trelloCards || []).filter(card =>
+                    ['blacklist', 'tb duels blacklist'].includes(String(card.listName || '').trim().toLowerCase())
                 );
 
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setLabel('View Appeal')
-                    .setStyle(ButtonStyle.Link)
-                    .setURL(`https://discord.com/channels/${thread.guildId}/${thread.id}`)
-            );
+                if (interaction) {
+                    const payload = {
+                        embeds: [buildInfoEmbed(user, infoData.avatarUrl, infoData.gameActivity, infoData.trelloCards || [], { showTrelloCards: true })],
+                        components: buildInfoComponents(user.id),
+                        ephemeral: true
+                    };
+                    await interaction.followUp(payload);
+                    sentCount++;
+                    continue;
+                }
 
-            await logChannel.send({
-                content: `<@&${APPEALS_LOG_ROLE_ID}>`,
-                allowedMentions: { roles: [APPEALS_LOG_ROLE_ID] },
-                embeds: [logEmbed],
-                components: [row]
-            });
+                if (!matchingCards.length) continue;
+
+                const cardLines = matchingCards.map(card => {
+                    const due = card.due ? new Date(card.due) : null;
+                    const dueTimestamp = due && !Number.isNaN(due.getTime()) ? Math.floor(due.getTime() / 1000) : null;
+                    return `• [${card.listName}](${card.url})${dueTimestamp ? ` — Ends <t:${dueTimestamp}:F> (<t:${dueTimestamp}:R>)` : ''}`;
+                }).join('\n');
+                const matchingListNames = new Set(matchingCards.map(card => String(card.listName || '').trim().toLowerCase()));
+                const moderatorLog = (client.getModLogs(thread.guildId) || []).find(entry =>
+                    entry?.source === 'trello_blacklist'
+                    && String(entry.userId || '') === String(user.id)
+                    && matchingListNames.has(String(entry.blacklistType || '').trim().toLowerCase())
+                );
+                const moderatorText = moderatorLog?.moderatorId
+                    ? `<@${moderatorLog.moderatorId}> (${moderatorLog.moderatorTag || moderatorLog.moderatorId})`
+                    : 'Unknown moderator';
+
+                const logEmbed = new EmbedBuilder()
+                    .setColor(0xED4245)
+                    .setTitle(`${user.displayName || user.name} (@${user.name})`)
+                    .setThumbnail(infoData.avatarUrl || null)
+                    .setFooter({ text: `appeal-thread:${thread.id}` })
+                    .addFields(
+                        { name: 'Roblox Username', value: user.name, inline: true },
+                        { name: 'Roblox User ID', value: String(user.id), inline: true },
+                        { name: 'Account Created', value: `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:F>`, inline: false },
+                        { name: 'Banned By', value: moderatorText, inline: false },
+                        { name: 'Matching Trello Cards', value: cardLines, inline: false },
+                        { name: 'Status', value: '❌ **Pending**', inline: false },
+                    );
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setLabel('View Appeal')
+                        .setStyle(ButtonStyle.Link)
+                        .setURL(`https://discord.com/channels/${thread.guildId}/${thread.id}`)
+                );
+
+                const logChannel = await client.channels.fetch(APPEALS_LOG_CHANNEL_ID).catch(() => null);
+                if (logChannel?.isTextBased?.()) {
+                    await logChannel.send({
+                        content: `<@&${APPEALS_LOG_ROLE_ID}>`,
+                        allowedMentions: { roles: [APPEALS_LOG_ROLE_ID] },
+                        embeds: [logEmbed],
+                        components: [row]
+                    });
+                }
+                sentCount++;
+            } catch (err) {
+                console.error(`Failed to resolve Appeals user ${user?.id || 'unknown'}:`, err);
+            }
         }
 
-        client.appealsScanHandledThreads.add(thread.id);
-        client.saveAppealsScanState();
+        if (!interaction) {
+            client.appealsScanHandledThreads.add(thread.id);
+            client.saveAppealsScanState();
+        }
+        return { sentCount };
     } catch (err) {
         console.error(`Failed to scan Appeals thread ${thread?.id || 'unknown'}:`, err);
+        return { sentCount: 0 };
     }
 };
 
