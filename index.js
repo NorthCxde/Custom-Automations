@@ -4825,6 +4825,15 @@ client.scanAppealsThread = async (thread) => {
                 const dueTimestamp = due && !Number.isNaN(due.getTime()) ? Math.floor(due.getTime() / 1000) : null;
                 return `• [${card.listName}](${card.url})${dueTimestamp ? ` — Ends <t:${dueTimestamp}:F> (<t:${dueTimestamp}:R>)` : ''}`;
             }).join('\n');
+            const matchingListNames = new Set(matchingCards.map(card => String(card.listName || '').trim().toLowerCase()));
+            const moderatorLog = (client.getModLogs(thread.guildId) || []).find(entry =>
+                entry?.source === 'trello_blacklist'
+                && String(entry.userId || '') === String(user.id)
+                && matchingListNames.has(String(entry.blacklistType || '').trim().toLowerCase())
+            );
+            const moderatorText = moderatorLog?.moderatorId
+                ? `<@${moderatorLog.moderatorId}> (${moderatorLog.moderatorTag || moderatorLog.moderatorId})`
+                : 'Unknown moderator';
 
             const logEmbed = new EmbedBuilder()
                 .setColor(0xED4245)
@@ -4834,15 +4843,19 @@ client.scanAppealsThread = async (thread) => {
                     { name: 'Roblox Username', value: user.name, inline: true },
                     { name: 'Roblox User ID', value: String(user.id), inline: true },
                     { name: 'Account Created', value: `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:F>`, inline: false },
+                    { name: 'Banned By', value: moderatorText, inline: false },
                     { name: 'Matching Trello Cards', value: cardLines, inline: false },
-                    { name: 'Appeal Thread', value: `[View appeal thread](https://discord.com/channels/${thread.guildId}/${thread.id})`, inline: false }
                 );
 
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
-                    .setLabel('View Thread')
+                    .setLabel('View Appeal')
                     .setStyle(ButtonStyle.Link)
-                    .setURL(`https://discord.com/channels/${thread.guildId}/${thread.id}`)
+                    .setURL(`https://discord.com/channels/${thread.guildId}/${thread.id}`),
+                new ButtonBuilder()
+                    .setCustomId(`appeal_resolved:${user.id}`)
+                    .setLabel('Resolved')
+                    .setStyle(ButtonStyle.Danger)
             );
 
             await logChannel.send({
@@ -5261,6 +5274,23 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+        if (interaction.customId.startsWith('appeal_resolved:')) {
+            if (!client.isManuallyAddedModerator(interaction.user.id)) {
+                return interaction.reply({
+                    content: 'You must be manually added as a moderator before resolving Appeals logs.',
+                    ephemeral: true
+                });
+            }
+
+            const resolvedEmbed = interaction.message.embeds?.[0]
+                ? EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287)
+                : null;
+            return interaction.update({
+                embeds: resolvedEmbed ? [resolvedEmbed] : [],
+                components: []
+            });
+        }
+
         if (interaction.customId.startsWith('info_blacklist_menu:')) {
             if (!client.isManuallyAddedModerator(interaction.user.id)) {
                 return interaction.reply({ content: 'You must be manually added as a moderator before using this action.', ephemeral: true });
