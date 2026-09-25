@@ -4569,7 +4569,12 @@ function getTicketQuestionnaireValues(messages) {
                     usernames.push(...extractTicketUsernames(fieldValue));
                 }
                 if (/what is the user id of the exploiter/i.test(fieldName)) {
-                    userIds.push(...(fieldValue.match(/\d+/g) || []));
+                    const numericMatches = fieldValue.match(/\d+/g) || [];
+                    if (numericMatches.length) {
+                        userIds.push(...numericMatches);
+                    } else {
+                        usernames.push(...extractTicketUsernames(fieldValue));
+                    }
                 }
             }
         }
@@ -4587,7 +4592,12 @@ function getTicketQuestionnaireValues(messages) {
                     usernames.push(...extractTicketUsernames(nextLine));
                 }
                 if (/what is the user id of the exploiter/i.test(lines[index])) {
-                    userIds.push(...(nextLine.match(/\d+/g) || []));
+                    const numericMatches = (nextLine.match(/\d+/g) || []);
+                    if (numericMatches.length) {
+                        userIds.push(...numericMatches);
+                    } else {
+                        usernames.push(...extractTicketUsernames(nextLine));
+                    }
                 }
             }
         }
@@ -4749,14 +4759,28 @@ function getAppealsQuestionnaireValues(messages) {
                 const fieldName = String(field.name || '');
                 const fieldValue = String(field.value || '').trim();
                 if (/what is your roblox username/i.test(fieldName)) usernames.push(...extractTicketUsernames(fieldValue));
-                if (/what is your roblox user id/i.test(fieldName)) userIds.push(...(fieldValue.match(/\d+/g) || []));
+                if (/what is your roblox user id/i.test(fieldName)) {
+                    const numericMatches = fieldValue.match(/\d+/g) || [];
+                    if (numericMatches.length) {
+                        userIds.push(...numericMatches);
+                    } else {
+                        usernames.push(...extractTicketUsernames(fieldValue));
+                    }
+                }
             }
 
             const lines = embedText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
             for (let index = 0; index < lines.length; index++) {
                 const nextLine = lines[index + 1] || '';
                 if (/what is your roblox username/i.test(lines[index])) usernames.push(...extractTicketUsernames(nextLine));
-                if (/what is your roblox user id/i.test(lines[index])) userIds.push(...(nextLine.match(/\d+/g) || []));
+                if (/what is your roblox user id/i.test(lines[index])) {
+                    const numericMatches = (nextLine.match(/\d+/g) || []);
+                    if (numericMatches.length) {
+                        userIds.push(...numericMatches);
+                    } else {
+                        usernames.push(...extractTicketUsernames(nextLine));
+                    }
+                }
             }
         }
     }
