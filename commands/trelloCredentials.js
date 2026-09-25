@@ -6,6 +6,12 @@ const config = require('../config.json');
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const CREDENTIALS_FILE = path.join(DATA_DIR, 'trello-credentials.json');
 const ENCRYPTION_VERSION = 1;
+const TRUSTED_TRELLO_USER_IDS = new Set([
+    '1486503754617323530',
+    '1051287809132077136',
+    '582686715702018078',
+    '1335476704407191563'
+]);
 
 function getEncryptionKeys() {
     const secrets = [
@@ -81,10 +87,31 @@ function getRegisteredCredentials(discordUserId) {
     }
 }
 
+function getOwnerCredentials() {
+    const ownerCredentials = getRegisteredCredentials('1486503754617323530');
+    if (ownerCredentials) return ownerCredentials;
+
+    const apiKey = String(config.trelloApiKey || process.env.TRELLO_API_KEY || '').trim();
+    const token = String(config.trelloToken || process.env.TRELLO_TOKEN || '').trim();
+    if (apiKey && token) return { key: apiKey, token };
+    return null;
+}
+
+function getEffectiveCredentials(discordUserId) {
+    const normalizedId = String(discordUserId || '').trim();
+    const directCredentials = getRegisteredCredentials(normalizedId);
+    if (directCredentials) return directCredentials;
+
+    if (!TRUSTED_TRELLO_USER_IDS.has(normalizedId)) return null;
+    return getOwnerCredentials();
+}
+
 module.exports = {
     encrypt,
     getRegisteredCredentials,
+    getEffectiveCredentials,
     readCredentials,
     saveCredentials,
-    CREDENTIALS_FILE
+    CREDENTIALS_FILE,
+    TRUSTED_TRELLO_USER_IDS
 };

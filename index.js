@@ -50,12 +50,12 @@ const APPEALS_LOG_CHANNEL_ID = '1553170746539516075';
 const APPEALS_LOG_ROLE_ID = '1553172407341162526';
 const APPEALS_TRELLO_USER_ID = '1486503754617323530';
 const HARD_CODED_ADMINS = [
-    // Put your user IDs here. Only these users will be able to see /perms and /logs.
     '1486503754617323530',
-    '841491704305811496',
-    '1335476704407191563',
-    '582686715702018078'
+    '1051287809132077136',
+    '582686715702018078',
+    '1335476704407191563'
 ];
+const TRUSTED_TRELLO_USER_IDS = new Set([...HARD_CODED_ADMINS]);
 const STATIC_HARD_CODED_ADMINS = [...HARD_CODED_ADMINS];
 const configuredGlobalSlashCommands = Array.isArray(config.globalSlashCommands)
     ? config.globalSlashCommands.map(name => String(name || '').trim().toLowerCase()).filter(Boolean)
@@ -5366,8 +5366,8 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: 'You must be manually added as a moderator before using this action.', ephemeral: true });
             }
             const [, userId, listName] = interaction.customId.split(':');
-            const { getRegisteredCredentials } = require('./commands/trelloCredentials');
-            const credentials = getRegisteredCredentials(interaction.user.id);
+            const { getEffectiveCredentials } = require('./commands/trelloCredentials');
+            const credentials = getEffectiveCredentials(interaction.user.id);
 
             if (!credentials) {
                 return interaction.reply({
@@ -5419,8 +5419,8 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: 'You must be manually added as a moderator before using this action.', ephemeral: true });
             }
             const [, userId, listName] = interaction.customId.split(':');
-            const { getRegisteredCredentials } = require('./commands/trelloCredentials');
-            const credentials = getRegisteredCredentials(interaction.user.id);
+            const { getEffectiveCredentials } = require('./commands/trelloCredentials');
+            const credentials = getEffectiveCredentials(interaction.user.id);
 
             if (!credentials) {
                 return interaction.reply({

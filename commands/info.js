@@ -103,8 +103,8 @@ async function fetchGameActivity(userId) {
 }
 
 async function fetchExistingTrelloCards(userId, discordUserId) {
-    const { getRegisteredCredentials } = require('./trelloCredentials');
-    const credentials = getRegisteredCredentials(discordUserId);
+    const { getEffectiveCredentials } = require('./trelloCredentials');
+    const credentials = getEffectiveCredentials(discordUserId);
     if (!credentials) return [];
 
     const auth = new URLSearchParams({ key: credentials.key, token: credentials.token });
