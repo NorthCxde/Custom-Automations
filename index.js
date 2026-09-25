@@ -45,6 +45,10 @@ if (envToken && configToken && envToken !== configToken) {
 
 const prefix = "?";
 const TICKET_REPORTS_BOT_ID = '1325579039888511056';
+const APPEALS_PARENT_CHANNEL_ID = '1406849439104106677';
+const APPEALS_LOG_CHANNEL_ID = '1553170746539516075';
+const APPEALS_LOG_ROLE_ID = '1553172407341162526';
+const APPEALS_TRELLO_USER_ID = '1486503754617323530';
 const HARD_CODED_ADMINS = [
     // Put your user IDs here. Only these users will be able to see /perms and /logs.
     '1486503754617323530',
@@ -290,6 +294,7 @@ const securityFile = path.join(dataPath, "security.json");
 const commandAccessFile = path.join(dataPath, "commandAccess.json");
 const manualModeratorsFile = path.join(dataPath, "manual-moderators.json");
 const statsOverridesFile = path.join(dataPath, "stats-overrides.json");
+const appealsScanStateFile = path.join(dataPath, "appeals-scan-state.json");
 
 client.allowedRoles = new Map();
 client.logChannels = new Map();
@@ -342,6 +347,8 @@ client.prefixCommandsEnabled = false; // default; can be changed with /enablecom
 client.ticketScanEnabled = false; // default; can be changed with /ticketscan and is persisted
 client.ticketScanHandledThreads = new Set();
 client.ticketScanTimers = new Map();
+client.appealsScanHandledThreads = new Set();
+client.appealsScanTimers = new Map();
 client.hideCommandState = new Map(); // per-guild set of userIds for deleting their moderation prefix command messages
 client.prefixCommandReactionEmojiId = '1356003566925512934'; // Emoji ID for prefix command responses
 client.hardcodedAdmins = new Set(STATIC_HARD_CODED_ADMINS);
@@ -841,6 +848,31 @@ client.saveTicketScanState = () => {
     fs.writeFileSync(ticketScanStateFile, JSON.stringify({
         enabled: Boolean(client.ticketScanEnabled),
         scannedThreadIds: [...client.ticketScanHandledThreads]
+    }, null, 2), 'utf8');
+};
+
+client.loadAppealsScanState = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(appealsScanStateFile)) fs.writeFileSync(appealsScanStateFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(appealsScanStateFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to read Appeals scan state file:', err);
+    }
+
+    client.appealsScanHandledThreads = new Set(
+        Array.isArray(parsed.loggedThreadIds)
+            ? parsed.loggedThreadIds.map(String).filter(id => /^\d{17,20}$/.test(id))
+            : []
+    );
+};
+
+client.saveAppealsScanState = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    fs.writeFileSync(appealsScanStateFile, JSON.stringify({
+        loggedThreadIds: [...client.appealsScanHandledThreads]
     }, null, 2), 'utf8');
 };
 
@@ -4104,6 +4136,7 @@ client.loadBoostChannels();
 client.loadContentReactChannels();
 client.loadPrefixCommandState();
 client.loadTicketScanState();
+client.loadAppealsScanState();
 client.loadHideCommandState();
 client.loadAutoresponders();
 client.loadAutomodRules();
@@ -4692,6 +4725,154 @@ client.scheduleTicketThreadScan = (thread) => {
 
     client.ticketScanTimers.set(thread.id, timer);
 };
+
+function isAppealsQuestionnaireMessage(message) {
+    if (message?.author?.id !== TICKET_REPORTS_BOT_ID) return false;
+    const text = getTicketMessageSearchText(message);
+    return /what is your roblox username/i.test(text)
+        && /what is your roblox user id/i.test(text);
+}
+
+function getAppealsQuestionnaireValues(messages) {
+    const usernames = [];
+    const userIds = [];
+    for (const message of messages) {
+        for (const embed of message?.embeds || []) {
+            const embedText = getTicketEmbedSearchText(embed);
+            if (!/what is your roblox username/i.test(embedText) || !/what is your roblox user id/i.test(embedText)) continue;
+
+            for (const field of embed.fields || []) {
+                const fieldName = String(field.name || '');
+                const fieldValue = String(field.value || '').trim();
+                if (/what is your roblox username/i.test(fieldName)) usernames.push(...extractTicketUsernames(fieldValue));
+                if (/what is your roblox user id/i.test(fieldName)) userIds.push(...(fieldValue.match(/\d+/g) || []));
+            }
+
+            const lines = embedText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+            for (let index = 0; index < lines.length; index++) {
+                const nextLine = lines[index + 1] || '';
+                if (/what is your roblox username/i.test(lines[index])) usernames.push(...extractTicketUsernames(nextLine));
+                if (/what is your roblox user id/i.test(lines[index])) userIds.push(...(nextLine.match(/\d+/g) || []));
+            }
+        }
+    }
+
+    return {
+        usernames: [...new Set(usernames.map(normalizeTicketUsername).filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value)))],
+        userIds: [...new Set(userIds)]
+    };
+}
+
+client.scheduleAppealsThreadScan = (thread) => {
+    if (!thread?.id || client.appealsScanHandledThreads.has(thread.id)) return;
+    const existingTimer = client.appealsScanTimers.get(thread.id);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(async () => {
+        client.appealsScanTimers.delete(thread.id);
+        await client.scanAppealsThread(thread);
+    }, 5000);
+    client.appealsScanTimers.set(thread.id, timer);
+};
+
+client.scanAppealsThread = async (thread) => {
+    if (!thread?.guildId || thread.parentId !== APPEALS_PARENT_CHANNEL_ID) return;
+    if (client.appealsScanHandledThreads.has(thread.id)) return;
+
+    try {
+        const messages = await thread.messages.fetch({ limit: 25 }).catch(() => null);
+        const questionnaireMessages = messages
+            ? [...messages.values()].filter(isAppealsQuestionnaireMessage)
+            : [];
+        if (!questionnaireMessages.length) return;
+
+        const values = getAppealsQuestionnaireValues(questionnaireMessages);
+        const { resolveUser, fetchInfoData } = require('./commands/info');
+        const resolvedUsers = new Map();
+
+        for (const userId of values.userIds) {
+            try {
+                const user = await resolveUser(userId);
+                resolvedUsers.set(String(user.id), user);
+            } catch (err) {
+                continue;
+            }
+        }
+
+        if (!resolvedUsers.size && values.usernames.length) {
+            for (const username of values.usernames) {
+                try {
+                    const user = await resolveUser(username);
+                    resolvedUsers.set(String(user.id), user);
+                } catch (err) {
+                    continue;
+                }
+            }
+        }
+
+        const logChannel = await client.channels.fetch(APPEALS_LOG_CHANNEL_ID).catch(() => null);
+        if (!logChannel?.isTextBased?.()) return;
+
+        for (const user of resolvedUsers.values()) {
+            const infoData = await fetchInfoData(user.id, APPEALS_TRELLO_USER_ID);
+            const matchingCards = (infoData.trelloCards || []).filter(card =>
+                ['blacklist', 'tb duels blacklist'].includes(String(card.listName || '').trim().toLowerCase())
+            );
+            if (!matchingCards.length) continue;
+
+            const cardLines = matchingCards.map(card => {
+                const due = card.due ? new Date(card.due) : null;
+                const dueTimestamp = due && !Number.isNaN(due.getTime()) ? Math.floor(due.getTime() / 1000) : null;
+                return `• [${card.listName}](${card.url})${dueTimestamp ? ` — Ends <t:${dueTimestamp}:F> (<t:${dueTimestamp}:R>)` : ''}`;
+            }).join('\n');
+
+            const logEmbed = new EmbedBuilder()
+                .setColor(0xED4245)
+                .setTitle(`${user.displayName || user.name} (@${user.name})`)
+                .setThumbnail(infoData.avatarUrl || null)
+                .addFields(
+                    { name: 'Roblox Username', value: user.name, inline: true },
+                    { name: 'Roblox User ID', value: String(user.id), inline: true },
+                    { name: 'Account Created', value: `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:F>`, inline: false },
+                    { name: 'Matching Trello Cards', value: cardLines, inline: false },
+                    { name: 'Appeal Thread', value: `[View appeal thread](https://discord.com/channels/${thread.guildId}/${thread.id})`, inline: false }
+                );
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setLabel('View Thread')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(`https://discord.com/channels/${thread.guildId}/${thread.id}`)
+            );
+
+            await logChannel.send({
+                content: `<@&${APPEALS_LOG_ROLE_ID}>`,
+                allowedMentions: { roles: [APPEALS_LOG_ROLE_ID] },
+                embeds: [logEmbed],
+                components: [row]
+            });
+        }
+
+        client.appealsScanHandledThreads.add(thread.id);
+        client.saveAppealsScanState();
+    } catch (err) {
+        console.error(`Failed to scan Appeals thread ${thread?.id || 'unknown'}:`, err);
+    }
+};
+
+client.on('threadCreate', async (thread) => {
+    if (thread?.parentId === APPEALS_PARENT_CHANNEL_ID) {
+        await thread.join().catch(() => null);
+        client.scheduleAppealsThreadScan(thread);
+    }
+});
+
+client.on('messageCreate', async (message) => {
+    if (!message?.author?.bot || message.author.id !== TICKET_REPORTS_BOT_ID) return;
+    if (!message.channel?.isThread?.() || message.channel.parentId !== APPEALS_PARENT_CHANNEL_ID) return;
+    if (!isAppealsQuestionnaireMessage(message)) return;
+    client.scheduleAppealsThreadScan(message.channel);
+});
 
 client.on('threadCreate', async (thread) => {
     try {
