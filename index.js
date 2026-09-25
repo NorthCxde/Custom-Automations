@@ -4839,23 +4839,21 @@ client.scanAppealsThread = async (thread) => {
                 .setColor(0xED4245)
                 .setTitle(`${user.displayName || user.name} (@${user.name})`)
                 .setThumbnail(infoData.avatarUrl || null)
+                .setFooter({ text: `appeal-thread:${thread.id}` })
                 .addFields(
                     { name: 'Roblox Username', value: user.name, inline: true },
                     { name: 'Roblox User ID', value: String(user.id), inline: true },
                     { name: 'Account Created', value: `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:F>`, inline: false },
                     { name: 'Banned By', value: moderatorText, inline: false },
                     { name: 'Matching Trello Cards', value: cardLines, inline: false },
+                    { name: 'Status', value: 'Open', inline: false },
                 );
 
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setLabel('View Appeal')
                     .setStyle(ButtonStyle.Link)
-                    .setURL(`https://discord.com/channels/${thread.guildId}/${thread.id}`),
-                new ButtonBuilder()
-                    .setCustomId(`appeal_resolved:${user.id}`)
-                    .setLabel('Resolved')
-                    .setStyle(ButtonStyle.Danger)
+                    .setURL(`https://discord.com/channels/${thread.guildId}/${thread.id}`)
             );
 
             await logChannel.send({
@@ -4872,6 +4870,32 @@ client.scanAppealsThread = async (thread) => {
         console.error(`Failed to scan Appeals thread ${thread?.id || 'unknown'}:`, err);
     }
 };
+
+client.on('threadUpdate', async (oldThread, newThread) => {
+    if (newThread?.parentId !== APPEALS_PARENT_CHANNEL_ID) return;
+    const wasClosed = Boolean(oldThread?.archived || oldThread?.locked);
+    const isClosed = Boolean(newThread.archived || newThread.locked);
+    if (wasClosed || !isClosed) return;
+
+    try {
+        const logChannel = await client.channels.fetch(APPEALS_LOG_CHANNEL_ID).catch(() => null);
+        if (!logChannel?.isTextBased?.()) return;
+        const messages = await logChannel.messages.fetch({ limit: 100 });
+        const logMessage = messages.find(message =>
+            message.embeds?.some(embed => embed.footer?.text === `appeal-thread:${newThread.id}`)
+        );
+        if (!logMessage?.embeds?.[0]) return;
+
+        const updatedEmbed = EmbedBuilder.from(logMessage.embeds[0])
+            .setColor(0x57F287)
+            .setFields(logMessage.embeds[0].fields.map(field =>
+                field.name === 'Status' ? { ...field, value: 'Resolved' } : field
+            ));
+        await logMessage.edit({ embeds: [updatedEmbed] });
+    } catch (err) {
+        console.error(`Failed to update closed Appeals log for thread ${newThread.id}:`, err);
+    }
+});
 
 client.on('threadCreate', async (thread) => {
     if (thread?.parentId === APPEALS_PARENT_CHANNEL_ID) {
