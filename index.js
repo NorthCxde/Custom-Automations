@@ -4846,7 +4846,7 @@ client.scanAppealsThread = async (thread) => {
                     { name: 'Account Created', value: `<t:${Math.floor(new Date(user.created).getTime() / 1000)}:F>`, inline: false },
                     { name: 'Banned By', value: moderatorText, inline: false },
                     { name: 'Matching Trello Cards', value: cardLines, inline: false },
-                    { name: 'Status', value: 'Open', inline: false },
+                    { name: 'Status', value: '❌ **Pending**', inline: false },
                 );
 
             const row = new ActionRowBuilder().addComponents(
@@ -4889,7 +4889,7 @@ client.on('threadUpdate', async (oldThread, newThread) => {
         const updatedEmbed = EmbedBuilder.from(logMessage.embeds[0])
             .setColor(0x57F287)
             .setFields(logMessage.embeds[0].fields.map(field =>
-                field.name === 'Status' ? { ...field, value: 'Resolved' } : field
+                field.name === 'Status' ? { ...field, value: '✅ **Resolved**' } : field
             ));
         await logMessage.edit({ embeds: [updatedEmbed] });
     } catch (err) {
