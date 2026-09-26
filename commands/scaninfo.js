@@ -15,8 +15,10 @@ module.exports = {
         const isAppealsThread = interaction.channel?.isThread?.()
             && interaction.channel.parentId === APPEALS_PARENT_CHANNEL_ID;
         const isAppealsParentChannel = interaction.channelId === APPEALS_PARENT_CHANNEL_ID;
+        const isPrioritySupportThread = interaction.channel?.isThread?.()
+            && interaction.channel.parentId === SCANINFO_WHITELIST_CHANNEL_ID;
         const isWhitelistedChannel = interaction.channelId === SCANINFO_WHITELIST_CHANNEL_ID
-            || (interaction.channel?.isThread?.() && interaction.channel.parentId === SCANINFO_WHITELIST_CHANNEL_ID);
+            || isPrioritySupportThread;
 
         if (!isTicketThread && !isAppealsThread && !isAppealsParentChannel && !isWhitelistedChannel) {
             return interaction.reply({
@@ -34,16 +36,27 @@ module.exports = {
 
         await interaction.deferReply({ ephemeral: true });
 
-        if (isAppealsThread || isAppealsParentChannel) {
+        if (isAppealsThread || isAppealsParentChannel || isPrioritySupportThread) {
             if (!interaction.channel?.isThread?.()) {
-                return interaction.editReply('Use this command inside an Appeals thread so the same questionnaire detection applies.');
+                return interaction.editReply('Use this command inside an Appeals or priority support thread so the same questionnaire detection applies.');
             }
 
-            const result = await client.scanAppealsThread(interaction.channel, { interaction });
-            if (result?.sentCount) {
-                return interaction.editReply(`Appeals thread scan completed and sent **${result.sentCount}** Roblox info embed${result.sentCount === 1 ? '' : 's'}.`);
+            const appealsResult = await client.scanAppealsThread(interaction.channel, { interaction });
+            if (appealsResult?.sentCount) {
+                return interaction.editReply(`Appeals thread scan completed and sent **${appealsResult.sentCount}** Roblox info embed${appealsResult.sentCount === 1 ? '' : 's'}.`);
             }
-            return interaction.editReply('Appeals thread scan completed using the Appeals questionnaire detection, but no valid Roblox user was found.');
+
+            const ticketResult = await client.scanTicketThread(interaction.channel, {
+                force: true,
+                interaction,
+                trelloUserId: interaction.user.id
+            });
+
+            if (ticketResult?.sentCount) {
+                return interaction.editReply(`Priority support thread scan completed and sent **${ticketResult.sentCount}** Roblox info embed${ticketResult.sentCount === 1 ? '' : 's'}.`);
+            }
+
+            return interaction.editReply('This priority support thread scan completed, but no valid Roblox username or numeric ID was found.');
         }
 
         const result = await client.scanTicketThread(interaction.channel, {
