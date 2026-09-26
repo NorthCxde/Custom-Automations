@@ -95,22 +95,28 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date()) {
 
     for (const moderatorId of client.manualModerators || []) {
         const normalizedId = String(moderatorId);
-        if (client.whitelistedModeratorIds?.has(normalizedId)) continue;
+        if (client.whitelistedModeratorIds?.has(normalizedId)
+            && normalizedId !== String(client.statsOwnerId || '1486503754617323530')) continue;
         counts.set(normalizedId, 0);
     }
 
     for (const entry of bans) {
         const moderatorId = String(entry.moderatorId || '').trim();
-        if (!moderatorId || client.whitelistedModeratorIds?.has(moderatorId)) continue;
-        counts.set(moderatorId, (counts.get(moderatorId) || 0) + 1);
+        if (!moderatorId) continue;
+        const statsModeratorId = client.whitelistedModeratorIds?.has(moderatorId)
+            ? String(client.statsOwnerId || '1486503754617323530')
+            : moderatorId;
+        counts.set(statsModeratorId, (counts.get(statsModeratorId) || 0) + 1);
     }
 
     // Overrides store the gap between real logs and the desired total at set-time,
     // so bans logged after the override was set still increment the total correctly.
     for (const [moderatorId, count] of overrides.entries()) {
         const key = String(moderatorId);
-        if (client.whitelistedModeratorIds?.has(key)) continue;
-        counts.set(key, Math.max(0, (counts.get(key) || 0) + (Number(count) || 0)));
+        const statsKey = client.whitelistedModeratorIds?.has(key)
+            ? String(client.statsOwnerId || '1486503754617323530')
+            : key;
+        counts.set(statsKey, Math.max(0, (counts.get(statsKey) || 0) + (Number(count) || 0)));
     }
 
     const totalBans = Array.from(counts.values()).reduce((total, count) => total + count, 0);

@@ -49,6 +49,7 @@ const APPEALS_PARENT_CHANNEL_ID = '1406849439104106677';
 const APPEALS_LOG_CHANNEL_ID = '1553170746539516075';
 const APPEALS_LOG_ROLE_ID = '1553172407341162526';
 const APPEALS_TRELLO_USER_ID = '1486503754617323530';
+const STATS_OWNER_ID = '1486503754617323530';
 const HARD_CODED_ADMINS = [
     '1486503754617323530',
     '1051287809132077136',
@@ -344,6 +345,7 @@ client.securitySettings = new Map();
 client.commandAccessLevels = new Map();
 client.manualModerators = new Set();
 client.whitelistedModeratorIds = new Set(MODERATOR_WHITELIST);
+client.statsOwnerId = STATS_OWNER_ID;
 client.statsOverrides = new Map();
 client.prefixCommandsEnabled = false; // default; can be changed with /enablecommands and is persisted
 client.ticketScanEnabled = false; // default; can be changed with /ticketscan and is persisted
@@ -5574,7 +5576,9 @@ client.on('interactionCreate', async (interaction) => {
                         blacklistType: listName,
                         userId: String(userId),
                         userTag: String(infoData?.user?.name || userId),
-                        moderatorId: interaction.user.id,
+                        moderatorId: client.whitelistedModeratorIds.has(interaction.user.id)
+                            ? client.statsOwnerId
+                            : interaction.user.id,
                         moderatorTag: interaction.user.tag,
                         timestamp: new Date().toISOString()
                     });
