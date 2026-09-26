@@ -4628,7 +4628,7 @@ function getTicketQuestionnaireValues(messages) {
 function isTicketRobloxCandidate(user) {
     const username = String(user?.name || '');
     const accountCreatedAt = new Date(user?.created || '').getTime();
-    return username.length >= 5
+    return username.length >= 3
         && !(/^\d+$/.test(username) && username.length < 7)
         && Number.isFinite(accountCreatedAt);
 }
@@ -4662,7 +4662,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         const questionnaireValues = getTicketQuestionnaireValues(questionnaireMessages);
         const userIdCandidates = questionnaireValues.userIds.filter(userId => /^\d{7,}$/.test(userId));
         const usernameCandidates = questionnaireValues.usernames.filter(username =>
-            username.length >= 5 && !(/^\d+$/.test(username) && username.length < 7)
+            username.length >= 3 && !(/^\d+$/.test(username) && username.length < 7)
         );
 
         if (!usernameCandidates.length && !userIdCandidates.length) return { sentCount: 0 };
