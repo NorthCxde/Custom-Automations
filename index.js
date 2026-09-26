@@ -4625,6 +4625,11 @@ function getTicketQuestionnaireValues(messages) {
     };
 }
 
+function isAllowedTicketRobloxUser(user) {
+    const username = String(user?.name || '');
+    return username.length >= 5 && !(/^\d+$/.test(username) && username.length < 7);
+}
+
 client.scanTicketThread = async (thread, { force = false, interaction = null, trelloUserId = null } = {}) => {
     const isAutomaticTicket = thread?.parentId === '964450684613328916';
     const isWhitelistedScanThread = thread?.parentId === '1406849874925719583';
@@ -4663,6 +4668,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         for (const userId of userIdCandidates) {
             try {
                 const user = await resolveUser(userId);
+                if (!isAllowedTicketRobloxUser(user)) continue;
                 resolvedUsers.set(String(user.id), user);
             } catch (err) {
                 continue;
@@ -4683,6 +4689,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
                 for (const match of result?.data || []) {
                     if (!match?.id) continue;
                     const user = await resolveUser(String(match.id));
+                    if (!isAllowedTicketRobloxUser(user)) continue;
                     resolvedUsers.set(String(user.id), user);
                     resolvedUsernameCandidates.add(String(match.requestedUsername || match.name || '').toLowerCase());
                 }
@@ -4695,6 +4702,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
             if (resolvedUsernameCandidates.has(username.toLowerCase())) continue;
             try {
                 const user = await resolveUser(username);
+                if (!isAllowedTicketRobloxUser(user)) continue;
                 resolvedUsers.set(String(user.id), user);
             } catch (err) {
                 continue;
