@@ -4556,6 +4556,13 @@ function isTicketQuestionnaireMessage(message) {
             .filter(value => /^[A-Za-z0-9_]{3,20}$/.test(value));
     }
 
+function extractTicketUserIds(value) {
+    return String(value || '')
+        .split(/[\s,]+/)
+        .map(token => token.replace(/^[^\d]+|[^\d]+$/g, ''))
+        .filter(token => /^\d+$/.test(token));
+}
+
 function getTicketQuestionnaireValues(messages) {
     const usernames = [];
     const userIds = [];
@@ -4574,12 +4581,7 @@ function getTicketQuestionnaireValues(messages) {
                 usernames.push(...extractTicketUsernames(nextLine));
             }
             if (/what is the user id of the exploiter/i.test(line)) {
-                const numericMatches = nextLine.match(/\d+/g) || [];
-                if (numericMatches.length) {
-                    userIds.push(...numericMatches);
-                } else {
-                    usernames.push(...extractTicketUsernames(nextLine));
-                }
+                userIds.push(...extractTicketUserIds(nextLine));
             }
         }
 
@@ -4593,12 +4595,7 @@ function getTicketQuestionnaireValues(messages) {
                     usernames.push(...extractTicketUsernames(fieldValue));
                 }
                 if (/what is the user id of the exploiter/i.test(fieldName)) {
-                    const numericMatches = fieldValue.match(/\d+/g) || [];
-                    if (numericMatches.length) {
-                        userIds.push(...numericMatches);
-                    } else {
-                        usernames.push(...extractTicketUsernames(fieldValue));
-                    }
+                    userIds.push(...extractTicketUserIds(fieldValue));
                 }
             }
         }
@@ -4616,12 +4613,7 @@ function getTicketQuestionnaireValues(messages) {
                     usernames.push(...extractTicketUsernames(nextLine));
                 }
                 if (/what is the user id of the exploiter/i.test(lines[index])) {
-                    const numericMatches = (nextLine.match(/\d+/g) || []);
-                    if (numericMatches.length) {
-                        userIds.push(...numericMatches);
-                    } else {
-                        usernames.push(...extractTicketUsernames(nextLine));
-                    }
+                    userIds.push(...extractTicketUserIds(nextLine));
                 }
             }
         }
@@ -4651,7 +4643,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         if (!ticketContent) return { sentCount: 0 };
 
         const questionnaireValues = getTicketQuestionnaireValues(questionnaireMessages);
-        const userIdCandidates = questionnaireValues.userIds;
+        const userIdCandidates = questionnaireValues.userIds.filter(userId => userId.length > 6);
         const usernameCandidates = questionnaireValues.usernames;
 
         if (!usernameCandidates.length && !userIdCandidates.length) return { sentCount: 0 };
@@ -4786,12 +4778,7 @@ function getAppealsQuestionnaireValues(messages) {
             const nextLine = plainLines[index + 1] || '';
             if (/what is your roblox username/i.test(line)) usernames.push(...extractTicketUsernames(nextLine));
             if (/what is your roblox user id/i.test(line)) {
-                const numericMatches = nextLine.match(/\d+/g) || [];
-                if (numericMatches.length) {
-                    userIds.push(...numericMatches);
-                } else {
-                    usernames.push(...extractTicketUsernames(nextLine));
-                }
+                userIds.push(...extractTicketUserIds(nextLine));
             }
         }
 
@@ -4804,12 +4791,7 @@ function getAppealsQuestionnaireValues(messages) {
                 const fieldValue = String(field.value || '').trim();
                 if (/what is your roblox username/i.test(fieldName)) usernames.push(...extractTicketUsernames(fieldValue));
                 if (/what is your roblox user id/i.test(fieldName)) {
-                    const numericMatches = fieldValue.match(/\d+/g) || [];
-                    if (numericMatches.length) {
-                        userIds.push(...numericMatches);
-                    } else {
-                        usernames.push(...extractTicketUsernames(fieldValue));
-                    }
+                    userIds.push(...extractTicketUserIds(fieldValue));
                 }
             }
 
@@ -4818,12 +4800,7 @@ function getAppealsQuestionnaireValues(messages) {
                 const nextLine = lines[index + 1] || '';
                 if (/what is your roblox username/i.test(lines[index])) usernames.push(...extractTicketUsernames(nextLine));
                 if (/what is your roblox user id/i.test(lines[index])) {
-                    const numericMatches = (nextLine.match(/\d+/g) || []);
-                    if (numericMatches.length) {
-                        userIds.push(...numericMatches);
-                    } else {
-                        usernames.push(...extractTicketUsernames(nextLine));
-                    }
+                    userIds.push(...extractTicketUserIds(nextLine));
                 }
             }
         }
