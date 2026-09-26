@@ -4627,7 +4627,11 @@ function getTicketQuestionnaireValues(messages) {
 
 function isAllowedTicketRobloxUser(user) {
     const username = String(user?.name || '');
-    return username.length >= 5 && !(/^\d+$/.test(username) && username.length < 7);
+    const accountCreatedAt = new Date(user?.created || '').getTime();
+    return username.length >= 5
+        && !(/^\d+$/.test(username) && username.length < 7)
+        && Number.isFinite(accountCreatedAt)
+        && accountCreatedAt >= Date.UTC(2010, 0, 1);
 }
 
 client.scanTicketThread = async (thread, { force = false, interaction = null, trelloUserId = null } = {}) => {
