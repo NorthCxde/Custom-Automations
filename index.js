@@ -4625,13 +4625,21 @@ function getTicketQuestionnaireValues(messages) {
     };
 }
 
-function isAllowedTicketRobloxUser(user) {
+function isTicketRobloxCandidate(user) {
     const username = String(user?.name || '');
     const accountCreatedAt = new Date(user?.created || '').getTime();
     return username.length >= 5
         && !(/^\d+$/.test(username) && username.length < 7)
-        && Number.isFinite(accountCreatedAt)
-        && accountCreatedAt >= Date.UTC(2015, 0, 1);
+        && Number.isFinite(accountCreatedAt);
+}
+
+function isAllowedTicketRobloxUser(user, gameActivity = '') {
+    if (!isTicketRobloxCandidate(user)) return false;
+
+    const accountCreatedAt = new Date(user.created).getTime();
+    if (accountCreatedAt >= Date.UTC(2015, 0, 1)) return true;
+
+    return /Has played (?:Timebomb Duels|Custom Minigames)/.test(String(gameActivity));
 }
 
 client.scanTicketThread = async (thread, { force = false, interaction = null, trelloUserId = null } = {}) => {
@@ -4672,7 +4680,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         for (const userId of userIdCandidates) {
             try {
                 const user = await resolveUser(userId);
-                if (!isAllowedTicketRobloxUser(user)) continue;
+                if (!isTicketRobloxCandidate(user)) continue;
                 resolvedUsers.set(String(user.id), user);
             } catch (err) {
                 continue;
@@ -4693,7 +4701,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
                 for (const match of result?.data || []) {
                     if (!match?.id) continue;
                     const user = await resolveUser(String(match.id));
-                    if (!isAllowedTicketRobloxUser(user)) continue;
+                    if (!isTicketRobloxCandidate(user)) continue;
                     resolvedUsers.set(String(user.id), user);
                     resolvedUsernameCandidates.add(String(match.requestedUsername || match.name || '').toLowerCase());
                 }
@@ -4706,7 +4714,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
             if (resolvedUsernameCandidates.has(username.toLowerCase())) continue;
             try {
                 const user = await resolveUser(username);
-                if (!isAllowedTicketRobloxUser(user)) continue;
+                if (!isTicketRobloxCandidate(user)) continue;
                 resolvedUsers.set(String(user.id), user);
             } catch (err) {
                 continue;
@@ -4717,6 +4725,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         for (const user of resolvedUsers.values()) {
             try {
                 const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, trelloUserId || thread.ownerId || '0');
+                if (!isAllowedTicketRobloxUser(user, gameActivity)) continue;
                 const payload = {
                     embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards, { showTrelloCards: Boolean(interaction) })],
                     components: buildInfoComponents(user.id)
