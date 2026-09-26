@@ -4643,8 +4643,8 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         if (!ticketContent) return { sentCount: 0 };
 
         const questionnaireValues = getTicketQuestionnaireValues(questionnaireMessages);
-        const userIdCandidates = questionnaireValues.userIds.filter(userId => userId.length > 6);
-        const usernameCandidates = questionnaireValues.usernames;
+        const userIdCandidates = questionnaireValues.userIds.filter(userId => /^\d{7,}$/.test(userId));
+        const usernameCandidates = questionnaireValues.usernames.filter(username => username.length >= 5);
 
         if (!usernameCandidates.length && !userIdCandidates.length) return { sentCount: 0 };
 
