@@ -4846,7 +4846,8 @@ client.scheduleAppealsThreadScan = (thread) => {
 };
 
 client.scanAppealsThread = async (thread, { interaction = null } = {}) => {
-    if (!thread?.guildId || thread.parentId !== APPEALS_PARENT_CHANNEL_ID) return { sentCount: 0 };
+    const allowedParentIds = new Set([APPEALS_PARENT_CHANNEL_ID, '1406849874925719583']);
+    if (!thread?.guildId || !allowedParentIds.has(thread.parentId)) return { sentCount: 0 };
     if (client.appealsScanHandledThreads.has(thread.id) && !interaction) return { sentCount: 0 };
 
     try {
