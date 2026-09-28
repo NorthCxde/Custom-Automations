@@ -13,9 +13,11 @@ function formatRecentBan(entry) {
     return `🔨 ${time} · \`${userId}\` (${listName}) by ${moderator}`;
 }
 
-function buildRecentBansPayload(logs, count) {
+function buildRecentBansPayload(logs, count, moderatorId = null) {
     const recentBans = logs
-        .filter(entry => BAN_ACTIONS.has(String(entry.action || '').trim().toLowerCase()) && entry.source === 'trello_blacklist')
+        .filter(entry => BAN_ACTIONS.has(String(entry.action || '').trim().toLowerCase())
+            && entry.source === 'trello_blacklist'
+            && (!moderatorId || String(entry.moderatorId || '') === String(moderatorId)))
         .slice(0, count);
 
     const embed = new EmbedBuilder()
@@ -37,6 +39,10 @@ module.exports = {
             .setDescription('How many to show (default 10, max 25)')
             .setMinValue(1)
             .setMaxValue(MAX_COUNT)
+            .setRequired(false))
+            .addUserOption(option => option
+                .setName('user')
+                .setDescription('Show bans performed by this moderator')
             .setRequired(false)),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
@@ -44,8 +50,9 @@ module.exports = {
         }
 
         const count = Math.min(MAX_COUNT, Math.max(1, interaction.options.getInteger('count') || DEFAULT_COUNT));
+        const moderator = interaction.options.getUser('user');
         const logs = client.getModLogs(interaction.guild.id);
-        return interaction.reply({ ...buildRecentBansPayload(logs, count), ephemeral: true });
+        return interaction.reply({ ...buildRecentBansPayload(logs, count, moderator?.id), ephemeral: true });
     },
     async execute({ client, message, args }) {
         if (!message.guild) return null;
