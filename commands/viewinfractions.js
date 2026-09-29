@@ -3,15 +3,19 @@ const { RULE_CHOICES } = require('../infractions');
 
 const MAX_RESULTS = 25;
 
-function getInfractionUsers(client, guildId, ruleKey) {
+function getInfractionUsers(client, guildId, ruleKey, selectedUserId = null) {
     const logs = client.getModLogs(guildId) || [];
+    const selectedIds = selectedUserId && typeof client.getLinkedAccountIds === 'function'
+        ? new Set(client.getLinkedAccountIds(guildId, selectedUserId))
+        : null;
     const candidateIds = new Set(
         logs
             .filter(entry => {
                 const action = String(entry.action || '').trim().toLowerCase();
                 return ['mute', 'infraction'].includes(action)
                     && entry.infractionRule === ruleKey
-                    && !entry.infractionClearedOnEarlyUnmute;
+                    && !entry.infractionClearedOnEarlyUnmute
+                    && (!selectedIds || selectedIds.has(String(entry.userId || '')));
             })
             .map(entry => String(entry.userId || '').trim())
             .filter(Boolean)
@@ -48,7 +52,11 @@ module.exports = {
                 .setRequired(true);
             for (const choice of RULE_CHOICES) option.addChoices(choice);
             return option;
-        }),
+        })
+        .addUserOption(option => option
+            .setName('user')
+            .setDescription('Only show this user and linked accounts')
+            .setRequired(false)),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server.', ephemeral: true });
@@ -60,7 +68,8 @@ module.exports = {
             return interaction.reply({ content: 'That infraction rule is not configured.', ephemeral: true });
         }
 
-        const groups = getInfractionUsers(client, interaction.guild.id, ruleKey);
+        const selectedUser = interaction.options.getUser('user');
+        const groups = getInfractionUsers(client, interaction.guild.id, ruleKey, selectedUser?.id);
         const lines = groups.slice(0, MAX_RESULTS).map(group => {
             const accounts = group.accountIds.map(userId => `<@${userId}>`).join(', ');
             return `• **Level ${group.level}** — ${accounts}`;
