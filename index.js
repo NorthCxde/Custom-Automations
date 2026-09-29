@@ -2823,6 +2823,26 @@ client.linkAccounts = (guildId, mainId, altIds, linkedBy) => {
     return mergedIds;
 };
 
+client.unlinkAccount = (guildId, mainId, altId) => {
+    const normalizedGuildId = String(guildId || '').trim();
+    const normalizedMainId = String(mainId || '').trim();
+    const normalizedAltId = String(altId || '').trim();
+    const groups = client.linkedAccountGroups.get(normalizedGuildId) || [];
+    const group = groups.find(entry =>
+        entry.mainId === normalizedMainId
+        && entry.accountIds.includes(normalizedAltId)
+    );
+    if (!group || normalizedMainId === normalizedAltId) return null;
+
+    group.accountIds = group.accountIds.filter(id => id !== normalizedAltId);
+    const remainingGroups = group.accountIds.length > 1
+        ? groups
+        : groups.filter(entry => entry !== group);
+    client.linkedAccountGroups.set(normalizedGuildId, remainingGroups);
+    client.saveLinkedAccounts();
+    return group.accountIds;
+};
+
 client.getLinkedInfractionGroups = (guildId, userId, ruleKey) => {
     const linkedIds = client.getLinkedAccountIds(guildId, userId);
     const logs = client.getModLogs(guildId) || [];
