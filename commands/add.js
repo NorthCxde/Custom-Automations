@@ -2,10 +2,10 @@ const { SlashCommandBuilder } = require('discord.js');
 const { RULE_CHOICES } = require('../infractions');
 
 module.exports = {
-    name: 'add',
+    name: 'addinfraction',
     description: 'Add a manual infraction to a user.',
     data: new SlashCommandBuilder()
-        .setName('add')
+        .setName('addinfraction')
         .setDescription('Add a manual infraction to a user.')
         .addUserOption(option => option
             .setName('user')
