@@ -2824,13 +2824,100 @@ client.linkAccounts = (guildId, mainId, altIds, linkedBy) => {
 client.getLinkedInfractionCount = (guildId, userId, ruleKey) => {
     const linkedIds = client.getLinkedAccountIds(guildId, userId);
     const logs = client.getModLogs(guildId) || [];
+    const countedActions = new Set();
     return logs.filter(entry => {
         const action = String(entry.action || '').trim().toLowerCase();
-        return linkedIds.includes(String(entry.userId || ''))
+        const actionKey = entry.linkedActionId
+            ? `linked:${entry.linkedActionId}`
+            : `case:${entry.caseNumber ?? entry.caseId ?? `${entry.userId}:${entry.timestamp}`}`;
+        if (countedActions.has(actionKey)) return false;
+        const matches = linkedIds.includes(String(entry.userId || ''))
             && ['mute', 'infraction'].includes(action)
             && entry.infractionRule === ruleKey
             && !entry.infractionClearedOnEarlyUnmute;
+        if (matches) countedActions.add(actionKey);
+        return matches;
     }).length;
+};
+
+client.propagateLinkedModerationAction = async (guildId, entry) => {
+    if (entry?.linkedPropagation) return [];
+
+    const action = String(entry?.action || '').trim().toLowerCase();
+    if (!['mute', 'ban', 'temp ban'].includes(action)) return [];
+
+    const linkedIds = client.getLinkedAccountIds(guildId, entry.userId);
+    if (linkedIds.length < 2) return [];
+
+    const guild = client.guilds.cache.get(String(guildId));
+    if (!guild) return [];
+
+    const linkedActionId = entry.linkedActionId || `${guildId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    const affectedIds = linkedIds.filter(userId => String(userId) !== String(entry.userId));
+    const results = [];
+    const reason = `${entry.reason || 'Linked account moderation action'} [Linked account action]`;
+    const durationMs = action === 'mute' || action === 'temp ban'
+        ? parseModerationDurationMs(entry.duration)
+        : null;
+    const entryTimestamp = new Date(entry.timestamp || '').getTime();
+
+    for (const userId of affectedIds) {
+        try {
+            const alreadyPropagated = (client.getModLogs(guildId) || []).some(existing =>
+                existing.linkedPropagation
+                && String(existing.linkedSourceUserId || '') === String(entry.userId)
+                && String(existing.userId || '') === String(userId)
+                && String(existing.action || '').trim().toLowerCase() === action
+                && (!Number.isFinite(entryTimestamp)
+                    || Math.abs(new Date(existing.timestamp || '').getTime() - entryTimestamp) <= 30_000)
+            );
+            if (alreadyPropagated) {
+                results.push({ userId, success: true, skipped: true });
+                continue;
+            }
+
+            if (action === 'mute') {
+                if (!durationMs) throw new Error('The original mute duration could not be parsed.');
+                const member = await guild.members.fetch(userId).catch(() => null);
+                if (!member) throw new Error('Account is not a member of this server.');
+                await member.timeout(durationMs, reason);
+            } else {
+                await guild.members.ban(userId, { reason });
+                if (action === 'temp ban' && durationMs && typeof client.addTempBan === 'function') {
+                    const user = await client.users.fetch(userId).catch(() => null);
+                    client.addTempBan({
+                        guildId,
+                        userId,
+                        userTag: user?.tag || `<@${userId}>`,
+                        unbanAt: Date.now() + durationMs
+                    });
+                }
+            }
+
+            const user = await client.users.fetch(userId).catch(() => null);
+            results.push({ userId, success: true });
+            const propagatedEntry = { ...entry };
+            delete propagatedEntry.caseNumber;
+            client.addModLog(guildId, {
+                ...propagatedEntry,
+                userId,
+                userTag: user?.tag || `<@${userId}>`,
+                linkedActionId,
+                linkedPropagation: true,
+                linkedSourceUserId: String(entry.userId),
+                linkedAccountIds: linkedIds,
+                reason
+            });
+        } catch (error) {
+            results.push({ userId, success: false, error: error.message || 'Unknown error' });
+        }
+    }
+
+    entry.linkedActionId = linkedActionId;
+    entry.linkedAccountIds = linkedIds;
+    entry.linkedActionResults = results;
+    client.saveModLogs();
+    return results;
 };
 
 client.getNextModCaseNumber = (guildId) => {
@@ -2848,10 +2935,22 @@ client.getNextModCaseNumber = (guildId) => {
 client.addModLog = (guildId, entry) => {
     const logs = client.modLogs.get(guildId) || [];
     const caseNumber = client.getNextModCaseNumber(guildId);
-    const newEntry = { caseNumber, ...entry };
+    const linkedIds = client.getLinkedAccountIds(guildId, entry?.userId);
+    const linkedActionId = entry?.linkedActionId
+        || (linkedIds.length > 1 ? `${guildId}:${Date.now()}:${Math.random().toString(36).slice(2)}` : null);
+    const newEntry = {
+        caseNumber,
+        ...entry,
+        ...(linkedActionId ? { linkedActionId, linkedAccountIds: linkedIds } : {})
+    };
     logs.unshift(newEntry);
     client.modLogs.set(guildId, logs);
     client.saveModLogs();
+
+    if (!newEntry.linkedPropagation) {
+        client.propagateLinkedModerationAction(guildId, newEntry)
+            .catch(err => console.error('[LinkedModeration] Failed to propagate action:', err));
+    }
 
     // Trello blacklist actions are game bans, not Discord server bans, so keep them out of the cross-server audit log.
     if (newEntry.source !== 'trello_blacklist' && typeof client.logGlobalModerationAudit === 'function') {

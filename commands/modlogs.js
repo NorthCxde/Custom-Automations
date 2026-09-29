@@ -78,6 +78,19 @@ function buildModlogsPayload({ logs, user, page = 0, ownerId = '0', targetUserId
         }
         if (entry.count) lines.push(`**Count**: ${entry.count}`);
         if (entry.channelId) lines.push(`**Channel**: <#${entry.channelId}>`);
+        if (Array.isArray(entry.linkedAccountIds) && entry.linkedAccountIds.length > 1) {
+            const linkedAccounts = entry.linkedAccountIds
+                .filter(userId => String(userId) !== String(entry.userId))
+                .map(userId => `<@${userId}>`)
+                .join(', ');
+            if (linkedAccounts) lines.push(`**Linked Accounts**: ${truncate(linkedAccounts, 800)}`);
+        }
+        if (Array.isArray(entry.linkedActionResults) && entry.linkedActionResults.length) {
+            const results = entry.linkedActionResults.map(result =>
+                `<@${result.userId}>: ${result.success ? 'affected' : `failed (${truncate(result.error || 'Unknown error', 80)})`}`
+            ).join('\n');
+            lines.push(`**Linked Results**:\n${truncate(results, 800)}`);
+        }
         lines.push(`**Reason**: ${truncate(entry.reason || 'No reason provided.')}`);
         lines.push(`**Date**: ${timestampInfo}`);
         lines.push(separator);
