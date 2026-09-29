@@ -273,6 +273,9 @@ async function fetchGuildMemberSafe(guild, userId) {
 }
 
 function getRuleMuteCount(client, guildId, userId, ruleKey) {
+    if (typeof client.getLinkedInfractionCount === 'function') {
+        return client.getLinkedInfractionCount(guildId, userId, ruleKey);
+    }
     if (!client.getModLogs) return 0;
     const logs = client.getModLogs(guildId, userId) || [];
     return logs.filter(entry => {

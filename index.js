@@ -105,7 +105,7 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'backup'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
-const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'recentbans', 'quota', 'register']);
+const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'recentbans', 'quota', 'register', 'linkaccounts', 'add']);
 
 function trelloRequestJson(url) {
     return new Promise((resolve, reject) => {
@@ -272,6 +272,7 @@ const dataPath = path.join(__dirname, "data");
 const permsFile = path.join(dataPath, "perms.json");
 const logsFile = path.join(dataPath, "logs.json");
 const modLogsFile = path.join(dataPath, "modlogs.json");
+const linkedAccountsFile = path.join(dataPath, "linked-accounts.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
 const contentReactChannelFile = path.join(dataPath, "contentreactchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
@@ -301,6 +302,7 @@ const appealsScanStateFile = path.join(dataPath, "appeals-scan-state.json");
 client.allowedRoles = new Map();
 client.logChannels = new Map();
 client.modLogs = new Map();
+client.linkedAccountGroups = new Map();
 client.boostChannels = new Map();
 client.contentReactChannels = new Map();
 client.pendingModerationActions = new Map();
@@ -2744,6 +2746,93 @@ client.saveModLogs = () => {
     fs.writeFileSync(modLogsFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
+client.loadLinkedAccounts = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(linkedAccountsFile)) fs.writeFileSync(linkedAccountsFile, '{}', 'utf8');
+
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(linkedAccountsFile, 'utf8') || '{}');
+    } catch (err) {
+        console.error('Failed to parse linked accounts file:', err);
+    }
+
+    client.linkedAccountGroups.clear();
+    for (const [guildId, groups] of Object.entries(parsed || {})) {
+        const normalizedGroups = Array.isArray(groups)
+            ? groups.map(group => ({
+                mainId: String(group?.mainId || ''),
+                accountIds: [...new Set((Array.isArray(group?.accountIds) ? group.accountIds : [])
+                    .map(String)
+                    .filter(id => /^\d{17,20}$/.test(id)))],
+                linkedAt: group?.linkedAt || null,
+                linkedBy: group?.linkedBy || null
+            })).filter(group => group.accountIds.length > 1)
+            : [];
+        client.linkedAccountGroups.set(guildId, normalizedGroups);
+    }
+};
+
+client.saveLinkedAccounts = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    const output = {};
+    for (const [guildId, groups] of client.linkedAccountGroups.entries()) {
+        output[guildId] = groups;
+    }
+    fs.writeFileSync(linkedAccountsFile, JSON.stringify(output, null, 2), 'utf8');
+};
+
+client.getLinkedAccountIds = (guildId, userId) => {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) return [];
+
+    const groups = client.linkedAccountGroups.get(String(guildId)) || [];
+    const group = groups.find(entry => entry.accountIds.includes(normalizedUserId));
+    return group ? [...group.accountIds] : [normalizedUserId];
+};
+
+client.linkAccounts = (guildId, mainId, altIds, linkedBy) => {
+    const normalizedGuildId = String(guildId || '').trim();
+    const normalizedMainId = String(mainId || '').trim();
+    const normalizedIds = [...new Set([
+        normalizedMainId,
+        ...(Array.isArray(altIds) ? altIds : [])
+    ].map(String).filter(id => /^\d{17,20}$/.test(id)))];
+
+    if (!normalizedGuildId || !/^\d{17,20}$/.test(normalizedMainId) || normalizedIds.length < 2) {
+        return null;
+    }
+
+    const groups = client.linkedAccountGroups.get(normalizedGuildId) || [];
+    const matchingGroups = groups.filter(group => normalizedIds.some(id => group.accountIds.includes(id)));
+    const mergedIds = [...new Set([
+        ...normalizedIds,
+        ...matchingGroups.flatMap(group => group.accountIds)
+    ])];
+    const remainingGroups = groups.filter(group => !matchingGroups.includes(group));
+    remainingGroups.push({
+        mainId: normalizedMainId,
+        accountIds: mergedIds,
+        linkedAt: new Date().toISOString(),
+        linkedBy: String(linkedBy || '')
+    });
+    client.linkedAccountGroups.set(normalizedGuildId, remainingGroups);
+    client.saveLinkedAccounts();
+    return mergedIds;
+};
+
+client.getLinkedInfractionCount = (guildId, userId, ruleKey) => {
+    const linkedIds = client.getLinkedAccountIds(guildId, userId);
+    const logs = client.getModLogs(guildId) || [];
+    return logs.filter(entry => {
+        const action = String(entry.action || '').trim().toLowerCase();
+        return linkedIds.includes(String(entry.userId || ''))
+            && ['mute', 'infraction'].includes(action)
+            && entry.infractionRule === ruleKey
+            && !entry.infractionClearedOnEarlyUnmute;
+    }).length;
+};
+
 client.getNextModCaseNumber = (guildId) => {
     const logs = client.modLogs.get(guildId) || [];
     let maxNumber = 0;
@@ -4143,6 +4232,7 @@ client.loadContentReactChannels();
 client.loadPrefixCommandState();
 client.loadTicketScanState();
 client.loadAppealsScanState();
+client.loadLinkedAccounts();
 client.loadHideCommandState();
 client.loadAutoresponders();
 client.loadAutomodRules();
