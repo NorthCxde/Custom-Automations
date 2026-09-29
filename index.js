@@ -2942,6 +2942,54 @@ client.propagateLinkedModerationAction = async (guildId, entry) => {
     return results;
 };
 
+client.propagateLinkedUnmute = async (guildId, entry) => {
+    if (entry?.linkedPropagation) return [];
+
+    const linkedIds = client.getLinkedAccountIds(guildId, entry.userId);
+    if (linkedIds.length < 2) return [];
+
+    const guild = client.guilds.cache.get(String(guildId));
+    if (!guild) return [];
+
+    const linkedActionId = entry.linkedActionId || `${guildId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    const affectedIds = linkedIds.filter(userId => String(userId) !== String(entry.userId));
+    const results = [];
+
+    for (const userId of affectedIds) {
+        try {
+            const member = await guild.members.fetch(userId).catch(() => null);
+            if (!member) throw new Error('Account is not a member of this server.');
+
+            await member.timeout(null, 'Unmuted through linked account synchronization');
+            if (typeof client.markLatestInfractionMuteAsAppealed === 'function') {
+                client.markLatestInfractionMuteAsAppealed(guildId, userId, Date.now());
+            }
+
+            const user = await client.users.fetch(userId).catch(() => null);
+            results.push({ userId, success: true });
+            const propagatedEntry = { ...entry };
+            delete propagatedEntry.caseNumber;
+            client.addModLog(guildId, {
+                ...propagatedEntry,
+                userId,
+                userTag: user?.tag || `<@${userId}>`,
+                linkedActionId,
+                linkedPropagation: true,
+                linkedSourceUserId: String(entry.userId),
+                linkedAccountIds: linkedIds
+            });
+        } catch (error) {
+            results.push({ userId, success: false, error: error.message || 'Unknown error' });
+        }
+    }
+
+    entry.linkedActionId = linkedActionId;
+    entry.linkedAccountIds = linkedIds;
+    entry.linkedActionResults = results;
+    client.saveModLogs();
+    return results;
+};
+
 client.getNextModCaseNumber = (guildId) => {
     const logs = client.modLogs.get(guildId) || [];
     let maxNumber = 0;
@@ -2970,7 +3018,10 @@ client.addModLog = (guildId, entry) => {
     client.saveModLogs();
 
     if (!newEntry.linkedPropagation) {
-        client.propagateLinkedModerationAction(guildId, newEntry)
+        const propagation = String(newEntry.action || '').trim().toLowerCase() === 'unmute'
+            ? client.propagateLinkedUnmute(guildId, newEntry)
+            : client.propagateLinkedModerationAction(guildId, newEntry);
+        propagation
             .catch(err => console.error('[LinkedModeration] Failed to propagate action:', err));
     }
 
