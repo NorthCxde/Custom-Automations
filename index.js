@@ -102,10 +102,12 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'duel',
     'daily',
     'work',
-    'backup'
+    'backup',
+    'linkaccounts',
+    'addinfraction'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
-const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'recentbans', 'quota', 'register', 'linkaccounts', 'addinfraction', 'viewinfractions']);
+const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'recentbans', 'quota', 'register', 'viewinfractions']);
 
 function trelloRequestJson(url) {
     return new Promise((resolve, reject) => {
