@@ -16,7 +16,7 @@ module.exports = {
                 .setName('rule')
                 .setDescription('The infraction rule to review')
                 .setRequired(false)
-                .addChoices({ name: 'All', value: 'all' });
+                .addChoices({ name: 'All ✨', value: 'all' });
             for (const choice of RULE_CHOICES) option.addChoices(choice);
             return option;
         }),
