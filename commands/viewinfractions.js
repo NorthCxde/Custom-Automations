@@ -15,6 +15,7 @@ function getInfractionUsers(client, guildId, ruleKey, selectedUserId = null) {
                 return ['mute', 'infraction'].includes(action)
                     && entry.infractionRule === ruleKey
                     && !entry.infractionClearedOnEarlyUnmute
+                    && !entry.infractionRemoved
                     && (!selectedIds || selectedIds.has(String(entry.userId || '')));
             })
             .map(entry => String(entry.userId || '').trim())

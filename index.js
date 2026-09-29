@@ -2821,23 +2821,45 @@ client.linkAccounts = (guildId, mainId, altIds, linkedBy) => {
     return mergedIds;
 };
 
-client.getLinkedInfractionCount = (guildId, userId, ruleKey) => {
+client.getLinkedInfractionGroups = (guildId, userId, ruleKey) => {
     const linkedIds = client.getLinkedAccountIds(guildId, userId);
     const logs = client.getModLogs(guildId) || [];
-    const countedActions = new Set();
-    return logs.filter(entry => {
+    const groups = new Map();
+    for (const entry of logs) {
         const action = String(entry.action || '').trim().toLowerCase();
+        if (!linkedIds.includes(String(entry.userId || ''))
+            || !['mute', 'infraction'].includes(action)
+            || entry.infractionRule !== ruleKey
+            || entry.infractionClearedOnEarlyUnmute
+            || entry.infractionRemoved) {
+            continue;
+        }
+
         const actionKey = entry.linkedActionId
             ? `linked:${entry.linkedActionId}`
             : `case:${entry.caseNumber ?? entry.caseId ?? `${entry.userId}:${entry.timestamp}`}`;
-        if (countedActions.has(actionKey)) return false;
-        const matches = linkedIds.includes(String(entry.userId || ''))
-            && ['mute', 'infraction'].includes(action)
-            && entry.infractionRule === ruleKey
-            && !entry.infractionClearedOnEarlyUnmute;
-        if (matches) countedActions.add(actionKey);
-        return matches;
-    }).length;
+        if (!groups.has(actionKey)) groups.set(actionKey, []);
+        groups.get(actionKey).push(entry);
+    }
+    return [...groups.values()];
+};
+
+client.getLinkedInfractionCount = (guildId, userId, ruleKey) =>
+    client.getLinkedInfractionGroups(guildId, userId, ruleKey).length;
+
+client.removeLinkedInfractionLevels = (guildId, userId, ruleKey, level, removedBy) => {
+    const groups = client.getLinkedInfractionGroups(guildId, userId, ruleKey);
+    const groupsToRemove = groups.slice(0, Math.max(0, Number(level) || 0));
+    const removedAt = new Date().toISOString();
+    for (const entries of groupsToRemove) {
+        for (const entry of entries) {
+            entry.infractionRemoved = true;
+            entry.infractionRemovedAt = removedAt;
+            entry.infractionRemovedBy = String(removedBy || '');
+        }
+    }
+    if (groupsToRemove.length) client.saveModLogs();
+    return groupsToRemove.length;
 };
 
 client.propagateLinkedModerationAction = async (guildId, entry) => {
