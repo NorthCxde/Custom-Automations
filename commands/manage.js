@@ -649,10 +649,10 @@ function resolveEmbedStatToken(client, guildId, token) {
         return String(totalBans);
     }
 
-    const robloxBanMatch = raw.match(/^(\d{17,20})_(robloxbans|%)$/i);
+    const robloxBanMatch = raw.match(/^(\d{17,20})_(robloxbans|%|&)$/i);
     if (robloxBanMatch) {
         const stats = getRobloxBanStats(client, guildId, robloxBanMatch[1]);
-        return robloxBanMatch[2].toLowerCase() === '%'
+        return ['%', '&'].includes(robloxBanMatch[2].toLowerCase())
             ? `${stats.percentage.toFixed(1)}%`
             : String(stats.count);
     }
@@ -683,7 +683,7 @@ function resolveEmbedTemplateText(text, client, guildId) {
         const replacement = resolveEmbedStatToken(client, guildId, 'totalbans');
         return replacement === null ? match : replacement;
     });
-    const withRobloxStats = withTotalBans.replace(/(?:\{(\d{17,20})_(robloxbans|%)\}|<(\d{17,20})_(robloxbans|%)>)/gi, (match, curlyUserId, curlyMetric, angleUserId, angleMetric) => {
+    const withRobloxStats = withTotalBans.replace(/(?:\{(\d{17,20})_(robloxbans|%|&)\}|<(\d{17,20})_(robloxbans|%|&)\>)/gi, (match, curlyUserId, curlyMetric, angleUserId, angleMetric) => {
         const userId = curlyUserId || angleUserId;
         const metric = curlyMetric || angleMetric;
         const replacement = resolveEmbedStatToken(client, guildId, `${userId}_${metric}`);
