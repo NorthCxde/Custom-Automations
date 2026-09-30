@@ -95,7 +95,7 @@ module.exports = {
             .setRequired(false)
             .addChoices(
                 { name: 'Moderator Summary', value: 'summary' },
-                { name: 'Server Stats', value: 'server_stats' }
+                { name: 'Discord Stats', value: 'server_stats' }
             )),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
