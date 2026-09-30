@@ -1697,6 +1697,40 @@ function getGuildModeratorIds(client, guildId) {
     return ids;
 }
 
+function resetCurrentMonthSummaryStats(client, guildId, targetUserId = null) {
+    const statsCommand = require('./stats');
+    const logs = client.modLogs?.get(guildId) || [];
+    const bans = statsCommand.getCurrentMonthBans(logs);
+    const realCounts = new Map();
+    for (const entry of bans) {
+        const rawModeratorId = String(entry.moderatorId || '').trim();
+        if (!rawModeratorId) continue;
+        const moderatorId = client.whitelistedModeratorIds?.has(rawModeratorId)
+            ? String(client.statsOwnerId || rawModeratorId)
+            : rawModeratorId;
+        realCounts.set(moderatorId, (realCounts.get(moderatorId) || 0) + 1);
+    }
+
+    const { year, month } = statsCommand.getMonthRange(new Date());
+    const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const guildOverrides = client.statsOverrides?.get(guildId) || new Map();
+    const monthOverrides = guildOverrides.get(monthKey) || new Map();
+    const moderatorIds = targetUserId
+        ? new Set([String(targetUserId)])
+        : getGuildModeratorIds(client, guildId);
+    for (const moderatorId of realCounts.keys()) moderatorIds.add(moderatorId);
+    for (const moderatorId of client.statsOverrides?.get(guildId)?.get(monthKey)?.keys?.() || []) {
+        moderatorIds.add(String(moderatorId));
+    }
+    for (const moderatorId of moderatorIds) {
+        monthOverrides.set(String(moderatorId), -(realCounts.get(String(moderatorId)) || 0));
+    }
+
+    guildOverrides.set(monthKey, monthOverrides);
+    client.statsOverrides.set(guildId, guildOverrides);
+    client.saveStatsOverrides();
+}
+
 function buildRevokedInvitesPayload(client, guildId, selectedEntryId, notice) {
     const entries = typeof client.getRevokedInvites === 'function'
         ? client.getRevokedInvites(guildId)
@@ -3845,6 +3879,7 @@ module.exports = {
             }
             
             client.modStatsOverrides.get(interaction.guild.id).set(userId, createZeroModstatsOverride());
+            resetCurrentMonthSummaryStats(client, interaction.guild.id, userId);
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_MODSTATS,
@@ -3865,6 +3900,7 @@ module.exports = {
                 resetOverrides.set(moderatorId, createZeroModstatsOverride());
             }
             client.modStatsOverrides.set(interaction.guild.id, resetOverrides);
+            resetCurrentMonthSummaryStats(client, interaction.guild.id);
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_MODSTATS,
