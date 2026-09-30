@@ -683,7 +683,9 @@ function resolveEmbedTemplateText(text, client, guildId) {
         const replacement = resolveEmbedStatToken(client, guildId, 'totalbans');
         return replacement === null ? match : replacement;
     });
-    const withRobloxStats = withTotalBans.replace(/\{(\d{17,20})_(robloxbans|%)\}/gi, (match, userId, metric) => {
+    const withRobloxStats = withTotalBans.replace(/(?:\{(\d{17,20})_(robloxbans|%)\}|<(\d{17,20})_(robloxbans|%)>)/gi, (match, curlyUserId, curlyMetric, angleUserId, angleMetric) => {
+        const userId = curlyUserId || angleUserId;
+        const metric = curlyMetric || angleMetric;
         const replacement = resolveEmbedStatToken(client, guildId, `${userId}_${metric}`);
         return replacement === null ? match : replacement;
     });
