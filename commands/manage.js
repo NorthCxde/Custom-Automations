@@ -626,9 +626,29 @@ function getModStatsCounts(client, guildId, moderatorId = null, days = null) {
     };
 }
 
+function getRobloxBanStats(client, guildId, moderatorId) {
+    const statsCommand = require('./stats');
+    const logs = client.modLogs?.get(guildId) || [];
+    const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guildId, logs);
+    const normalizedModeratorId = client.whitelistedModeratorIds?.has(String(moderatorId))
+        ? String(client.statsOwnerId || moderatorId)
+        : String(moderatorId);
+    const count = Number(counts.get(normalizedModeratorId) || 0);
+    const percentage = totalBans ? (count / totalBans) * 100 : 0;
+    return { count, percentage, totalBans };
+}
+
 function resolveEmbedStatToken(client, guildId, token) {
     const raw = String(token || '').trim();
     if (!raw) return null;
+
+    const robloxBanMatch = raw.match(/^(\d{17,20})_(robloxbans|%)$/i);
+    if (robloxBanMatch) {
+        const stats = getRobloxBanStats(client, guildId, robloxBanMatch[1]);
+        return robloxBanMatch[2].toLowerCase() === '%'
+            ? `${stats.percentage.toFixed(1)}%`
+            : String(stats.count);
+    }
 
     const userMatch = raw.match(/^(\d{17,20})_(bans|mutes|kicks|warns)(?:_(alltime|\d+days?))?$/i);
     if (userMatch) {
@@ -652,7 +672,11 @@ function resolveEmbedStatToken(client, guildId, token) {
 
 function resolveEmbedTemplateText(text, client, guildId) {
     const raw = String(text || '');
-    return raw.replace(/\{(?:(\d{17,20})_)?(bans|mutes|kicks|warns)(?:_(alltime|\d+days?))?\}/gi, (match, userId, metric, period) => {
+    const withRobloxStats = raw.replace(/\{(\d{17,20})_(robloxbans|%)\}/gi, (match, userId, metric) => {
+        const replacement = resolveEmbedStatToken(client, guildId, `${userId}_${metric}`);
+        return replacement === null ? match : replacement;
+    });
+    return withRobloxStats.replace(/\{(?:(\d{17,20})_)?(bans|mutes|kicks|warns)(?:_(alltime|\d+days?))?\}/gi, (match, userId, metric, period) => {
         const token = userId ? `${userId}_${metric}${period ? `_${period}` : ''}` : `${metric}${period ? `_${period}` : ''}`;
         const replacement = resolveEmbedStatToken(client, guildId, token);
         return replacement === null ? match : replacement;
