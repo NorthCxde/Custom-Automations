@@ -36,9 +36,7 @@ function buildSummaryEmbed(client, guild) {
         : ['No Roblox bans recorded this month.'];
 
     return new EmbedBuilder()
-        .setColor(0x57F287)
         .setTitle('Moderator Summary')
-        .setTimestamp(now)
         .setDescription([
             `## ${formatMonth(now)}`,
             `Total Bans: **${totalBans.toLocaleString()}**`,
@@ -54,15 +52,24 @@ module.exports = {
     description: 'Show the moderator Roblox-ban summary.',
     data: new SlashCommandBuilder()
         .setName('summary')
-        .setDescription('Show the moderator Roblox-ban summary.'),
+        .setDescription('Show the moderator Roblox-ban summary.')
+        .addStringOption(option => option
+            .setName('visibility')
+            .setDescription('Choose who can see the summary')
+            .setRequired(true)
+            .addChoices(
+                { name: 'Visible', value: 'visible' },
+                { name: 'Ephemeral', value: 'ephemeral' }
+            )),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server.', ephemeral: true });
         }
 
+        const visibility = interaction.options.getString('visibility', true);
         return interaction.reply({
             embeds: [buildSummaryEmbed(client, interaction.guild)],
-            ephemeral: true
+            ephemeral: visibility !== 'visible'
         });
     },
     buildSummaryEmbed
