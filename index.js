@@ -104,7 +104,8 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'work',
     'backup',
     'linkaccounts',
-    'addinfraction'
+    'addinfraction',
+    'summary'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
 const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'recentbans', 'quota', 'register', 'viewinfractions']);
