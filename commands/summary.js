@@ -5,26 +5,6 @@ const QUOTA_PERCENT = 8;
 const MAX_ROWS = 25;
 const STATS_TIME_ZONE = 'America/New_York';
 
-function getCurrentMonthMuteCounts(client, guildId, logs, date = new Date()) {
-    const { start, end } = statsCommand.getMonthRange(date);
-    const counts = new Map();
-
-    for (const entry of logs) {
-        if (String(entry.action || '').trim().toLowerCase() !== 'mute') continue;
-        const timestamp = new Date(entry.timestamp || '').getTime();
-        if (!Number.isFinite(timestamp) || timestamp < start || timestamp >= end) continue;
-
-        const moderatorId = String(entry.moderatorId || '').trim();
-        if (!moderatorId) continue;
-        const statsModeratorId = client.whitelistedModeratorIds?.has(moderatorId)
-            ? String(client.statsOwnerId || moderatorId)
-            : moderatorId;
-        counts.set(statsModeratorId, (counts.get(statsModeratorId) || 0) + 1);
-    }
-
-    return counts;
-}
-
 function formatMonth(date) {
     return date.toLocaleDateString('en-US', {
         month: 'long',
@@ -36,13 +16,11 @@ function buildSummaryEmbed(client, guild) {
     const logs = client.getModLogs(guild.id) || [];
     const now = new Date();
     const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guild.id, logs, now);
-    const muteCounts = getCurrentMonthMuteCounts(client, guild.id, logs, now);
     const rows = Array.from(counts.entries())
         .map(([moderatorId, count]) => ({
             moderatorId,
             count,
-            percentage: totalBans ? (count / totalBans) * 100 : 0,
-            mutes: muteCounts.get(moderatorId) || 0
+            percentage: totalBans ? (count / totalBans) * 100 : 0
         }))
         .sort((left, right) => right.count - left.count || left.moderatorId.localeCompare(right.moderatorId))
         .slice(0, MAX_ROWS);
@@ -53,7 +31,7 @@ function buildSummaryEmbed(client, guild) {
     const lines = rows.length
         ? rows.map((row, index) => {
             const indicator = row.percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
-            return `${index + 1}. <@${row.moderatorId}> ${indicator} (${row.percentage.toFixed(1)}%) | ${row.count} Roblox Bans | ${row.mutes} Mutes`;
+            return `${index + 1}. <@${row.moderatorId}> ${indicator} (${row.percentage.toFixed(1)}%) | ${row.count} Roblox Bans`;
         })
         : ['No Roblox bans recorded this month.'];
 
