@@ -12,15 +12,40 @@ function formatMonth(date) {
     });
 }
 
-function buildSummaryEmbed(client, guild) {
+function getRecentModeratorStats(client, guildId, logs, date = new Date()) {
+    const cutoff = date.getTime() - (30 * 24 * 60 * 60 * 1000);
+    const stats = new Map();
+    for (const entry of logs) {
+        const timestamp = new Date(entry.timestamp || '').getTime();
+        if (!Number.isFinite(timestamp) || timestamp < cutoff) continue;
+
+        const rawModeratorId = String(entry.moderatorId || '').trim();
+        if (!rawModeratorId) continue;
+        const moderatorId = client.whitelistedModeratorIds?.has(rawModeratorId)
+            ? String(client.statsOwnerId || rawModeratorId)
+            : rawModeratorId;
+        const current = stats.get(moderatorId) || { mutes: 0, discordBans: 0 };
+        const action = String(entry.action || '').trim().toLowerCase();
+        if (action === 'mute') current.mutes += 1;
+        if (action === 'ban' || action === 'temp ban') current.discordBans += 1;
+        stats.set(moderatorId, current);
+    }
+    return stats;
+}
+
+function buildSummaryEmbed(client, guild, report = 'summary') {
     const logs = client.getModLogs(guild.id) || [];
     const now = new Date();
     const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guild.id, logs, now);
+    const recentStats = report === 'server_stats'
+        ? getRecentModeratorStats(client, guild.id, logs, now)
+        : new Map();
     const rows = Array.from(counts.entries())
         .map(([moderatorId, count]) => ({
             moderatorId,
             count,
-            percentage: totalBans ? (count / totalBans) * 100 : 0
+            percentage: totalBans ? (count / totalBans) * 100 : 0,
+            ...(recentStats.get(moderatorId) || { mutes: 0, discordBans: 0 })
         }))
         .sort((left, right) => right.count - left.count || left.moderatorId.localeCompare(right.moderatorId))
         .slice(0, MAX_ROWS);
@@ -31,7 +56,10 @@ function buildSummaryEmbed(client, guild) {
     const lines = rows.length
         ? rows.map((row, index) => {
             const indicator = row.percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
-            return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count}** Roblox Bans`;
+            const serverStats = report === 'server_stats'
+                ? ` | **${row.mutes}** Mutes | **${row.discordBans}** Discord Bans`
+                : '';
+            return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count}** Roblox Bans${serverStats}`;
         })
         : ['No Roblox bans recorded this month.'];
 
@@ -60,6 +88,14 @@ module.exports = {
             .addChoices(
                 { name: 'Visible', value: 'visible' },
                 { name: 'Ephemeral', value: 'ephemeral' }
+            ))
+        .addStringOption(option => option
+            .setName('report')
+            .setDescription('Choose the summary version')
+            .setRequired(false)
+            .addChoices(
+                { name: 'Moderator Summary', value: 'summary' },
+                { name: 'Server Stats', value: 'server_stats' }
             )),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
@@ -67,8 +103,9 @@ module.exports = {
         }
 
         const visibility = interaction.options.getString('visibility', true);
+        const report = interaction.options.getString('report') || 'summary';
         return interaction.reply({
-            embeds: [buildSummaryEmbed(client, interaction.guild)],
+            embeds: [buildSummaryEmbed(client, interaction.guild, report)],
             ephemeral: visibility !== 'visible'
         });
     },
