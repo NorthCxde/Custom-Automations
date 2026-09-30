@@ -1676,6 +1676,27 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
     };
 }
 
+function createZeroModstatsOverride() {
+    const zeroStats = { mutes: 0, bans: 0, kicks: 0, warns: 0 };
+    return {
+        '7d': { ...zeroStats },
+        '30d': { ...zeroStats },
+        all: { ...zeroStats }
+    };
+}
+
+function getGuildModeratorIds(client, guildId) {
+    const ids = new Set(client.manualModerators || []);
+    for (const entry of client.modLogs?.get(guildId) || []) {
+        const moderatorId = String(entry.moderatorId || '').trim();
+        if (moderatorId) ids.add(moderatorId);
+    }
+    for (const userId of client.modStatsOverrides?.get(guildId)?.keys?.() || []) {
+        ids.add(String(userId));
+    }
+    return ids;
+}
+
 function buildRevokedInvitesPayload(client, guildId, selectedEntryId, notice) {
     const entries = typeof client.getRevokedInvites === 'function'
         ? client.getRevokedInvites(guildId)
@@ -3823,7 +3844,7 @@ module.exports = {
                 client.modStatsOverrides.set(interaction.guild.id, new Map());
             }
             
-            client.modStatsOverrides.get(interaction.guild.id).delete(userId);
+            client.modStatsOverrides.get(interaction.guild.id).set(userId, createZeroModstatsOverride());
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_MODSTATS,
@@ -3839,7 +3860,11 @@ module.exports = {
                 client.modStatsOverrides = new Map();
             }
             
-            client.modStatsOverrides.delete(interaction.guild.id);
+            const resetOverrides = new Map();
+            for (const moderatorId of getGuildModeratorIds(client, interaction.guild.id)) {
+                resetOverrides.set(moderatorId, createZeroModstatsOverride());
+            }
+            client.modStatsOverrides.set(interaction.guild.id, resetOverrides);
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_MODSTATS,
