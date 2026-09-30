@@ -90,8 +90,8 @@ module.exports = {
                 { name: 'Ephemeral', value: 'ephemeral' }
             ))
         .addStringOption(option => option
-            .setName('report')
-            .setDescription('Choose the summary version')
+            .setName('stats')
+            .setDescription('Choose whether to include Discord stats')
             .setRequired(false)
             .addChoices(
                 { name: 'Moderator Summary', value: 'summary' },
@@ -103,7 +103,7 @@ module.exports = {
         }
 
         const visibility = interaction.options.getString('visibility', true);
-        const report = interaction.options.getString('report') || 'summary';
+        const report = interaction.options.getString('stats') || 'summary';
         return interaction.reply({
             embeds: [buildSummaryEmbed(client, interaction.guild, report)],
             ephemeral: visibility !== 'visible'
