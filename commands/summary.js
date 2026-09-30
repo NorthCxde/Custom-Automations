@@ -31,7 +31,7 @@ function buildSummaryEmbed(client, guild) {
     const lines = rows.length
         ? rows.map((row, index) => {
             const indicator = row.percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
-            return `${index + 1}. <@${row.moderatorId}> ${indicator} (${row.percentage.toFixed(1)}%) | ${row.count} Roblox Bans`;
+            return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count} Roblox Bans**`;
         })
         : ['No Roblox bans recorded this month.'];
 
