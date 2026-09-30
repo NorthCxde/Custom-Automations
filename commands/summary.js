@@ -31,12 +31,12 @@ function buildSummaryEmbed(client, guild) {
     const lines = rows.length
         ? rows.map((row, index) => {
             const indicator = row.percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
-            return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count} Roblox Bans**`;
+            return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count}** Roblox Bans`;
         })
         : ['No Roblox bans recorded this month.'];
 
     return new EmbedBuilder()
-        .setColor(0x36393f)
+        .setColor(0x57F287)
         .setTitle('Moderator Summary')
         .setTimestamp(now)
         .setDescription([
@@ -45,7 +45,7 @@ function buildSummaryEmbed(client, guild) {
             '',
             `Top Moderator: ${topModerator}`,
             '',
-            ...lines
+            lines.join('\n\n')
         ].join('\n'));
 }
 
