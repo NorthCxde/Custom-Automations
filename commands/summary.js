@@ -33,11 +33,11 @@ function getRecentModeratorStats(client, guildId, logs, date = new Date()) {
     return stats;
 }
 
-function buildSummaryEmbed(client, guild, report = 'summary') {
+function buildSummaryEmbed(client, guild, includeServerStats = false) {
     const logs = client.getModLogs(guild.id) || [];
     const now = new Date();
     const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guild.id, logs, now);
-    const recentStats = report === 'server_stats'
+    const recentStats = includeServerStats
         ? getRecentModeratorStats(client, guild.id, logs, now)
         : new Map();
     const rows = Array.from(counts.entries())
@@ -56,7 +56,7 @@ function buildSummaryEmbed(client, guild, report = 'summary') {
     const lines = rows.length
         ? rows.map((row, index) => {
             const indicator = row.percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
-            const serverStats = report === 'server_stats'
+            const serverStats = includeServerStats
                 ? ` | **${row.mutes}** Mutes | **${row.discordBans}** Discord Bans`
                 : '';
             return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count}** Roblox Bans${serverStats}`;
@@ -89,23 +89,19 @@ module.exports = {
                 { name: 'Visible', value: 'visible' },
                 { name: 'Ephemeral', value: 'ephemeral' }
             ))
-        .addStringOption(option => option
-            .setName('stats')
-            .setDescription('Choose whether to include Discord stats')
-            .setRequired(false)
-            .addChoices(
-                { name: 'Moderator Summary', value: 'summary' },
-                { name: 'Discord Stats', value: 'server_stats' }
-            )),
+        .addBooleanOption(option => option
+            .setName('server_stats')
+            .setDescription('Include Discord Stats (optional)')
+            .setRequired(false)),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server.', ephemeral: true });
         }
 
         const visibility = interaction.options.getString('visibility', true);
-        const report = interaction.options.getString('stats') || 'summary';
+        const includeServerStats = interaction.options.getBoolean('server_stats') === true;
         return interaction.reply({
-            embeds: [buildSummaryEmbed(client, interaction.guild, report)],
+            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats)],
             ephemeral: visibility !== 'visible'
         });
     },
