@@ -642,6 +642,13 @@ function resolveEmbedStatToken(client, guildId, token) {
     const raw = String(token || '').trim();
     if (!raw) return null;
 
+    if (raw.toLowerCase() === 'totalbans') {
+        const statsCommand = require('./stats');
+        const logs = client.modLogs?.get(guildId) || [];
+        const { totalBans } = statsCommand.getModeratorBanCounts(client, guildId, logs);
+        return String(totalBans);
+    }
+
     const robloxBanMatch = raw.match(/^(\d{17,20})_(robloxbans|%)$/i);
     if (robloxBanMatch) {
         const stats = getRobloxBanStats(client, guildId, robloxBanMatch[1]);
@@ -672,7 +679,11 @@ function resolveEmbedStatToken(client, guildId, token) {
 
 function resolveEmbedTemplateText(text, client, guildId) {
     const raw = String(text || '');
-    const withRobloxStats = raw.replace(/\{(\d{17,20})_(robloxbans|%)\}/gi, (match, userId, metric) => {
+    const withTotalBans = raw.replace(/(?:\{totalbans\}|<totalbans>)/gi, (match) => {
+        const replacement = resolveEmbedStatToken(client, guildId, 'totalbans');
+        return replacement === null ? match : replacement;
+    });
+    const withRobloxStats = withTotalBans.replace(/\{(\d{17,20})_(robloxbans|%)\}/gi, (match, userId, metric) => {
         const replacement = resolveEmbedStatToken(client, guildId, `${userId}_${metric}`);
         return replacement === null ? match : replacement;
     });
