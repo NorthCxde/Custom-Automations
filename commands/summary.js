@@ -31,6 +31,14 @@ function getRecentModeratorStats(client, guildId, logs, date = new Date()) {
         stats.set(moderatorId, current);
     }
 
+    for (const [moderatorId, overrides] of client.modStatsOverrides?.get(guildId) || []) {
+        if (!overrides?.['30d']) continue;
+        stats.set(String(moderatorId), {
+            mutes: Math.max(0, Number(overrides['30d'].mutes) || 0),
+            discordBans: Math.max(0, Number(overrides['30d'].bans) || 0)
+        });
+    }
+
     return stats;
 }
 
