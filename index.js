@@ -7687,10 +7687,23 @@ client.on('messageCreate', async (message) => {
 
                 client.autoresponderCooldowns.set(cooldownKey, Date.now());
                 const expiry = client.parseAutoresponderExpiry(responder.response);
-                const rendered = client.applyAutoresponderVariables(expiry.output, message);
-                if (!rendered.output.trim()) continue;
+                const includeAppeals = /<appeals>/i.test(expiry.output);
+                const responseText = includeAppeals
+                    ? expiry.output.replace(/<appeals>/gi, '').trim()
+                    : expiry.output;
+                const rendered = client.applyAutoresponderVariables(responseText, message);
+                const components = includeAppeals
+                    ? [new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setLabel('Appeals')
+                            .setStyle(ButtonStyle.Link)
+                            .setURL(`https://discord.com/channels/${message.guild.id}/${APPEALS_PARENT_CHANNEL_ID}`)
+                    )]
+                    : [];
+                if (!rendered.output.trim() && !components.length) continue;
                 const sentMessage = await message.channel.send({
-                    content: rendered.output,
+                    content: rendered.output || undefined,
+                    components,
                     allowedMentions: {
                         parse: [],
                         users: [message.author.id],
