@@ -1399,6 +1399,17 @@ client.deleteAutomodRule = (guildId, entryId) => {
     return true;
 };
 
+client.parseAutoresponderExpiry = (template) => {
+    let deleteAfterMs = null;
+    const output = String(template || '').replace(/<(\d+)s>/gi, (marker, seconds) => {
+        const delay = Number(seconds) * 1000;
+        if (!Number.isSafeInteger(delay) || delay <= 0 || delay > 2147483647) return marker;
+        if (deleteAfterMs === null) deleteAfterMs = delay;
+        return '';
+    });
+    return { output: deleteAfterMs === null ? output : output.trim(), deleteAfterMs };
+};
+
 client.applyAutoresponderVariables = (template, message) => {
     let output = String(template || '');
     const guild = message.guild;
@@ -7675,8 +7686,10 @@ client.on('messageCreate', async (message) => {
                 if (Date.now() - lastSentAt < 5000) continue;
 
                 client.autoresponderCooldowns.set(cooldownKey, Date.now());
-                const rendered = client.applyAutoresponderVariables(responder.response, message);
-                await message.channel.send({
+                const expiry = client.parseAutoresponderExpiry(responder.response);
+                const rendered = client.applyAutoresponderVariables(expiry.output, message);
+                if (!rendered.output.trim()) continue;
+                const sentMessage = await message.channel.send({
                     content: rendered.output,
                     allowedMentions: {
                         parse: [],
@@ -7685,6 +7698,16 @@ client.on('messageCreate', async (message) => {
                         repliedUser: false
                     }
                 }).catch(err => console.error('Failed to send autoresponder message:', err));
+                if (sentMessage && expiry.deleteAfterMs !== null) {
+                    const timer = setTimeout(() => {
+                        sentMessage.delete().catch(err => {
+                            if (Number(err?.code) !== 10008) {
+                                console.error('Failed to delete autoresponder message:', err);
+                            }
+                        });
+                    }, expiry.deleteAfterMs);
+                    if (typeof timer.unref === 'function') timer.unref();
+                }
                 break;
             }
         }
