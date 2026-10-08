@@ -75,12 +75,15 @@ module.exports = {
             const dmSent = await interaction.user.send({
                 content: locationMessage,
                 embeds: statsEmbed ? [statsEmbed] : []
-            }).then(() => true).catch(() => false);
+            }).then(() => true).catch(error => {
+                console.error('Failed to DM manual backup details:', error);
+                return false;
+            });
 
             return interaction.reply({
                 content: dmSent
                     ? 'Manual backup completed successfully.'
-                    : 'Manual backup completed successfully, but I could not send the backup location by DM. Please enable DMs from server members.',
+                    : 'Manual backup completed successfully, but I could not send the backup details by DM. Check the bot logs for the delivery error.',
                 flags: MessageFlags.Ephemeral
             });
         } catch (error) {
