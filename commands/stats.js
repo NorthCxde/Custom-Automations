@@ -120,6 +120,9 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date()) {
     }
 
     const totalBans = Array.from(counts.values()).reduce((total, count) => total + count, 0);
+    for (const moderatorId of client.removedModerators || []) {
+        counts.delete(String(moderatorId));
+    }
     return { counts, totalBans };
 }
 

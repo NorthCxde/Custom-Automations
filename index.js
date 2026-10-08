@@ -105,6 +105,7 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'backup',
     'linkaccounts',
     'addinfraction',
+    'removemod',
     'summary'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
@@ -299,6 +300,7 @@ const revokedInvitesFile = path.join(dataPath, "revokedInvites.json");
 const securityFile = path.join(dataPath, "security.json");
 const commandAccessFile = path.join(dataPath, "commandAccess.json");
 const manualModeratorsFile = path.join(dataPath, "manual-moderators.json");
+const removedModeratorsFile = path.join(dataPath, "removed-moderators.json");
 const statsOverridesFile = path.join(dataPath, "stats-overrides.json");
 const appealsScanStateFile = path.join(dataPath, "appeals-scan-state.json");
 
@@ -424,6 +426,21 @@ client.loadManualModerators = () => {
     );
 };
 
+client.loadRemovedModerators = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(removedModeratorsFile)) fs.writeFileSync(removedModeratorsFile, '[]', 'utf8');
+
+    let parsed = [];
+    try {
+        parsed = JSON.parse(fs.readFileSync(removedModeratorsFile, 'utf8') || '[]');
+    } catch (err) {
+        console.error('Failed to read removed moderators file:', err);
+    }
+    client.removedModerators = new Set(
+        Array.isArray(parsed) ? parsed.map(String).filter(id => /^\d{17,20}$/.test(id)) : []
+    );
+};
+
 client.loadStatsOverrides = () => {
     if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
     if (!fs.existsSync(statsOverridesFile)) fs.writeFileSync(statsOverridesFile, '{}', 'utf8');
@@ -470,11 +487,26 @@ client.saveManualModerators = () => {
     fs.writeFileSync(manualModeratorsFile, `${JSON.stringify([...client.manualModerators], null, 2)}\n`, 'utf8');
 };
 
+client.saveRemovedModerators = () => {
+    fs.writeFileSync(removedModeratorsFile, `${JSON.stringify([...client.removedModerators], null, 2)}\n`, 'utf8');
+};
+
 client.addManualModerator = (userId) => {
     const normalized = String(userId || '').trim();
     if (!/^\d{17,20}$/.test(normalized)) return false;
     client.manualModerators.add(normalized);
+    if (client.removedModerators.delete(normalized)) client.saveRemovedModerators();
     client.saveManualModerators();
+    return true;
+};
+
+client.removeManualModerator = (userId) => {
+    const normalized = String(userId || '').trim();
+    if (!/^\d{17,20}$/.test(normalized) || !client.manualModerators.has(normalized)) return false;
+    client.manualModerators.delete(normalized);
+    client.removedModerators.add(normalized);
+    client.saveManualModerators();
+    client.saveRemovedModerators();
     return true;
 };
 
@@ -4430,6 +4462,7 @@ client.resetInfractionRule = (guildId, ruleKey) => {
 client.loadCommands();
 client.loadCommandAccessLevels();
 client.loadManualModerators();
+client.loadRemovedModerators();
 client.loadPermissions();
 client.loadLogChannels();
 client.loadModLogs();
