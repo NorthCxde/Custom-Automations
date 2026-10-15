@@ -14,33 +14,20 @@ function formatMonth(date) {
 }
 
 function getRecentModeratorStats(client, guildId, logs, date = new Date()) {
-    const cutoff = date.getTime() - (30 * 24 * 60 * 60 * 1000);
     const stats = new Map();
-    for (const entry of logs) {
-        if (entry.source === 'trello_blacklist') continue;
-        const timestamp = new Date(entry.timestamp || '').getTime();
-        if (!Number.isFinite(timestamp) || timestamp < cutoff) continue;
-
-        const rawModeratorId = String(entry.moderatorId || '').trim();
+    const moderatorIds = new Set(logs.map(entry => String(entry.moderatorId || '').trim()).filter(Boolean));
+    for (const moderatorId of client.modStatsOverrides?.get(guildId)?.keys() || []) moderatorIds.add(String(moderatorId));
+    for (const rawModeratorId of moderatorIds) {
         if (!rawModeratorId) continue;
         const moderatorId = client.whitelistedModeratorIds?.has(rawModeratorId)
             ? String(client.statsOwnerId || rawModeratorId)
             : rawModeratorId;
         const current = stats.get(moderatorId) || { mutes: 0, discordBans: 0 };
-        const action = String(entry.action || '').trim().toLowerCase();
-        if (action === 'mute') current.mutes += 1;
-        if (action === 'ban' || action === 'temp ban') current.discordBans += 1;
+        const counts = require('./modstats').getDiscordModstatsCounts(client, guildId, rawModeratorId, '30d', date.getTime());
+        current.mutes += counts.mutes;
+        current.discordBans += counts.bans;
         stats.set(moderatorId, current);
     }
-
-    for (const [moderatorId, overrides] of client.modStatsOverrides?.get(guildId) || []) {
-        if (!overrides?.['30d']) continue;
-        stats.set(String(moderatorId), {
-            mutes: Math.max(0, Number(overrides['30d'].mutes) || 0),
-            discordBans: Math.max(0, Number(overrides['30d'].bans) || 0)
-        });
-    }
-
     return stats;
 }
 

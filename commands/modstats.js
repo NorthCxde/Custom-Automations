@@ -8,71 +8,38 @@ const WARN_ACTIONS  = ['Warn'];
 const MS_7D  = 7  * 24 * 60 * 60 * 1000;
 const MS_30D = 30 * 24 * 60 * 60 * 1000;
 
-function countActions(logs, moderatorId, actionTypes, sinceMs) {
-    const now = Date.now();
+function countActions(logs, moderatorId, actionTypes, sinceMs, now = Date.now(), resetAt = null) {
     return logs.filter(log => {
         if (log.source === 'trello_blacklist') return false;
         if (String(log.moderatorId) !== String(moderatorId)) return false;
         if (!actionTypes.includes(log.action)) return false;
+        const timestamp = new Date(log.timestamp).getTime();
+        if (resetAt !== null && (!Number.isFinite(timestamp) || timestamp <= resetAt)) return false;
         if (sinceMs !== null) {
-            const ts = new Date(log.timestamp).getTime();
-            if (isNaN(ts) || now - ts > sinceMs) return false;
+            if (!Number.isFinite(timestamp) || now - timestamp > sinceMs) return false;
         }
         return true;
     }).length;
 }
 
-function buildModStatsEmbed(client, guildId, user, displayName, avatarUrl) {
+function getDiscordModstatsCounts(client, guildId, moderatorId, period = 'all', now = Date.now()) {
     const logs = client.modLogs.get(guildId) || [];
+    const override = client.modStatsOverrides?.get(guildId)?.get(String(moderatorId))?.[period];
+    const resetAt = override?.resetAt ? new Date(override.resetAt).getTime() : null;
+    const sinceMs = period === '7d' ? MS_7D : period === '30d' ? MS_30D : null;
+    const actionTypes = { mutes: MUTE_ACTIONS, bans: BAN_ACTIONS, kicks: KICK_ACTIONS, warns: WARN_ACTIONS };
+    return Object.fromEntries(Object.entries(actionTypes).map(([metric, actions]) => {
+        const baseline = Math.max(0, Number(override?.[metric]) || 0);
+        if (override && resetAt === null) return [metric, baseline];
+        return [metric, baseline + countActions(logs, moderatorId, actions, sinceMs, now, resetAt)];
+    }));
+}
+
+function buildModStatsEmbed(client, guildId, user, displayName, avatarUrl) {
     const uid  = user.id;
-
-    // Check if there's an override for this user
-    const hasOverrides = client.modStatsOverrides?.has(guildId) && client.modStatsOverrides.get(guildId).has(uid);
-    const userOverrides = hasOverrides ? client.modStatsOverrides.get(guildId).get(uid) : {};
-    
-    let mutes7, mutes30, mutesAll;
-    let bans7, bans30, bansAll;
-    let kicks7, kicks30, kicksAll;
-    let warns7, warns30, warnsAll;
-
-    // For 7 days
-    if (userOverrides['7d']) {
-        mutes7 = userOverrides['7d'].mutes || 0;
-        bans7 = userOverrides['7d'].bans || 0;
-        kicks7 = userOverrides['7d'].kicks || 0;
-        warns7 = userOverrides['7d'].warns || 0;
-    } else {
-        mutes7   = countActions(logs, uid, MUTE_ACTIONS,  MS_7D);
-        bans7    = countActions(logs, uid, BAN_ACTIONS,   MS_7D);
-        kicks7   = countActions(logs, uid, KICK_ACTIONS,  MS_7D);
-        warns7   = countActions(logs, uid, WARN_ACTIONS,  MS_7D);
-    }
-
-    // For 30 days
-    if (userOverrides['30d']) {
-        mutes30 = userOverrides['30d'].mutes || 0;
-        bans30 = userOverrides['30d'].bans || 0;
-        kicks30 = userOverrides['30d'].kicks || 0;
-        warns30 = userOverrides['30d'].warns || 0;
-    } else {
-        mutes30  = countActions(logs, uid, MUTE_ACTIONS,  MS_30D);
-        bans30   = countActions(logs, uid, BAN_ACTIONS,   MS_30D);
-        kicks30  = countActions(logs, uid, KICK_ACTIONS,  MS_30D);
-        warns30  = countActions(logs, uid, WARN_ACTIONS,  MS_30D);
-    }
-
-    // For all time
-    if (userOverrides['all']) {
-        mutesAll = userOverrides['all'].mutes || 0;
-        bansAll = userOverrides['all'].bans || 0;
-        kicksAll = userOverrides['all'].kicks || 0;
-        warnsAll = userOverrides['all'].warns || 0;
-    } else {
-        mutesAll = countActions(logs, uid, MUTE_ACTIONS,  null);
-        bansAll  = countActions(logs, uid, BAN_ACTIONS,   null);
-        kicksAll = countActions(logs, uid, KICK_ACTIONS,  null);
-        warnsAll = countActions(logs, uid, WARN_ACTIONS,  null);
-    }
+    const { mutes: mutes7, bans: bans7, kicks: kicks7, warns: warns7 } = getDiscordModstatsCounts(client, guildId, uid, '7d');
+    const { mutes: mutes30, bans: bans30, kicks: kicks30, warns: warns30 } = getDiscordModstatsCounts(client, guildId, uid, '30d');
+    const { mutes: mutesAll, bans: bansAll, kicks: kicksAll, warns: warnsAll } = getDiscordModstatsCounts(client, guildId, uid);
 
     const total7   = mutes7   + bans7   + kicks7   + warns7;
     const total30  = mutes30  + bans30  + kicks30  + warns30;
@@ -108,6 +75,7 @@ function buildModStatsEmbed(client, guildId, user, displayName, avatarUrl) {
 }
 
 module.exports = {
+    getDiscordModstatsCounts,
     name: 'modstats',
     description: 'Get moderation statistics for a mod/admin (based on mod log entries).',
     data: new SlashCommandBuilder()

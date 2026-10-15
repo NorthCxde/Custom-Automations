@@ -302,6 +302,7 @@ const commandAccessFile = path.join(dataPath, "commandAccess.json");
 const manualModeratorsFile = path.join(dataPath, "manual-moderators.json");
 const removedModeratorsFile = path.join(dataPath, "removed-moderators.json");
 const statsOverridesFile = path.join(dataPath, "stats-overrides.json");
+const discordModstatsFile = path.join(dataPath, "discord-modstats-overrides.json");
 const appealsScanStateFile = path.join(dataPath, "appeals-scan-state.json");
 
 client.allowedRoles = new Map();
@@ -439,6 +440,25 @@ client.loadRemovedModerators = () => {
     client.removedModerators = new Set(
         Array.isArray(parsed) ? parsed.map(String).filter(id => /^\d{17,20}$/.test(id)) : []
     );
+};
+
+client.loadDiscordModstats = () => {
+    if (!fs.existsSync(discordModstatsFile)) return;
+    const parsed = JSON.parse(fs.readFileSync(discordModstatsFile, 'utf8') || '{}');
+    client.modStatsOverrides.clear();
+    for (const [guildId, users] of Object.entries(parsed)) {
+        client.modStatsOverrides.set(guildId, new Map(Object.entries(users)));
+    }
+};
+
+client.saveDiscordModstats = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    const output = Object.fromEntries([...client.modStatsOverrides].map(([guildId, users]) =>
+        [guildId, Object.fromEntries(users)]
+    ));
+    const temporaryFile = `${discordModstatsFile}.tmp`;
+    fs.writeFileSync(temporaryFile, JSON.stringify(output, null, 2), 'utf8');
+    fs.renameSync(temporaryFile, discordModstatsFile);
 };
 
 client.loadStatsOverrides = () => {
@@ -4466,6 +4486,7 @@ client.loadRemovedModerators();
 client.loadPermissions();
 client.loadLogChannels();
 client.loadModLogs();
+client.loadDiscordModstats();
 client.loadBoostChannels();
 client.loadContentReactChannels();
 client.loadPrefixCommandState();

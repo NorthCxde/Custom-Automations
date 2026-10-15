@@ -1571,7 +1571,7 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
             kicks: logs7d.filter(log => log.action === 'Kick').length,
             warns: logs7d.filter(log => log.action === 'Warn').length
         };
-        stats7d = userOverrides['7d'] || logs7dStats;
+        stats7d = require('./modstats').getDiscordModstatsCounts(client, guildId, selectedUserId, '7d');
 
         // 30 days
         const logs30d = userLogs.filter(log => {
@@ -1584,7 +1584,7 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
             kicks: logs30d.filter(log => log.action === 'Kick').length,
             warns: logs30d.filter(log => log.action === 'Warn').length
         };
-        stats30d = userOverrides['30d'] || logs30dStats;
+        stats30d = require('./modstats').getDiscordModstatsCounts(client, guildId, selectedUserId, '30d');
 
         // All time
         const logsAllStats = {
@@ -1593,7 +1593,7 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
             kicks: userLogs.filter(log => log.action === 'Kick').length,
             warns: userLogs.filter(log => log.action === 'Warn').length
         };
-        statsAll = userOverrides['all'] || logsAllStats;
+        statsAll = require('./modstats').getDiscordModstatsCounts(client, guildId, selectedUserId);
     }
 
     const embed = new EmbedBuilder()
@@ -1678,7 +1678,7 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
 }
 
 function createZeroModstatsOverride() {
-    const zeroStats = { mutes: 0, bans: 0, kicks: 0, warns: 0 };
+    const zeroStats = { mutes: 0, bans: 0, kicks: 0, warns: 0, resetAt: new Date().toISOString() };
     return {
         '7d': { ...zeroStats },
         '30d': { ...zeroStats },
@@ -2742,7 +2742,7 @@ module.exports = {
                     warns: logs7d.filter(log => log.action === 'Warn').length
                 };
                 // Use override if it exists, otherwise use logs
-                periodStats = userOverrides[timePeriod] || logsStats;
+                periodStats = require('./modstats').getDiscordModstatsCounts(client, interaction.guild.id, userId, timePeriod);
             } else if (timePeriod === '30d') {
                 const logs30d = userLogs.filter(log => {
                     const ts = new Date(log.timestamp).getTime();
@@ -2755,7 +2755,7 @@ module.exports = {
                     warns: logs30d.filter(log => log.action === 'Warn').length
                 };
                 // Use override if it exists, otherwise use logs
-                periodStats = userOverrides[timePeriod] || logsStats;
+                periodStats = require('./modstats').getDiscordModstatsCounts(client, interaction.guild.id, userId, timePeriod);
             } else {
                 const logsStats = {
                     mutes: userLogs.filter(log => log.action === 'Mute').length,
@@ -2764,7 +2764,7 @@ module.exports = {
                     warns: userLogs.filter(log => log.action === 'Warn').length
                 };
                 // Use override if it exists, otherwise use logs
-                periodStats = userOverrides[timePeriod] || logsStats;
+                periodStats = require('./modstats').getDiscordModstatsCounts(client, interaction.guild.id, userId, timePeriod);
             }
             
             // Ensure all values are valid numbers
@@ -3843,6 +3843,7 @@ module.exports = {
             }
             
             client.modStatsOverrides.get(interaction.guild.id).set(userId, createZeroModstatsOverride());
+            client.saveDiscordModstats();
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_MODSTATS,
@@ -3863,6 +3864,7 @@ module.exports = {
                 resetOverrides.set(moderatorId, createZeroModstatsOverride());
             }
             client.modStatsOverrides.set(interaction.guild.id, resetOverrides);
+            client.saveDiscordModstats();
 
             await interaction.update(buildManagePayload(client, interaction.guild.id, {
                 panel: MANAGE_PANEL_MODSTATS,
@@ -4671,6 +4673,7 @@ module.exports = {
             const userOverrides = client.modStatsOverrides.get(interaction.guild.id).get(userId) || {};
             userOverrides[timePeriod] = { mutes, bans, kicks, warns };
             client.modStatsOverrides.get(interaction.guild.id).set(userId, userOverrides);
+            client.saveDiscordModstats();
 
             const periodLabel = timePeriod === '7d' ? 'Last 7 Days' : timePeriod === '30d' ? 'Last 30 Days' : 'All Time';
             const payload = buildManagePayload(client, interaction.guild.id, {
