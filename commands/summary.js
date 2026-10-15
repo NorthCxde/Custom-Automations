@@ -39,7 +39,7 @@ function formatLastMonthChange(currentCount, previousCount) {
     return ` **(${sign}${change.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% Last month${indicator ? ` ${indicator}` : ''})**`;
 }
 
-function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds = [], includeLastMonth = false, now = new Date()) {
+function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds = [], includeLastMonth = false, now = new Date(), isMidMonth = false) {
     const trainees = new Set(
         traineeIds instanceof Set || Array.isArray(traineeIds)
             ? [...traineeIds].map(String)
@@ -99,7 +99,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
         : ['No Roblox bans recorded this month.'];
 
     const embed = new EmbedBuilder()
-        .setTitle('Moderator Summary')
+        .setTitle(isMidMonth ? 'Mid-Month Moderator Summary' : 'Moderator Summary')
         .setDescription([
             `## ${formatMonth(now)}`,
             `**Total Bans:** **${grandTotal.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(grandTotal, previousGrandTotal) : ''}`,
@@ -174,6 +174,14 @@ module.exports = {
                 { name: 'Yes', value: 'yes' },
                 { name: 'No', value: 'no' }
             )
+            .setRequired(false))
+        .addStringOption(option => option
+            .setName('half')
+            .setDescription('Use the Mid-Month Moderator Summary title')
+            .addChoices(
+                { name: 'Yes', value: 'yes' },
+                { name: 'No', value: 'no' }
+            )
             .setRequired(false)),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
@@ -183,6 +191,7 @@ module.exports = {
         const visibility = interaction.options.getString('visibility', true);
         const includeServerStats = interaction.options.getBoolean('server_stats') === true;
         const includeLastMonth = interaction.options.getString('last_month') === 'yes';
+        const isMidMonth = interaction.options.getString('half') === 'yes';
         const includeTrainees = interaction.options.getString('trainee') !== 'no';
         await interaction.deferReply({ ephemeral: visibility !== 'visible' });
         let traineeIds = [];
@@ -203,7 +212,7 @@ module.exports = {
             }
         }
         return interaction.editReply({
-            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats, traineeIds, includeLastMonth)]
+            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats, traineeIds, includeLastMonth, new Date(), isMidMonth)]
         });
     },
     buildSummaryEmbed
