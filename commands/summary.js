@@ -47,7 +47,7 @@ function formatLastMonthChange(currentCount, previousCount) {
     if (!previousCount && currentCount) return ' **(N/A Last month)**';
     const change = previousCount ? ((currentCount - previousCount) / previousCount) * 100 : 0;
     const sign = change > 0 ? '+' : '';
-    const indicator = change > 0 ? '<:increase:1528565392245653615>' : change < 0 ? '<:decrease:1528565414207160521>' : '';
+    const indicator = change > 0 ? '<:increase:1528565392245653615>' : '<:decrease:1528565414207160521>';
     return ` **(${sign}${change.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% Last month${indicator ? ` ${indicator}` : ''})**`;
 }
 
