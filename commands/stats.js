@@ -145,7 +145,7 @@ async function buildStatsEmbed(client, guild, logs) {
     const lines = rows.length
         ? rows.map(row => {
             const percentage = totalBans ? (row.count / totalBans) * 100 : 0;
-            const indicator = percentage < 4 ? '❗' : percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
+            const indicator = percentage < 4 ? '❌' : percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
             return `${indicator} <@${row.moderatorId}> — ${row.count} bans (${percentage.toFixed(1)}%)`;
         })
         : ['No bans recorded this month.'];
