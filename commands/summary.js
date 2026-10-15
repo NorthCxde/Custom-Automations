@@ -116,7 +116,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
             `## ${formatMonth(now)}`,
             `**Total Bans:** **${grandTotal.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(grandTotal, previousGrandTotal) : ''}`,
             '',
-            `**Moderators:** **${totalBans.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(totalBans, previousStats.totalBans) : ''}`,
+            `Moderators: **${totalBans.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(totalBans, previousStats.totalBans) : ''}`,
             ...(trainees.size ? ['-# (excluding trainees)'] : []),
             '',
             `**Top Moderator:** ${topModerator}`,
@@ -140,15 +140,16 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
                 : '';
             return `${index + 1}. <@${row.moderatorId}> ${indicator} | **${row.count}** Roblox Bans${serverStats}${lastMonth}`;
         });
+        const traineeHeading = 'Trainee Bans:\n';
         let fieldValue = '';
         for (const line of traineeLines) {
-            if (fieldValue && fieldValue.length + line.length + 2 > 1024) {
-                embed.addFields({ name: 'Trainee Total Bans:', value: fieldValue });
+            if (fieldValue && traineeHeading.length + fieldValue.length + line.length + 2 > 1024) {
+                embed.addFields({ name: '\u200b', value: traineeHeading + fieldValue });
                 fieldValue = '';
             }
             fieldValue += `${fieldValue ? '\n\n' : ''}${line}`;
         }
-        if (fieldValue) embed.addFields({ name: 'Trainee Total Bans:', value: fieldValue });
+        if (fieldValue) embed.addFields({ name: '\u200b', value: traineeHeading + fieldValue });
     }
     return embed;
 }
