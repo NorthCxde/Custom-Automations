@@ -80,6 +80,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId 
         .setDescription([
             `## ${formatMonth(now)}`,
             `Total Bans: **${totalBans.toLocaleString()}**`,
+            ...(traineeId ? ['(excluding trainee)'] : []),
             '',
             `Top Moderator: ${topModerator}`,
             '',
@@ -94,8 +95,8 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId 
             ? ` | **${traineeStats?.mutes || 0}** Mutes | **${traineeStats?.discordBans || 0}** Discord Bans`
             : '';
         embed.addFields({
-            name: 'Trainee',
-            value: `<@${traineeId}> | **${traineeBans}** Roblox Bans${serverStats}`
+            name: 'Trainee Total Bans:',
+            value: `1. <@${traineeId}> | **${traineeBans}** Roblox Bans${serverStats}`
         });
     }
     return embed;
