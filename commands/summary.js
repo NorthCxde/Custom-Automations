@@ -74,8 +74,14 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId 
         .sort((left, right) => right.count - left.count || left.moderatorId.localeCompare(right.moderatorId))
         .slice(0, MAX_ROWS);
 
-    const topModerator = rows[0]?.moderatorId
-        ? `<@${rows[0].moderatorId}>`
+    const topCandidates = traineeId
+        ? [...rows, { moderatorId: traineeId, count: traineeBans }]
+        : rows;
+    const topEntry = [...topCandidates].sort((left, right) =>
+        right.count - left.count || left.moderatorId.localeCompare(right.moderatorId)
+    )[0];
+    const topModerator = topEntry?.moderatorId
+        ? `<@${topEntry.moderatorId}>`
         : 'None';
     const lines = rows.length
         ? rows.map((row, index) => {
