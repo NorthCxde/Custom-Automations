@@ -4,16 +4,20 @@ const OWNER_ID = '1486503754617323530';
 
 module.exports = {
     name: 'deletemymessages',
-    description: 'Delete your messages in a channel from the last 14 days',
+    description: 'Delete a user\'s messages in a channel from the last 14 days',
     data: new SlashCommandBuilder()
         .setName('deletemymessages')
-        .setDescription('Delete your messages in a channel from the last 14 days')
+        .setDescription('Delete a user\'s messages in a channel from the last 14 days')
         .setDefaultMemberPermissions(0)
         .addChannelOption(option =>
             option.setName('channel')
                 .setDescription('The channel to clean up')
                 .addChannelTypes(ChannelType.GuildText)
-                .setRequired(true)),
+                .setRequired(true))
+        .addUserOption(option => option
+            .setName('user')
+            .setDescription('Whose messages to delete (defaults to yourself)')
+            .setRequired(false)),
     async executeInteraction({ client, interaction }) {
         if (interaction.user.id !== OWNER_ID) return;
         if (!interaction.guild) {
@@ -21,6 +25,7 @@ module.exports = {
         }
 
         const channel = interaction.options.getChannel('channel');
+        const targetUser = interaction.options.getUser('user') || interaction.user;
         const yesId = `dmm_yes_${interaction.id}`;
         const noId = `dmm_no_${interaction.id}`;
 
@@ -30,7 +35,7 @@ module.exports = {
         );
 
         await interaction.reply({
-            content: `Warning: if you continue, I will delete all of your messages in <#${channel.id}> from the past 14 days.`,
+            content: `Warning: if you continue, I will delete all messages by <@${targetUser.id}> in <#${channel.id}> from the past 14 days.`,
             components: [row],
             ephemeral: true
         });
@@ -50,7 +55,7 @@ module.exports = {
             }
 
             await interaction.editReply({
-                content: `Starting deletion of your messages in <#${channel.id}> from the last 14 days...`,
+                content: `Starting deletion of messages by <@${targetUser.id}> in <#${channel.id}> from the last 14 days...`,
                 components: []
             });
 
@@ -82,7 +87,7 @@ module.exports = {
                 }
                 beforeId = oldestMsg.id;
 
-                const mine = arr.filter(m => m.author.id === OWNER_ID && m.createdTimestamp >= cutoff);
+                const mine = arr.filter(m => m.author.id === targetUser.id && m.createdTimestamp >= cutoff);
 
                 if (mine.length >= 2) {
                     const bulk = await channel.bulkDelete(mine, true).catch(() => null);
@@ -99,7 +104,7 @@ module.exports = {
             }
 
             await interaction.editReply({
-                content: `Deleted ${deleted} of your messages from <#${channel.id}>. Scanned ${scanned} messages from the last 14 days.`
+                content: `Deleted ${deleted} messages by <@${targetUser.id}> from <#${channel.id}>. Scanned ${scanned} messages from the last 14 days.`
             });
         });
 
