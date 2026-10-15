@@ -4,6 +4,7 @@ const statsCommand = require('./stats');
 const QUOTA_PERCENT = 8;
 const MAX_ROWS = 25;
 const STATS_TIME_ZONE = 'America/New_York';
+const TRAINEE_ROLE_ID = '1217365422501003284';
 
 function formatMonth(date) {
     return date.toLocaleDateString('en-US', {
@@ -50,17 +51,28 @@ function formatLastMonthChange(currentCount, previousCount) {
     return ` **(${sign}${change.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% Last month${indicator ? ` ${indicator}` : ''})**`;
 }
 
-function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId = null, includeLastMonth = false, now = new Date()) {
+function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds = [], includeLastMonth = false, now = new Date()) {
+    const trainees = new Set(
+        traineeIds instanceof Set || Array.isArray(traineeIds)
+            ? [...traineeIds].map(String)
+            : traineeIds ? [String(traineeIds)] : []
+    );
     const logs = client.getModLogs(guild.id) || [];
-    const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guild.id, logs, now, traineeId);
+    const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guild.id, logs, now, trainees);
     const { year, month } = statsCommand.getMonthRange(now);
     const previousMonthDate = new Date(Date.UTC(year, month - 1, 15, 12));
     const previousStats = includeLastMonth
-        ? statsCommand.getModeratorBanCounts(client, guild.id, logs, previousMonthDate, traineeId)
+        ? statsCommand.getModeratorBanCounts(client, guild.id, logs, previousMonthDate, trainees)
         : null;
-    const traineeBans = traineeId
-        ? Math.max(0, statsCommand.getModeratorBanCounts(client, guild.id, logs, now).totalBans - totalBans)
-        : 0;
+    const traineeClient = { ...client, whitelistedModeratorIds: new Set(), removedModerators: new Set() };
+    const allStats = statsCommand.getModeratorBanCounts(traineeClient, guild.id, logs, now);
+    const previousTraineeCounts = trainees.size && includeLastMonth
+        ? statsCommand.getModeratorBanCounts(traineeClient, guild.id, logs, previousMonthDate).counts
+        : new Map();
+    const traineeRows = [...trainees].map(moderatorId => ({
+        moderatorId,
+        count: allStats.counts.get(moderatorId) || 0
+    })).sort((left, right) => right.count - left.count || left.moderatorId.localeCompare(right.moderatorId));
     const recentStats = includeServerStats
         ? getRecentModeratorStats(client, guild.id, logs, now)
         : new Map();
@@ -74,9 +86,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId 
         .sort((left, right) => right.count - left.count || left.moderatorId.localeCompare(right.moderatorId))
         .slice(0, MAX_ROWS);
 
-    const topCandidates = traineeId
-        ? [...rows, { moderatorId: traineeId, count: traineeBans }]
-        : rows;
+    const topCandidates = [...rows, ...traineeRows];
     const topEntry = [...topCandidates].sort((left, right) =>
         right.count - left.count || left.moderatorId.localeCompare(right.moderatorId)
     )[0];
@@ -101,27 +111,38 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId 
         .setDescription([
             `## ${formatMonth(now)}`,
             `Total Bans: **${totalBans.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(totalBans, previousStats.totalBans) : ''}`,
-            ...(traineeId ? ['(excluding trainee)'] : []),
+            ...(trainees.size ? ['(excluding trainees)'] : []),
             '',
             `Top Moderator: ${topModerator}`,
             '',
             lines.join('\n\n')
         ].join('\n'));
 
-    if (traineeId) {
+    if (trainees.size) {
         const traineeStats = includeServerStats
-            ? getRecentModeratorStats({ ...client, whitelistedModeratorIds: new Set() }, guild.id, logs, now).get(traineeId)
-            : null;
-        const serverStats = includeServerStats
-            ? ` | **${traineeStats?.mutes || 0}** Mutes | **${traineeStats?.discordBans || 0}** Discord Bans`
-            : '';
-        const previousTraineeBans = includeLastMonth
-            ? Math.max(0, statsCommand.getModeratorBanCounts(client, guild.id, logs, previousMonthDate).totalBans - previousStats.totalBans)
-            : 0;
-        embed.addFields({
-            name: 'Trainee Total Bans:',
-            value: `1. <@${traineeId}> | **${traineeBans}** Roblox Bans${serverStats}${includeLastMonth ? formatLastMonthChange(traineeBans, previousTraineeBans) : ''}`
+            ? getRecentModeratorStats(traineeClient, guild.id, logs, now)
+            : new Map();
+        const traineeLines = traineeRows.map((row, index) => {
+            const percentage = allStats.totalBans ? (row.count / allStats.totalBans) * 100 : 0;
+            const indicator = percentage < 4 ? '❌' : percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
+            const discordStats = traineeStats.get(row.moderatorId);
+            const serverStats = includeServerStats
+                ? ` | **${discordStats?.mutes || 0}** Mutes | **${discordStats?.discordBans || 0}** Discord Bans`
+                : '';
+            const lastMonth = includeLastMonth
+                ? formatLastMonthChange(row.count, previousTraineeCounts.get(row.moderatorId) || 0)
+                : '';
+            return `${index + 1}. <@${row.moderatorId}> ${indicator} | **${row.count}** Roblox Bans${serverStats}${lastMonth}`;
         });
+        let fieldValue = '';
+        for (const line of traineeLines) {
+            if (fieldValue && fieldValue.length + line.length + 2 > 1024) {
+                embed.addFields({ name: 'Trainee Total Bans:', value: fieldValue });
+                fieldValue = '';
+            }
+            fieldValue += `${fieldValue ? '\n\n' : ''}${line}`;
+        }
+        if (fieldValue) embed.addFields({ name: 'Trainee Total Bans:', value: fieldValue });
     }
     return embed;
 }
@@ -144,10 +165,6 @@ module.exports = {
             .setName('server_stats')
             .setDescription('Include Discord Stats (optional)')
             .setRequired(false))
-        .addUserOption(option => option
-            .setName('trainee')
-            .setDescription('Show this trainee separately and exclude their bans from moderator quota')
-            .setRequired(false))
         .addStringOption(option => option
             .setName('last_month')
             .setDescription('Compare Roblox ban counts with the previous calendar month')
@@ -163,11 +180,25 @@ module.exports = {
 
         const visibility = interaction.options.getString('visibility', true);
         const includeServerStats = interaction.options.getBoolean('server_stats') === true;
-        const trainee = interaction.options.getUser('trainee');
         const includeLastMonth = interaction.options.getString('last_month') === 'yes';
-        return interaction.reply({
-            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats, trainee?.id, includeLastMonth)],
-            ephemeral: visibility !== 'visible'
+        await interaction.deferReply({ ephemeral: visibility !== 'visible' });
+        let traineeIds = [];
+        try {
+            const role = await interaction.guild.roles.fetch(TRAINEE_ROLE_ID);
+            if (role) {
+                const members = await interaction.guild.members.fetch();
+                traineeIds = [...members.values()]
+                    .filter(member => !member.user.bot && member.roles.cache.has(TRAINEE_ROLE_ID))
+                    .map(member => member.id);
+            }
+        } catch (error) {
+            if (Number(error?.code) !== 10011) {
+                console.error('Failed to load trainees for summary:', error);
+                return interaction.editReply({ content: 'I could not load the trainee role members. Please try again.' });
+            }
+        }
+        return interaction.editReply({
+            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats, traineeIds, includeLastMonth)]
         });
     },
     buildSummaryEmbed

@@ -87,6 +87,11 @@ function getMonthKey(year, month) {
 }
 
 function getModeratorBanCounts(client, guildId, logs, date = new Date(), excludedModeratorId = null) {
+    const excludedIds = new Set(
+        excludedModeratorId instanceof Set || Array.isArray(excludedModeratorId)
+            ? [...excludedModeratorId].map(String)
+            : excludedModeratorId ? [String(excludedModeratorId)] : []
+    );
     const { year, month } = getMonthRange(date);
     const bans = getCurrentMonthBans(logs, date);
     const counts = new Map();
@@ -95,7 +100,7 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date(), exclude
 
     for (const moderatorId of client.manualModerators || []) {
         const normalizedId = String(moderatorId);
-        if (normalizedId === excludedModeratorId) continue;
+        if (excludedIds.has(normalizedId)) continue;
         if (client.whitelistedModeratorIds?.has(normalizedId)
             && normalizedId !== String(client.statsOwnerId || '1486503754617323530')) continue;
         counts.set(normalizedId, 0);
@@ -104,7 +109,7 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date(), exclude
     for (const entry of bans) {
         const moderatorId = String(entry.moderatorId || '').trim();
         if (!moderatorId) continue;
-        if (moderatorId === excludedModeratorId) continue;
+        if (excludedIds.has(moderatorId)) continue;
         const statsModeratorId = client.whitelistedModeratorIds?.has(moderatorId)
             ? String(client.statsOwnerId || '1486503754617323530')
             : moderatorId;
@@ -115,7 +120,7 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date(), exclude
     // so bans logged after the override was set still increment the total correctly.
     for (const [moderatorId, count] of overrides.entries()) {
         const key = String(moderatorId);
-        if (key === excludedModeratorId) continue;
+        if (excludedIds.has(key)) continue;
         const statsKey = client.whitelistedModeratorIds?.has(key)
             ? String(client.statsOwnerId || '1486503754617323530')
             : key;
