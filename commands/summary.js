@@ -166,6 +166,14 @@ module.exports = {
             .setDescription('Include Discord Stats (optional)')
             .setRequired(false))
         .addStringOption(option => option
+            .setName('trainee')
+            .setDescription('Separate trainee-role members from quota standings (default Yes)')
+            .addChoices(
+                { name: 'Yes', value: 'yes' },
+                { name: 'No', value: 'no' }
+            )
+            .setRequired(false))
+        .addStringOption(option => option
             .setName('last_month')
             .setDescription('Compare Roblox ban counts with the previous calendar month')
             .addChoices(
@@ -181,20 +189,23 @@ module.exports = {
         const visibility = interaction.options.getString('visibility', true);
         const includeServerStats = interaction.options.getBoolean('server_stats') === true;
         const includeLastMonth = interaction.options.getString('last_month') === 'yes';
+        const includeTrainees = interaction.options.getString('trainee') !== 'no';
         await interaction.deferReply({ ephemeral: visibility !== 'visible' });
         let traineeIds = [];
-        try {
-            const role = await interaction.guild.roles.fetch(TRAINEE_ROLE_ID);
-            if (role) {
-                const members = await interaction.guild.members.fetch();
-                traineeIds = [...members.values()]
-                    .filter(member => !member.user.bot && member.roles.cache.has(TRAINEE_ROLE_ID))
-                    .map(member => member.id);
-            }
-        } catch (error) {
-            if (Number(error?.code) !== 10011) {
-                console.error('Failed to load trainees for summary:', error);
-                return interaction.editReply({ content: 'I could not load the trainee role members. Please try again.' });
+        if (includeTrainees) {
+            try {
+                const role = await interaction.guild.roles.fetch(TRAINEE_ROLE_ID);
+                if (role) {
+                    const members = await interaction.guild.members.fetch();
+                    traineeIds = [...members.values()]
+                        .filter(member => !member.user.bot && member.roles.cache.has(TRAINEE_ROLE_ID))
+                        .map(member => member.id);
+                }
+            } catch (error) {
+                if (Number(error?.code) !== 10011) {
+                    console.error('Failed to load trainees for summary:', error);
+                    return interaction.editReply({ content: 'I could not load the trainee role members. Please try again.' });
+                }
             }
         }
         return interaction.editReply({
