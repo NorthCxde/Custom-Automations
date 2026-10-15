@@ -17,6 +17,7 @@ function getRecentModeratorStats(client, guildId, logs, date = new Date()) {
     const cutoff = date.getTime() - (30 * 24 * 60 * 60 * 1000);
     const stats = new Map();
     for (const entry of logs) {
+        if (entry.source === 'trello_blacklist') continue;
         const timestamp = new Date(entry.timestamp || '').getTime();
         if (!Number.isFinite(timestamp) || timestamp < cutoff) continue;
 

@@ -612,6 +612,7 @@ function getModStatsCounts(client, guildId, moderatorId = null, days = null) {
     const cutoff = periodDays ? Date.now() - (periodDays * 24 * 60 * 60 * 1000) : null;
 
     const filtered = logs.filter((log) => {
+        if (log.source === 'trello_blacklist') return false;
         if (moderatorId && String(log.moderatorId || '') !== String(moderatorId)) return false;
         if (cutoff === null) return true;
         const ts = new Date(log.timestamp).getTime();
@@ -1553,7 +1554,7 @@ function buildModstatsManagePayload(client, guildId, selectedUserId, notice) {
     let stats7d = null, stats30d = null, statsAll = null;
     if (selectedUserId) {
         const logs = client.modLogs?.get(guildId) || [];
-        const userLogs = logs.filter(log => String(log.moderatorId) === String(selectedUserId));
+        const userLogs = logs.filter(log => log.source !== 'trello_blacklist' && String(log.moderatorId) === String(selectedUserId));
         
         const MS_7D  = 7  * 24 * 60 * 60 * 1000;
         const MS_30D = 30 * 24 * 60 * 60 * 1000;
@@ -2721,7 +2722,7 @@ module.exports = {
             
             // Calculate stats from logs using the EXACT same method as the panel
             const logs = client.modLogs?.get(interaction.guild.id) || [];
-            const userLogs = logs.filter(log => String(log.moderatorId) === String(userId));
+            const userLogs = logs.filter(log => log.source !== 'trello_blacklist' && String(log.moderatorId) === String(userId));
             const userOverrides = client.modStatsOverrides.get(interaction.guild.id).get(userId) || {};
             
             const MS_7D  = 7  * 24 * 60 * 60 * 1000;

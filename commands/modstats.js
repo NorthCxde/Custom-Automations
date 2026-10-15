@@ -11,6 +11,7 @@ const MS_30D = 30 * 24 * 60 * 60 * 1000;
 function countActions(logs, moderatorId, actionTypes, sinceMs) {
     const now = Date.now();
     return logs.filter(log => {
+        if (log.source === 'trello_blacklist') return false;
         if (String(log.moderatorId) !== String(moderatorId)) return false;
         if (!actionTypes.includes(log.action)) return false;
         if (sinceMs !== null) {
