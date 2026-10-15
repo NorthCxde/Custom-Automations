@@ -115,11 +115,10 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
         .setDescription([
             `## ${formatMonth(now)}`,
             `**Total Bans:** **${grandTotal.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(grandTotal, previousGrandTotal) : ''}`,
+            `**Top Moderator:** ${topModerator}`,
             '',
             `Moderators: **${totalBans.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(totalBans, previousStats.totalBans) : ''}`,
             ...(trainees.size ? ['-# (excluding trainees)'] : []),
-            '',
-            `**Top Moderator:** ${topModerator}`,
             '',
             lines.join('\n\n')
         ].join('\n'));
