@@ -59,11 +59,15 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
     );
     const logs = client.getModLogs(guild.id) || [];
     const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guild.id, logs, now, trainees);
+    const grandTotal = statsCommand.getModeratorBanCounts(client, guild.id, logs, now).totalBans;
     const { year, month } = statsCommand.getMonthRange(now);
     const previousMonthDate = new Date(Date.UTC(year, month - 1, 15, 12));
     const previousStats = includeLastMonth
         ? statsCommand.getModeratorBanCounts(client, guild.id, logs, previousMonthDate, trainees)
         : null;
+    const previousGrandTotal = includeLastMonth
+        ? statsCommand.getModeratorBanCounts(client, guild.id, logs, previousMonthDate).totalBans
+        : 0;
     const traineeClient = { ...client, whitelistedModeratorIds: new Set(), removedModerators: new Set() };
     const allStats = statsCommand.getModeratorBanCounts(traineeClient, guild.id, logs, now);
     const previousTraineeCounts = trainees.size && includeLastMonth
@@ -110,8 +114,10 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
         .setTitle('Moderator Summary')
         .setDescription([
             `## ${formatMonth(now)}`,
-            `**Total Bans:** **${totalBans.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(totalBans, previousStats.totalBans) : ''}`,
-            ...(trainees.size ? ['(excluding trainees)'] : []),
+            `**Total Bans:** **${grandTotal.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(grandTotal, previousGrandTotal) : ''}`,
+            '',
+            `**Moderators:** **${totalBans.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(totalBans, previousStats.totalBans) : ''}`,
+            ...(trainees.size ? ['-# (excluding trainees)'] : []),
             '',
             `**Top Moderator:** ${topModerator}`,
             '',
