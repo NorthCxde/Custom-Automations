@@ -94,7 +94,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
             const lastMonth = includeLastMonth
                 ? formatLastMonthChange(row.count, previousStats.counts.get(row.moderatorId) || 0)
                 : '';
-            return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count}** Roblox Bans${serverStats}${lastMonth}`;
+            return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count}** Roblox Bans${serverStats}${lastMonth ? `\n⤷${lastMonth}` : ''}`;
         })
         : ['No Roblox bans recorded this month.'];
 
@@ -125,7 +125,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
             const lastMonth = includeLastMonth
                 ? formatLastMonthChange(row.count, previousTraineeCounts.get(row.moderatorId) || 0)
                 : '';
-            return `${index + 1}. <@${row.moderatorId}> ${indicator} | **${row.count}** Roblox Bans${serverStats}${lastMonth}`;
+            return `${index + 1}. <@${row.moderatorId}> ${indicator} | **${row.count}** Roblox Bans${serverStats}${lastMonth ? `\n⤷${lastMonth}` : ''}`;
         });
         const traineeHeading = 'Trainee Bans:\n';
         let fieldValue = '';
