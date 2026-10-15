@@ -42,10 +42,22 @@ function getRecentModeratorStats(client, guildId, logs, date = new Date()) {
     return stats;
 }
 
-function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId = null) {
+function formatLastMonthChange(currentCount, previousCount) {
+    if (!previousCount && currentCount) return ' **(N/A Last month)**';
+    const change = previousCount ? ((currentCount - previousCount) / previousCount) * 100 : 0;
+    const sign = change > 0 ? '+' : '';
+    const indicator = change > 0 ? '📈' : change < 0 ? '📉' : '';
+    return ` **(${sign}${change.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% Last month${indicator ? ` ${indicator}` : ''})**`;
+}
+
+function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId = null, includeLastMonth = false, now = new Date()) {
     const logs = client.getModLogs(guild.id) || [];
-    const now = new Date();
     const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guild.id, logs, now, traineeId);
+    const { year, month } = statsCommand.getMonthRange(now);
+    const previousMonthDate = new Date(Date.UTC(year, month - 1, 15, 12));
+    const previousStats = includeLastMonth
+        ? statsCommand.getModeratorBanCounts(client, guild.id, logs, previousMonthDate, traineeId)
+        : null;
     const traineeBans = traineeId
         ? Math.max(0, statsCommand.getModeratorBanCounts(client, guild.id, logs, now).totalBans - totalBans)
         : 0;
@@ -71,7 +83,10 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId 
             const serverStats = includeServerStats
                 ? ` | **${row.mutes}** Mutes | **${row.discordBans}** Discord Bans`
                 : '';
-            return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count}** Roblox Bans${serverStats}`;
+            const lastMonth = includeLastMonth
+                ? formatLastMonthChange(row.count, previousStats.counts.get(row.moderatorId) || 0)
+                : '';
+            return `${index + 1}. <@${row.moderatorId}> ${indicator} **(${row.percentage.toFixed(1)}%)** | **${row.count}** Roblox Bans${serverStats}${lastMonth}`;
         })
         : ['No Roblox bans recorded this month.'];
 
@@ -79,7 +94,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId 
         .setTitle('Moderator Summary')
         .setDescription([
             `## ${formatMonth(now)}`,
-            `Total Bans: **${totalBans.toLocaleString()}**`,
+            `Total Bans: **${totalBans.toLocaleString()}**${includeLastMonth ? formatLastMonthChange(totalBans, previousStats.totalBans) : ''}`,
             ...(traineeId ? ['(excluding trainee)'] : []),
             '',
             `Top Moderator: ${topModerator}`,
@@ -94,9 +109,12 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId 
         const serverStats = includeServerStats
             ? ` | **${traineeStats?.mutes || 0}** Mutes | **${traineeStats?.discordBans || 0}** Discord Bans`
             : '';
+        const previousTraineeBans = includeLastMonth
+            ? Math.max(0, statsCommand.getModeratorBanCounts(client, guild.id, logs, previousMonthDate).totalBans - previousStats.totalBans)
+            : 0;
         embed.addFields({
             name: 'Trainee Total Bans:',
-            value: `1. <@${traineeId}> | **${traineeBans}** Roblox Bans${serverStats}`
+            value: `1. <@${traineeId}> | **${traineeBans}** Roblox Bans${serverStats}${includeLastMonth ? formatLastMonthChange(traineeBans, previousTraineeBans) : ''}`
         });
     }
     return embed;
@@ -123,6 +141,14 @@ module.exports = {
         .addUserOption(option => option
             .setName('trainee')
             .setDescription('Show this trainee separately and exclude their bans from moderator quota')
+            .setRequired(false))
+        .addStringOption(option => option
+            .setName('last_month')
+            .setDescription('Compare Roblox ban counts with the previous calendar month')
+            .addChoices(
+                { name: 'Yes', value: 'yes' },
+                { name: 'No', value: 'no' }
+            )
             .setRequired(false)),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
@@ -132,8 +158,9 @@ module.exports = {
         const visibility = interaction.options.getString('visibility', true);
         const includeServerStats = interaction.options.getBoolean('server_stats') === true;
         const trainee = interaction.options.getUser('trainee');
+        const includeLastMonth = interaction.options.getString('last_month') === 'yes';
         return interaction.reply({
-            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats, trainee?.id)],
+            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats, trainee?.id, includeLastMonth)],
             ephemeral: visibility !== 'visible'
         });
     },
