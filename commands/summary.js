@@ -85,7 +85,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId 
         : 'None';
     const lines = rows.length
         ? rows.map((row, index) => {
-            const indicator = row.percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
+            const indicator = row.percentage < 4 ? '❗' : row.percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
             const serverStats = includeServerStats
                 ? ` | **${row.mutes}** Mutes | **${row.discordBans}** Discord Bans`
                 : '';
