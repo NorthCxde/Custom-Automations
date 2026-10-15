@@ -42,10 +42,13 @@ function getRecentModeratorStats(client, guildId, logs, date = new Date()) {
     return stats;
 }
 
-function buildSummaryEmbed(client, guild, includeServerStats = false) {
+function buildSummaryEmbed(client, guild, includeServerStats = false, traineeId = null) {
     const logs = client.getModLogs(guild.id) || [];
     const now = new Date();
-    const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guild.id, logs, now);
+    const { counts, totalBans } = statsCommand.getModeratorBanCounts(client, guild.id, logs, now, traineeId);
+    const traineeBans = traineeId
+        ? Math.max(0, statsCommand.getModeratorBanCounts(client, guild.id, logs, now).totalBans - totalBans)
+        : 0;
     const recentStats = includeServerStats
         ? getRecentModeratorStats(client, guild.id, logs, now)
         : new Map();
@@ -72,7 +75,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false) {
         })
         : ['No Roblox bans recorded this month.'];
 
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setTitle('Moderator Summary')
         .setDescription([
             `## ${formatMonth(now)}`,
@@ -82,6 +85,20 @@ function buildSummaryEmbed(client, guild, includeServerStats = false) {
             '',
             lines.join('\n\n')
         ].join('\n'));
+
+    if (traineeId) {
+        const traineeStats = includeServerStats
+            ? getRecentModeratorStats({ ...client, whitelistedModeratorIds: new Set() }, guild.id, logs, now).get(traineeId)
+            : null;
+        const serverStats = includeServerStats
+            ? ` | **${traineeStats?.mutes || 0}** Mutes | **${traineeStats?.discordBans || 0}** Discord Bans`
+            : '';
+        embed.addFields({
+            name: 'Trainee',
+            value: `<@${traineeId}> | **${traineeBans}** Roblox Bans${serverStats}`
+        });
+    }
+    return embed;
 }
 
 module.exports = {
@@ -101,6 +118,10 @@ module.exports = {
         .addBooleanOption(option => option
             .setName('server_stats')
             .setDescription('Include Discord Stats (optional)')
+            .setRequired(false))
+        .addUserOption(option => option
+            .setName('trainee')
+            .setDescription('Show this trainee separately and exclude their bans from moderator quota')
             .setRequired(false)),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guild) {
@@ -109,8 +130,9 @@ module.exports = {
 
         const visibility = interaction.options.getString('visibility', true);
         const includeServerStats = interaction.options.getBoolean('server_stats') === true;
+        const trainee = interaction.options.getUser('trainee');
         return interaction.reply({
-            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats)],
+            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats, trainee?.id)],
             ephemeral: visibility !== 'visible'
         });
     },

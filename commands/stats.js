@@ -86,7 +86,7 @@ function getMonthKey(year, month) {
     return `${year}-${String(month + 1).padStart(2, '0')}`;
 }
 
-function getModeratorBanCounts(client, guildId, logs, date = new Date()) {
+function getModeratorBanCounts(client, guildId, logs, date = new Date(), excludedModeratorId = null) {
     const { year, month } = getMonthRange(date);
     const bans = getCurrentMonthBans(logs, date);
     const counts = new Map();
@@ -95,6 +95,7 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date()) {
 
     for (const moderatorId of client.manualModerators || []) {
         const normalizedId = String(moderatorId);
+        if (normalizedId === excludedModeratorId) continue;
         if (client.whitelistedModeratorIds?.has(normalizedId)
             && normalizedId !== String(client.statsOwnerId || '1486503754617323530')) continue;
         counts.set(normalizedId, 0);
@@ -103,6 +104,7 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date()) {
     for (const entry of bans) {
         const moderatorId = String(entry.moderatorId || '').trim();
         if (!moderatorId) continue;
+        if (moderatorId === excludedModeratorId) continue;
         const statsModeratorId = client.whitelistedModeratorIds?.has(moderatorId)
             ? String(client.statsOwnerId || '1486503754617323530')
             : moderatorId;
@@ -113,6 +115,7 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date()) {
     // so bans logged after the override was set still increment the total correctly.
     for (const [moderatorId, count] of overrides.entries()) {
         const key = String(moderatorId);
+        if (key === excludedModeratorId) continue;
         const statsKey = client.whitelistedModeratorIds?.has(key)
             ? String(client.statsOwnerId || '1486503754617323530')
             : key;
