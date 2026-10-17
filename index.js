@@ -7360,6 +7360,20 @@ client.on('messageCreate', async (message) => {
                     console.error('Failed to react with fire emoji to content link:', err);
                 }
             }
+            if (linkMatch) {
+                try {
+                    await message.reply({
+                        content: '<@&1561089711290974360>',
+                        allowedMentions: {
+                            parse: [],
+                            roles: ['1561089711290974360'],
+                            repliedUser: false
+                        }
+                    });
+                } catch (err) {
+                    console.error('Failed to send content creator role ping:', err);
+                }
+            }
         }
     }
 
