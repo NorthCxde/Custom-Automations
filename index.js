@@ -7363,10 +7363,10 @@ client.on('messageCreate', async (message) => {
             if (linkMatch) {
                 try {
                     await message.reply({
-                        content: '<@&1561089711290974360>',
+                        content: '<@&1561089094707318845>',
                         allowedMentions: {
                             parse: [],
-                            roles: ['1561089711290974360'],
+                            roles: ['1561089094707318845'],
                             repliedUser: false
                         }
                     });
