@@ -63,6 +63,9 @@ const MANAGE_PERMS_LEVEL_SELECT_PREFIX = 'manage_perms_level_select:';
 const MANAGE_EMBEDS_SELECT_ID = 'manage_embeds_select';
 const MANAGE_EMBEDS_CREATE_ID = 'manage_embeds_create';
 const MANAGE_EMBEDS_EDIT_ID = 'manage_embeds_edit';
+const MANAGE_EMBEDS_IMAGE_ID = 'manage_embeds_image';
+const MANAGE_EMBEDS_IMAGE_MODAL_PREFIX = 'manage_embeds_image_modal:';
+const MODAL_EMBED_IMAGE_INPUT_ID = 'embed_image_url';
 const MANAGE_EMBEDS_SAVE_ID = 'manage_embeds_save';
 const MANAGE_EMBEDS_SEND_TEST_ID = 'manage_embeds_send_test';
 const MANAGE_EMBEDS_DELETE_ID = 'manage_embeds_delete';
@@ -404,6 +407,13 @@ function buildEmbedsManagePayload(client, guildId, notice, selectedEmbedId = nul
     );
 
     const payload = { embeds: [embed], components };
+    components.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(MANAGE_EMBEDS_IMAGE_ID)
+            .setLabel('Image')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(!activeDraft)
+    ));
     if (notice) payload.content = String(notice);
     return payload;
 }
@@ -3015,6 +3025,7 @@ module.exports = {
             && interaction.customId !== MANAGE_AUTORESPONDER_OPEN_ID
             && interaction.customId !== MANAGE_EMBEDS_CREATE_ID
             && interaction.customId !== MANAGE_EMBEDS_EDIT_ID
+            && interaction.customId !== MANAGE_EMBEDS_IMAGE_ID
             && interaction.customId !== MANAGE_EMBEDS_SAVE_ID
             && interaction.customId !== MANAGE_EMBEDS_SEND_TEST_ID
             && interaction.customId !== MANAGE_EMBEDS_DELETE_ID) {
@@ -3143,6 +3154,31 @@ module.exports = {
                 panel: MANAGE_PANEL_BLACKLISTED_EMOJIS,
                 selectedAutomodRuleId: selectedRuleId && selectedRuleId !== 'none' ? selectedRuleId : null
             }));
+            return true;
+        }
+
+        if (interaction.customId === MANAGE_EMBEDS_IMAGE_ID) {
+            const selectedId = getEmbedSelectedId(interaction.guild.id, interaction.user.id);
+            const selectedEntry = selectedId ? readEmbedEntry(interaction.guild.id, selectedId) : null;
+            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id)
+                || (selectedEntry ? normalizeEmbedDraft({ ...selectedEntry }) : null);
+            if (!draft) {
+                await interaction.reply({ content: 'Create or select an embed first.', ephemeral: true });
+                return true;
+            }
+            setEmbedDraft(interaction.guild.id, interaction.user.id, draft);
+            const merged = applyAdvancedEmbedOptions(draft);
+            const input = new TextInputBuilder()
+                .setCustomId(MODAL_EMBED_IMAGE_INPUT_ID)
+                .setLabel('Image link (leave blank to remove)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(false)
+                .setMaxLength(2000)
+                .setValue(String(merged.imageUrl || '').slice(0, 2000));
+            await interaction.showModal(new ModalBuilder()
+                .setCustomId(`${MANAGE_EMBEDS_IMAGE_MODAL_PREFIX}${draft.id}`)
+                .setTitle('Embed Image')
+                .addComponents(new ActionRowBuilder().addComponents(input)));
             return true;
         }
 
@@ -4117,6 +4153,7 @@ module.exports = {
             && !interaction.customId.startsWith(MANAGE_BLACKLISTED_EMOJIS_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_SECURITY_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_EMBEDS_MAIN_MODAL_PREFIX)
+            && !interaction.customId.startsWith(MANAGE_EMBEDS_IMAGE_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_EMBEDS_ADVANCED_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_EMBEDS_FIELDS_MODAL_PREFIX)
             && !interaction.customId.startsWith(MANAGE_USER_INFRACTIONS_AUTO_RESET_MODAL_PREFIX)) return false;
@@ -4349,6 +4386,42 @@ module.exports = {
                 }
                 return true;
             }
+        }
+
+        if (interaction.customId.startsWith(MANAGE_EMBEDS_IMAGE_MODAL_PREFIX)) {
+            const draftId = interaction.customId.slice(MANAGE_EMBEDS_IMAGE_MODAL_PREFIX.length);
+            const draft = getEmbedDraft(interaction.guild.id, interaction.user.id);
+            if (!draft || draft.id !== draftId) {
+                await interaction.reply({ content: 'This embed draft has expired. Select the embed again.', ephemeral: true });
+                return true;
+            }
+            const imageUrl = interaction.fields.getTextInputValue(MODAL_EMBED_IMAGE_INPUT_ID).trim();
+            if (imageUrl) {
+                try {
+                    const parsed = new URL(imageUrl);
+                    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Invalid image protocol');
+                } catch {
+                    await interaction.reply({ content: 'Enter a valid HTTP or HTTPS image link, or leave it blank to remove the image.', ephemeral: true });
+                    return true;
+                }
+            }
+            draft.imageUrl = imageUrl;
+            draft.extra = { ...draft.extra };
+            delete draft.extra.image;
+            delete draft.extra.imageUrl;
+            draft.updatedAt = new Date().toISOString();
+            setEmbedDraft(interaction.guild.id, interaction.user.id, draft);
+            setEmbedSelectedId(interaction.guild.id, interaction.user.id, draft.id);
+            await interaction.reply({
+                ...buildManagePayload(client, interaction.guild.id, {
+                    panel: MANAGE_PANEL_EMBEDS,
+                    selectedEmbedId: draft.id,
+                    embedDraft: draft,
+                    notice: 'Updated embed image. Press Save / Sync when ready.'
+                }),
+                ephemeral: true
+            });
+            return true;
         }
 
         if (interaction.customId.startsWith(MANAGE_EMBEDS_MAIN_MODAL_PREFIX)) {

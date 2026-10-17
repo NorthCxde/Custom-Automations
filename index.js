@@ -5564,7 +5564,8 @@ client.on('interactionCreate', async (interaction) => {
             || interaction.customId.startsWith('manage_automod_custom_modal:')
             || interaction.customId.startsWith('manage_blacklisted_emojis_modal:')
             || interaction.customId.startsWith('manage_security_modal:')
-            || interaction.customId.startsWith('manage_embeds_modal:')) {
+            || interaction.customId.startsWith('manage_embeds_modal:')
+            || interaction.customId.startsWith('manage_embeds_image_modal:')) {
             if (!HARD_CODED_ADMINS.includes(interaction.user.id)) {
                 return interaction.reply({ content: 'Only the bot admins can use this action.', ephemeral: true });
             }
