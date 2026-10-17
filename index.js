@@ -85,6 +85,7 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'enablecommands',
     'setboostchannel',
     'setcontentchannel',
+    'setfanartchannel',
     'addmod',
     'autoresponder',
     'synccommands',
@@ -279,6 +280,7 @@ const modLogsFile = path.join(dataPath, "modlogs.json");
 const linkedAccountsFile = path.join(dataPath, "linked-accounts.json");
 const boostChannelFile = path.join(dataPath, "boostchannel.json");
 const contentReactChannelFile = path.join(dataPath, "contentreactchannel.json");
+const fanartChannelFile = path.join(dataPath, "fanartchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
 const ticketScanStateFile = path.join(dataPath, "ticket-scan-state.json");
 const hideCommandStateFile = path.join(dataPath, "hidecommand-state.json");
@@ -311,6 +313,7 @@ client.modLogs = new Map();
 client.linkedAccountGroups = new Map();
 client.boostChannels = new Map();
 client.contentReactChannels = new Map();
+client.fanartChannels = new Map();
 client.pendingModerationActions = new Map();
 client.pendingPermsUndoActions = new Map();
 client.pendingGlobalModUndoActions = new Map();
@@ -3639,6 +3642,26 @@ client.saveContentReactChannels = () => {
     fs.writeFileSync(contentReactChannelFile, JSON.stringify(out, null, 2), 'utf8');
 };
 
+client.loadFanartChannels = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(fanartChannelFile)) fs.writeFileSync(fanartChannelFile, '{}', 'utf8');
+    let parsed = {};
+    try {
+        parsed = JSON.parse(fs.readFileSync(fanartChannelFile, 'utf8') || '{}');
+    } catch (error) {
+        console.error('Failed to read fanart channel file:', error);
+    }
+    client.fanartChannels.clear();
+    for (const [guildId, channelId] of Object.entries(parsed)) {
+        if (typeof channelId === 'string') client.fanartChannels.set(guildId, channelId);
+    }
+};
+
+client.saveFanartChannels = () => {
+    if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+    fs.writeFileSync(fanartChannelFile, JSON.stringify(Object.fromEntries(client.fanartChannels), null, 2), 'utf8');
+};
+
 client.loadForumPings = () => {
     if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
     if (!fs.existsSync(forumPingsFile)) fs.writeFileSync(forumPingsFile, '{}', 'utf8');
@@ -4489,6 +4512,7 @@ client.loadModLogs();
 client.loadDiscordModstats();
 client.loadBoostChannels();
 client.loadContentReactChannels();
+client.loadFanartChannels();
 client.loadPrefixCommandState();
 client.loadTicketScanState();
 client.loadAppealsScanState();
@@ -7325,6 +7349,7 @@ client.on('messageCreate', async (message) => {
     }
 
     if (message.guild && !message.author?.bot) {
+        await require('./commands/setfanartchannel').handleMessage({ client, message });
         const contentReactChannelId = client.contentReactChannels.get(message.guild.id);
         if (contentReactChannelId && message.channel.id === contentReactChannelId) {
             const linkMatch = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be|(?:m|www)\.tiktok\.com|(?:vm|vt)\.tiktok\.com)\S*/i.test(message.content || '');
