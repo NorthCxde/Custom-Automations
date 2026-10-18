@@ -15,6 +15,10 @@ npm start
 
 The bot will read `DISCORD_TOKEN` first and fall back to `config.json` only if the environment variable is not set.
 
+## Content channel
+
+Use `/setcontentchannel` to select the text channel for creator links. HTTP(S) links containing `youtube` or `tiktok` anywhere in the URL (case-insensitive), as well as `youtu.be` links, trigger a fire reaction and the existing creator-role ping. This includes mobile and shortened link variations; plain-text platform names do not trigger it.
+
 ## Run locally
 
 1. Install the new dependency:

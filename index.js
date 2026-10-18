@@ -7352,7 +7352,7 @@ client.on('messageCreate', async (message) => {
         await require('./commands/setfanartchannel').handleMessage({ client, message });
         const contentReactChannelId = client.contentReactChannels.get(message.guild.id);
         if (contentReactChannelId && message.channel.id === contentReactChannelId) {
-            const linkMatch = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be|(?:m|www)\.tiktok\.com|(?:vm|vt)\.tiktok\.com)\S*/i.test(message.content || '');
+            const linkMatch = /https?:\/\/[^\s<>]*(?:youtube|tiktok|youtu\.be)[^\s<>]*/i.test(message.content || '');
             if (linkMatch && !message.reactions.cache.has('🔥')) {
                 try {
                     await message.react('🔥');
