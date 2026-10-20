@@ -255,20 +255,22 @@ test('Visits and CCU replies use the selected game history and never call Roblox
             assert.equal(request.replies[0], 'deferred');
             assert.equal(request.replies.length, 2);
             const embed = request.replies[1].embeds[0].toJSON();
-            assert.equal(embed.title, `Statistics - ${type === 'visits' ? 'Visits' : 'CCU'}`);
+            assert.equal(embed.title, type === 'visits' ? 'Visit Statistics' : 'CCU Statistics');
             assert.equal(embed.timestamp, undefined);
+            assert.equal(embed.fields, undefined);
             assert.equal(embed.author.url, GAMES[gameKey].url);
             assert.equal(request.replies[1].components[0].toJSON().components[0].url, GAMES[gameKey].url);
-            assert.ok(embed.fields.some(field => field.name === 'History'));
-            assert.match(embed.footer.text, /does not auto-update/);
-            const fields = Object.fromEntries(embed.fields.map(field => [field.name, field.value]));
+            assert.match(embed.description, /### Tracking\n> Since <t:\d+:D> · Updated <t:\d+:R>/);
+            assert.match(embed.footer.text, /Does not auto-update/);
             if (type === 'visits') {
-                assert.match(fields['Past 24 hours'], /Insufficient history/);
-                assert.match(fields['Daily average'], /2,880/);
-                assert.match(fields['Weekly average'], /20,160/);
+                assert.match(embed.description, /### Current Visits\n> \*\*120\*\*/);
+                assert.match(embed.description, /### Visits Gained\n> Past 24 hours: \*Collecting data…\*\n> Past 7 days: \*Collecting data…\*/);
+                assert.match(embed.description, /### Averages\n> Daily: \*\*2,880\*\*\n> Weekly: \*\*20,160\*\*/);
             } else {
-                assert.match(fields['Past 24 hours'], /Incomplete history/);
-                assert.match(fields['Past 7 days'], /Sampled peak/);
+                assert.match(embed.description, /### Current CCU\n> \*\*10\*\* players online/);
+                assert.match(embed.description, /### Average CCU\n> Past 24 hours: \*\*10\*\*/);
+                assert.match(embed.description, /### Peak CCU\n> Past 24 hours: \*\*10\*\*/);
+                assert.match(embed.description, /-# Partial data coverage: 24h 0\.3% · 7d 0\.0%/);
             }
         }
     }

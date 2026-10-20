@@ -1,57 +1,70 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { GAMES } = require('../lib/roblox-game');
 
-const count = value => value.toLocaleString('en-US', { maximumFractionDigits: 1 });
+const count = value => Math.round(value).toLocaleString('en-US');
+const COLLECTING = '*Collecting data…*';
+const UNAVAILABLE = '*Unavailable*';
+const discordTime = (timestamp, style) => `<t:${Math.floor(timestamp / 1000)}:${style}>`;
 
-function visitPeriod(period) {
-    if (period.counterReset) return 'Unavailable: Roblox visit counter decreased.';
-    if (period.visits === null) return 'Insufficient history for this period.';
-    return `**${count(period.visits)}** visits`;
+function visitGain(period) {
+    if (period.counterReset) return UNAVAILABLE;
+    return period.visits === null ? COLLECTING : `**${count(period.visits)}**`;
 }
 
-function ccuPeriod(period) {
-    if (period.average === null) return 'Insufficient history for an average.';
-    const coverage = period.complete
-        ? 'Full sampled history'
-        : `Incomplete history: ${(period.coverage * 100).toFixed(1)}% time coverage`;
-    return `Average: **${count(period.average)}**\nSampled peak: **${count(period.peak)}**\n${coverage}`;
+function ccuValue(period, key) {
+    return period.average === null ? COLLECTING : `**${count(period[key])}**`;
+}
+
+function section(title, lines) {
+    return [`### ${title}`, ...lines.map(line => `> ${line}`)].join('\n');
 }
 
 function buildStatisticsEmbed(current, summary, type, game) {
-    const embed = new EmbedBuilder()
-        .setColor(0x000000)
-        .setAuthor({ name: current.name, url: game.url })
-        .setTitle(`Statistics - ${type === 'visits' ? 'Visits' : 'CCU'}`);
-
+    const sections = [];
     if (type === 'visits') {
-        const unavailable = summary.counterReset
-            ? 'Unavailable: Roblox visit counter decreased.'
-            : 'Collecting history (at least two snapshots, 5 minutes apart).';
-        embed.addFields(
-            { name: 'Current visits', value: `**${count(current.visits)}**` },
-            { name: 'Past 24 hours', value: visitPeriod(summary.day), inline: true },
-            { name: 'Past 7 days', value: visitPeriod(summary.week), inline: true },
-            { name: 'Daily average', value: summary.dailyAverage === null
-                ? unavailable : `**${count(summary.dailyAverage)}** visits/day`, inline: true },
-            { name: 'Weekly average', value: summary.weeklyAverage === null
-                ? unavailable : `**${count(summary.weeklyAverage)}** visits/week`, inline: true }
-        ).setDescription('Daily and weekly averages are rates across all collected history, not completed calendar periods.');
+        const average = value => (value === null
+            ? (summary.counterReset ? UNAVAILABLE : COLLECTING)
+            : `**${count(value)}**`);
+        sections.push(
+            section('Current Visits', [`**${count(current.visits)}**`]),
+            section('Visits Gained', [
+                `Past 24 hours: ${visitGain(summary.day)}`,
+                `Past 7 days: ${visitGain(summary.week)}`
+            ]),
+            section('Averages', [
+                `Daily: ${average(summary.dailyAverage)}`,
+                `Weekly: ${average(summary.weeklyAverage)}`
+            ])
+        );
     } else {
-        embed.addFields(
-            { name: 'Current CCU', value: `**${count(current.ccu)}** players online` },
-            { name: 'Past 24 hours', value: ccuPeriod(summary.day), inline: true },
-            { name: 'Past 7 days', value: ccuPeriod(summary.week), inline: true }
-        ).setDescription('CCU averages are time-weighted. Peaks are observed at collection times, not guaranteed real-time peaks. Gaps longer than 10 minutes are not filled.');
+        sections.push(
+            section('Current CCU', [`**${count(current.ccu)}** players online`]),
+            section('Average CCU', [
+                `Past 24 hours: ${ccuValue(summary.day, 'average')}`,
+                `Past 7 days: ${ccuValue(summary.week, 'average')}`
+            ]),
+            section('Peak CCU', [
+                `Past 24 hours: ${ccuValue(summary.day, 'peak')}`,
+                `Past 7 days: ${ccuValue(summary.week, 'peak')}`
+            ])
+        );
+        const partial = [['24h', summary.day], ['7d', summary.week]]
+            .filter(([, period]) => period.average !== null && !period.complete)
+            .map(([label, period]) => `${label} ${(period.coverage * 100).toFixed(1)}%`);
+        if (partial.length) sections.push(`-# Partial data coverage: ${partial.join(' · ')}`);
     }
 
-    const history = summary.origin
-        ? `History started <t:${Math.floor(summary.origin.timestamp / 1000)}:f>.`
-        : 'History collection has not succeeded yet.';
-    const last = summary.lastCollected
-        ? `Last saved snapshot: <t:${Math.floor(summary.lastCollected.timestamp / 1000)}:R>.`
-        : 'No snapshots saved.';
-    return embed.addFields({ name: 'History', value: `${history}\n${last}` })
-        .setFooter({ text: 'Latest saved 5-minute snapshot; visit counts have ~5-minute resolution. This message does not auto-update.' });
+    const tracking = summary.origin
+        ? `Since ${discordTime(summary.origin.timestamp, 'D')} · Updated ${discordTime(summary.lastCollected.timestamp, 'R')}`
+        : 'Not started yet';
+    sections.push(section('Tracking', [tracking]));
+
+    return new EmbedBuilder()
+        .setColor(0x000000)
+        .setAuthor({ name: current.name, url: game.url })
+        .setTitle(type === 'visits' ? 'Visit Statistics' : 'CCU Statistics')
+        .setDescription(sections.join('\n\n'))
+        .setFooter({ text: 'Collected every 5 minutes · Does not auto-update' });
 }
 
 module.exports = {
