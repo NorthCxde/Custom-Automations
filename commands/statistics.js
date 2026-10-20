@@ -60,7 +60,7 @@ function buildStatisticsEmbed(current, summary, type, game) {
     sections.push(section('Tracking', [tracking]));
 
     return new EmbedBuilder()
-        .setColor(0x000000)
+        .setColor(0x393A41)
         .setAuthor({ name: current.name, url: game.url })
         .setTitle(type === 'visits' ? 'Visit Statistics' : 'CCU Statistics')
         .setDescription(sections.join('\n\n'))
