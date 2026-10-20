@@ -19,6 +19,20 @@ The bot will read `DISCORD_TOKEN` first and fall back to `config.json` only if t
 
 Use `/setcontentchannel` to select the text channel for creator links. HTTP(S) links containing `youtube` or `tiktok` anywhere in the URL (case-insensitive), as well as `youtu.be` links, trigger a fire reaction and the existing creator-role ping. This includes mobile and shortened link variations; plain-text platform names do not trigger it.
 
+## Game statistics
+
+`/statistics type:Visits` and `/statistics type:CCU` show a non-updating snapshot of Timebomb Duels (the same game as `/game`). The command defaults to moderator access through the existing `/perms` roles; its access level can also be changed through `/manage`.
+
+- Visits: current total, visits gained in the rolling past 24 hours and 7 days, and daily/weekly visit rates across all collected history. Rates need at least five minutes of history; the weekly rate is the daily rate multiplied by seven, not a completed week's total.
+- CCU: current players online, time-weighted average CCU, and sampled peak CCU over the past 24 hours and 7 days. Peaks can miss spikes between samples. Incomplete time coverage is labeled, and samples are held for at most ten minutes so outages are not treated as observed activity.
+- Collection starts automatically on bot startup and repeats approximately every five minutes, without anyone running the command. Commands only read the latest saved snapshot (including its timestamp); they never trigger extra API requests. No Discord messages or routine collection logs are sent; only failures are logged. The bot saves history to `data/game-statistics.json`; keep this file across deploys and back it up. Run only one collector per data directory.
+- Historical data cannot be backfilled from the current Roblox game endpoint. Rolling visit totals remain unavailable until the relevant starting snapshot exists (within ten minutes of the window boundary); counts have approximately five-minute resolution. Visit counter decreases make affected totals and all-history rates unavailable rather than reporting misleading gains.
+- The most recent eight days of raw snapshots are retained, plus the original baseline used for all-history visit rates. History survives restarts. API/storage failures are logged; invalid history is not silently overwritten.
+
+Restart the bot to begin collection and register the new command. If needed, use `/synccommands` to refresh the server's commands.
+
+Run the focused tests with `node --test tests/game-statistics.test.js`.
+
 ## Run locally
 
 1. Install the new dependency:

@@ -32,6 +32,7 @@ const {
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
+const { GameStatistics } = require('./lib/game-statistics');
 const https = require("https");
 const { DEFAULT_INFRACTION_RULES, sanitizeInfractionRules, cloneInfractionRules, cloneInfractionRule, parseDurationMs } = require('./infractions');
 
@@ -4637,6 +4638,14 @@ client.syncSlashCommands = async (options = {}) => {
 client.on('clientReady', async () => {
     console.log(`Discord login successful. Token source: ${tokenSource}.`);
     console.log(`Boot marker: ${BOOT_MARKER}`);
+    if (!client.gameStatistics) {
+        try {
+            client.gameStatistics = new GameStatistics(path.join(dataPath, 'game-statistics.json'));
+            client.gameStatistics.start();
+        } catch (error) {
+            console.error('Failed to initialize game statistics history:', error);
+        }
+    }
     const { slashData, globalSlashData, guildSlashData } = await client.syncSlashCommands();
     console.log(`Ready! Registered ${slashData.length} slash command definition(s) (${globalSlashData.length} global, ${guildSlashData.length} guild).`);
 

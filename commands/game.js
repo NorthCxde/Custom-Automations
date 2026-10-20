@@ -1,27 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
-const PLACE_ID = '11379739543';
-const UNIVERSE_ID = '4049246711';
+const { PLACE_ID, fetchGameData } = require('../lib/roblox-game');
 const NINE_HUNDRED_MILLION = 900000000;
 const ONE_BILLION = 1000000000;
-
-async function fetchGameData() {
-    const response = await fetch(`https://games.roblox.com/v1/games?universeIds=${UNIVERSE_ID}`);
-    if (!response.ok) {
-        throw new Error(`Roblox game request failed with status ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const game = payload?.data?.[0];
-    if (!game) {
-        throw new Error('Roblox game data was not returned');
-    }
-
-    return {
-        name: String(game.name || 'Timebomb Duels'),
-        visits: Number(game.visits || 0)
-    };
-}
 
 function formatCount(value) {
     return Number(value || 0).toLocaleString('en-US');
