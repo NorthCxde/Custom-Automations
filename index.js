@@ -33,6 +33,7 @@ const {
 const fs = require("fs");
 const path = require("path");
 const { GameStatistics } = require('./lib/game-statistics');
+const { GAMES: ROBLOX_GAMES, fetchGameData: fetchRobloxGameData } = require('./lib/roblox-game');
 const https = require("https");
 const { DEFAULT_INFRACTION_RULES, sanitizeInfractionRules, cloneInfractionRules, cloneInfractionRule, parseDurationMs } = require('./infractions');
 
@@ -4639,11 +4640,15 @@ client.on('clientReady', async () => {
     console.log(`Discord login successful. Token source: ${tokenSource}.`);
     console.log(`Boot marker: ${BOOT_MARKER}`);
     if (!client.gameStatistics) {
-        try {
-            client.gameStatistics = new GameStatistics(path.join(dataPath, 'game-statistics.json'));
-            client.gameStatistics.start();
-        } catch (error) {
-            console.error('Failed to initialize game statistics history:', error);
+        client.gameStatistics = {};
+        for (const game of Object.values(ROBLOX_GAMES)) {
+            try {
+                const service = new GameStatistics(path.join(dataPath, game.historyFile), () => fetchRobloxGameData(game));
+                service.start();
+                client.gameStatistics[game.key] = service;
+            } catch (error) {
+                console.error(`Failed to initialize ${game.label} statistics history:`, error);
+            }
         }
     }
     const { slashData, globalSlashData, guildSlashData } = await client.syncSlashCommands();

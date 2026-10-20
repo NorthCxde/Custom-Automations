@@ -4,8 +4,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const vm = require('vm');
+const { MessageFlags } = require('discord.js');
 const { GameStatistics, summarizeWindow, INTERVAL, DAY, WEEK } = require('../lib/game-statistics');
-const { fetchGameData, UNIVERSE_ID } = require('../lib/roblox-game');
+const { fetchGameData, UNIVERSE_ID, GAMES } = require('../lib/roblox-game');
 const command = require('../commands/statistics');
 
 const START = 1700000000000;
@@ -19,13 +20,16 @@ function storage(t, fetchData) {
     return new GameStatistics(filePath, fetchData);
 }
 
-function interaction(type = 'visits') {
+function interaction(type = 'visits', game = 'timebomb') {
     const replies = [];
     return {
         guildId: 'guild',
-        options: { getString: () => type },
+        options: { getString: name => (name === 'game' ? game : type) },
         replies,
-        deferReply: async () => replies.push('deferred'),
+        deferReply: async options => {
+            assert.deepEqual(options, { flags: MessageFlags.Ephemeral });
+            replies.push('deferred');
+        },
         editReply: async payload => { replies.push(payload); return payload; },
         reply: async payload => { replies.push(payload); return payload; }
     };
@@ -53,6 +57,21 @@ test('Roblox fetch uses the matching universe, validates metrics, and has a time
     await assert.rejects(fetchGameData(), /invalid/);
     fetchMock.mock.mockImplementation(async () => ({ ok: true, json: async () => ({ data: [] }) }));
     await assert.rejects(fetchGameData(), /invalid/);
+});
+
+test('Custom Minigames fetches its own universe', async t => {
+    t.mock.method(globalThis, 'fetch', async url => {
+        assert.match(url, /universeIds=1617185934$/);
+        return {
+            ok: true,
+            json: async () => ({ data: [{ id: 1617185934, name: 'Custom Minigames', visits: 15678922, playing: 180 }] })
+        };
+    });
+    const result = await fetchGameData(GAMES.minigames);
+    assert.equal(result.name, 'Custom Minigames');
+    assert.equal(result.ccu, 180);
+    assert.equal(GAMES.timebomb.historyFile, 'game-statistics.json');
+    assert.notEqual(GAMES.minigames.historyFile, GAMES.timebomb.historyFile);
 });
 
 test('collects and restores history without requiring a command or extra fetches', async t => {
@@ -222,40 +241,47 @@ test('background errors are logged and retried without posting messages', async 
     service.stop();
 });
 
-test('Visits and CCU replies use saved history and never call Roblox or schedule updates', async t => {
+test('Visits and CCU replies use the selected game history and never call Roblox or schedule updates', async t => {
     let calls = 0;
     const service = storage(t, async () => snapshot(START + calls++ * INTERVAL, 100 + calls * 10));
+    const other = storage(t, async () => { throw new Error('Wrong game'); });
     await service.collect();
     await service.collect();
-    for (const type of ['visits', 'ccu']) {
-        const request = interaction(type);
-        await command.executeInteraction({ client: { gameStatistics: service }, interaction: request });
-        assert.equal(request.replies[0], 'deferred');
-        assert.equal(request.replies.length, 2);
-        const embed = request.replies[1].embeds[0].toJSON();
-        assert.equal(embed.title, `Statistics - ${type === 'visits' ? 'Visits' : 'CCU'}`);
-        assert.equal(embed.timestamp, new Date(service.latest().timestamp).toISOString());
-        assert.ok(embed.fields.some(field => field.name === 'History'));
-        assert.match(embed.footer.text, /does not auto-update/);
-        const fields = Object.fromEntries(embed.fields.map(field => [field.name, field.value]));
-        if (type === 'visits') {
-            assert.match(fields['Past 24 hours'], /Insufficient history/);
-            assert.match(fields['Daily average'], /2,880/);
-            assert.match(fields['Weekly average'], /20,160/);
-        } else {
-            assert.match(fields['Past 24 hours'], /Incomplete history/);
-            assert.match(fields['Past 7 days'], /Sampled peak/);
+    for (const [gameKey, gameStatistics] of [['timebomb', { timebomb: service, minigames: other }],
+        ['minigames', { timebomb: other, minigames: service }]]) {
+        for (const type of ['visits', 'ccu']) {
+            const request = interaction(type, gameKey);
+            await command.executeInteraction({ client: { gameStatistics }, interaction: request });
+            assert.equal(request.replies[0], 'deferred');
+            assert.equal(request.replies.length, 2);
+            const embed = request.replies[1].embeds[0].toJSON();
+            assert.equal(embed.title, `Statistics - ${type === 'visits' ? 'Visits' : 'CCU'}`);
+            assert.equal(embed.timestamp, undefined);
+            assert.equal(embed.author.url, GAMES[gameKey].url);
+            assert.equal(request.replies[1].components[0].toJSON().components[0].url, GAMES[gameKey].url);
+            assert.ok(embed.fields.some(field => field.name === 'History'));
+            assert.match(embed.footer.text, /does not auto-update/);
+            const fields = Object.fromEntries(embed.fields.map(field => [field.name, field.value]));
+            if (type === 'visits') {
+                assert.match(fields['Past 24 hours'], /Insufficient history/);
+                assert.match(fields['Daily average'], /2,880/);
+                assert.match(fields['Weekly average'], /20,160/);
+            } else {
+                assert.match(fields['Past 24 hours'], /Incomplete history/);
+                assert.match(fields['Past 7 days'], /Sampled peak/);
+            }
         }
     }
     assert.equal(calls, 2);
 });
 
-test('command registers required type choices and defaults to existing moderator permissions', () => {
+test('command registers required game and type choices and defaults to existing moderator permissions', () => {
     const definition = command.data.toJSON();
     assert.equal(definition.name, 'statistics');
     assert.equal(definition.dm_permission, false);
-    assert.equal(definition.options[0].required, true);
-    assert.deepEqual(definition.options[0].choices.map(choice => choice.name), ['Visits', 'CCU']);
+    assert.deepEqual(definition.options.map(option => [option.name, option.required]), [['game', true], ['type', true]]);
+    assert.deepEqual(definition.options[0].choices.map(choice => choice.name), ['Timebomb Duels', 'Custom Minigames']);
+    assert.deepEqual(definition.options[1].choices.map(choice => choice.name), ['Visits', 'CCU']);
     const source = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
     const assignment = source.match(/client\.getDefaultCommandAccessLevel = \(commandName\) => \{[\s\S]*?\n};/)[0];
     const publicNames = source.match(/const DEFAULT_PUBLIC_COMMAND_NAMES = new Set\([^\n]+/)[0];
@@ -267,9 +293,9 @@ test('command registers required type choices and defaults to existing moderator
 
 test('missing history, unavailable service, and DMs receive explicit replies', async t => {
     const service = storage(t);
-    const initial = interaction();
-    await command.executeInteraction({ client: { gameStatistics: service }, interaction: initial });
-    assert.match(initial.replies[1].content, /No game statistics have been saved/);
+    const initial = interaction('visits', 'minigames');
+    await command.executeInteraction({ client: { gameStatistics: { minigames: service } }, interaction: initial });
+    assert.match(initial.replies[1].content, /No Custom Minigames statistics have been saved/);
     t.mock.method(console, 'error', () => {});
     const unavailable = interaction();
     await command.executeInteraction({ client: {}, interaction: unavailable });
