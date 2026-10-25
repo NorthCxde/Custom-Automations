@@ -4643,7 +4643,7 @@ client.on('clientReady', async () => {
         client.gameStatistics = {};
         for (const game of Object.values(ROBLOX_GAMES)) {
             try {
-                const service = new GameStatistics(path.join(dataPath, game.historyFile), () => fetchRobloxGameData(game));
+                const service = new GameStatistics(path.join(dataPath, game.historyFile), () => fetchRobloxGameData(game, true));
                 service.start();
                 client.gameStatistics[game.key] = service;
             } catch (error) {

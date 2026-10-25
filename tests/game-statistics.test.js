@@ -20,11 +20,11 @@ function storage(t, fetchData) {
     return new GameStatistics(filePath, fetchData);
 }
 
-function interaction(type = 'visits', game = 'timebomb') {
+function interaction(type = 'visits', game = 'timebomb', milestone = null) {
     const replies = [];
     return {
         guildId: 'guild',
-        options: { getString: name => (name === 'game' ? game : type) },
+        options: { getString: name => (name === 'game' ? game : name === 'type' ? type : milestone) },
         replies,
         deferReply: async options => {
             assert.deepEqual(options, { flags: MessageFlags.Ephemeral });
@@ -37,17 +37,33 @@ function interaction(type = 'visits', game = 'timebomb') {
 
 test('Roblox fetch uses the matching universe, validates metrics, and has a timeout', async t => {
     const fetchMock = t.mock.method(globalThis, 'fetch', async (url, options) => {
-        assert.match(url, new RegExp(`universeIds=${UNIVERSE_ID}`));
         assert.ok(options.signal instanceof AbortSignal);
+        if (url.includes('/votes')) {
+            assert.match(url, new RegExp(`/${UNIVERSE_ID}/votes`));
+            return { ok: true, json: async () => ({ id: Number(UNIVERSE_ID), upVotes: 500, downVotes: 50 }) };
+        }
+        if (url.includes('/badges/')) {
+            assert.match(url, /\/badges\/2142457718$/);
+            return { ok: true, json: async () => ({
+                awardingUniverse: { id: Number(UNIVERSE_ID) },
+                statistics: { pastDayAwardedCount: 42, awardedCount: 1000 }
+            }) };
+        }
+        assert.match(url, new RegExp(`universeIds=${UNIVERSE_ID}`));
         return {
             ok: true,
-            json: async () => ({ data: [{ id: 1, visits: 0, playing: 0 },
-                { id: Number(UNIVERSE_ID), name: 'Timebomb Duels', visits: 900001234, playing: 1250 }] })
+            json: async () => ({ data: [{ id: 1, visits: 0, playing: 0, favoritedCount: 600 },
+                { id: Number(UNIVERSE_ID), name: 'Timebomb Duels', visits: 900001234, playing: 1250, favoritedCount: 600 }] })
         };
     });
-    const result = await fetchGameData();
+    const result = await fetchGameData(undefined, true);
     assert.equal(result.visits, 900001234);
     assert.equal(result.ccu, 1250);
+    assert.equal(result.favorites, 600);
+    assert.equal(result.likes, 500);
+    assert.equal(result.dislikes, 50);
+    assert.equal(result.newPlayers, 42);
+    assert.equal(result.badgeAwards, 1000);
     assert.ok(result.timestamp >= START);
     fetchMock.mock.mockImplementation(async () => ({ ok: false, status: 429 }));
     await assert.rejects(fetchGameData(), /429/);
@@ -61,17 +77,59 @@ test('Roblox fetch uses the matching universe, validates metrics, and has a time
 
 test('Custom Minigames fetches its own universe', async t => {
     t.mock.method(globalThis, 'fetch', async url => {
+        if (url.includes('/votes')) {
+            assert.match(url, /\/1617185934\/votes$/);
+            return { ok: true, json: async () => ({ id: 1617185934, upVotes: 20, downVotes: 3 }) };
+        }
+        if (url.includes('/badges/')) {
+            assert.match(url, /\/badges\/2124646244$/);
+            return { ok: true, json: async () => ({
+                awardingUniverse: { id: 1617185934 },
+                statistics: { pastDayAwardedCount: 4, awardedCount: 200 }
+            }) };
+        }
         assert.match(url, /universeIds=1617185934$/);
         return {
             ok: true,
-            json: async () => ({ data: [{ id: 1617185934, name: 'Custom Minigames', visits: 15678922, playing: 180 }] })
+            json: async () => ({ data: [{ id: 1617185934, name: 'Custom Minigames', visits: 15678922, playing: 180, favoritedCount: 80 }] })
         };
     });
-    const result = await fetchGameData(GAMES.minigames);
+    const result = await fetchGameData(GAMES.minigames, true);
     assert.equal(result.name, 'Custom Minigames');
     assert.equal(result.ccu, 180);
+    assert.equal(result.newPlayers, 4);
+    assert.equal(result.likes, 20);
+    assert.equal(result.dislikes, 3);
     assert.equal(GAMES.timebomb.historyFile, 'game-statistics.json');
     assert.notEqual(GAMES.minigames.historyFile, GAMES.timebomb.historyFile);
+});
+
+test('optional badge and vote failures do not interrupt visits or CCU collection', async t => {
+    const errors = t.mock.method(console, 'error', () => {});
+    t.mock.method(globalThis, 'fetch', async url => {
+        if (url.includes('/votes')) return { ok: false, status: 503 };
+        if (url.includes('/badges/')) {
+            return { ok: true, json: async () => ({
+                awardingUniverse: { id: Number(UNIVERSE_ID) },
+                statistics: { pastDayAwardedCount: 8, awardedCount: 80 }
+            }) };
+        }
+        return {
+            ok: true,
+            json: async () => ({ data: [{
+                id: Number(UNIVERSE_ID), name: 'Timebomb Duels', visits: 1234, playing: 56, favoritedCount: 78
+            }] })
+        };
+    });
+    const result = await fetchGameData(undefined, true);
+    assert.equal(result.visits, 1234);
+    assert.equal(result.ccu, 56);
+    assert.equal(result.favorites, 78);
+    assert.equal(result.newPlayers, 8);
+    assert.equal(result.badgeAwards, 80);
+    assert.equal(result.likes, null);
+    assert.equal(result.dislikes, null);
+    assert.equal(errors.mock.callCount(), 2);
 });
 
 test('collects and restores history without requiring a command or extra fetches', async t => {
@@ -157,6 +215,60 @@ test('raw history is bounded while all-history average retains its original base
     assert.equal(summary.dailyAverage, 100);
     assert.equal(summary.weeklyAverage, 700);
     assert.equal(summary.week.visits, null);
+});
+
+test('new metrics append to existing history without changing saved visit and CCU history', async t => {
+    const legacy = [
+        snapshot(START, 1000, 50),
+        snapshot(START + INTERVAL, 1100, 60)
+    ];
+    let call = 0;
+    const newSamples = [
+        { ...snapshot(START + 2 * INTERVAL, 1200, 70), favorites: 10, likes: 8, dislikes: 2, newPlayers: 5, badgeAwards: 100 },
+        { ...snapshot(START + 3 * INTERVAL, 1300, 80), favorites: 12, likes: 9, dislikes: 3, newPlayers: 7, badgeAwards: 102 }
+    ];
+    const service = storage(t, async () => newSamples[call++]);
+    service.state = {
+        version: 1, origin: legacy[0], counterReset: false, snapshots: legacy
+    };
+    const before = JSON.stringify(service.state);
+    await service.collect();
+    await service.collect();
+    assert.equal(service.state.origin.timestamp, START);
+    assert.deepEqual(service.state.snapshots.slice(0, 2), legacy);
+    assert.equal(JSON.stringify({ ...service.state, snapshots: legacy }), before);
+    const summary = service.summarize(service.latest());
+    assert.equal(summary.dailyAverage, 300 * DAY / (3 * INTERVAL));
+    assert.equal(summary.metricChanges.favorites.day, null);
+    assert.equal(summary.metricChanges.badgeAwards.week, null);
+});
+
+test('social net changes may decrease while badge award counts reject counter resets', async t => {
+    const service = storage(t);
+    const start = START;
+    const dayBaseline = {
+        ...snapshot(start + 6 * DAY, 1000, 10),
+        favorites: 50, likes: 30, dislikes: 20, badgeAwards: 100
+    };
+    const current = {
+        ...snapshot(start + WEEK, 1100, 10),
+        favorites: 48, likes: 35, dislikes: 18, badgeAwards: 120
+    };
+    const weekBaseline = {
+        ...snapshot(start, 0), favorites: 40, likes: 20, dislikes: 22, badgeAwards: 80
+    };
+    service.state = {
+        version: 1, origin: weekBaseline, counterReset: false,
+        snapshots: [weekBaseline, dayBaseline]
+    };
+    const summary = service.summarize(current);
+    assert.equal(summary.metricChanges.favorites.day, -2);
+    assert.equal(summary.metricChanges.likes.day, 5);
+    assert.equal(summary.metricChanges.dislikes.day, -2);
+    assert.equal(summary.metricChanges.badgeAwards.day, 20);
+    assert.equal(summary.metricChanges.badgeAwards.week, 40);
+    const reset = { ...current, badgeAwards: 70 };
+    assert.equal(service.summarize(reset).metricChanges.badgeAwards.week, null);
 });
 
 test('corrupt history is rejected without overwriting it', t => {
@@ -277,13 +389,75 @@ test('Visits and CCU replies use the selected game history and never call Roblox
     assert.equal(calls, 2);
 });
 
+test('New Players and social-stat types display badge awards and snapshot net changes', async t => {
+    const service = storage(t);
+    const baseline = {
+        ...snapshot(START, 1000, 10),
+        favorites: 10, likes: 5, dislikes: 2, newPlayers: 3, badgeAwards: 100
+    };
+    const dayBaseline = {
+        ...snapshot(START + 6 * DAY, 1600, 12),
+        favorites: 40, likes: 30, dislikes: 15, newPlayers: 20, badgeAwards: 150
+    };
+    const current = {
+        ...snapshot(START + WEEK, 1700, 14),
+        favorites: 50, likes: 35, dislikes: 12, newPlayers: 25, badgeAwards: 160
+    };
+    service.state = {
+        version: 1, origin: baseline, counterReset: false, snapshots: [baseline, dayBaseline, current]
+    };
+    for (const [type, expected] of [
+        ['new_players', ['Past 24 hours (rolling): **25**', 'Past 7 days: **+60**', 'Played Custom Minigames!']],
+        ['favorites', ['Current: **50**', 'Past 24 hours: **+10**', 'Past 7 days: **+40**']],
+        ['likes', ['Current: **35**', 'Past 24 hours: **+5**', 'Past 7 days: **+30**']],
+        ['dislikes', ['Current: **12**', 'Past 24 hours: **-3**', 'Past 7 days: **+10**']]
+    ]) {
+        const request = interaction(type, 'minigames');
+        await command.executeInteraction({
+            client: { gameStatistics: { minigames: service } }, interaction: request
+        });
+        const embed = request.replies[1].embeds[0].toJSON();
+        assert.equal(embed.title, {
+            new_players: 'New Players Statistics',
+            favorites: 'Favorites Statistics',
+            likes: 'Likes Statistics',
+            dislikes: 'Dislikes Statistics'
+        }[type]);
+        for (const line of expected) assert.ok(embed.description.includes(line), `${type}: ${line}`);
+        assert.equal(embed.timestamp, undefined);
+    }
+});
+
+test('optional milestone shows remaining visits and estimates a date from the preserved average', async t => {
+    let calls = 0;
+    const service = storage(t, async () => snapshot(START + calls++ * INTERVAL, 1000 + calls * 10));
+    await service.collect();
+    await service.collect();
+    const request = interaction('visits', 'timebomb', '1,000,000,000');
+    await command.executeInteraction({
+        client: { gameStatistics: { timebomb: service } }, interaction: request
+    });
+    const embed = request.replies[1].embeds[0].toJSON();
+    assert.match(embed.description, /### Milestone\n> \*\*999,998,980\*\* visits to \*\*1,000,000,000\*\*/);
+    assert.match(embed.description, /Estimated date: <t:\d+:D>/);
+    assert.equal(embed.timestamp, undefined);
+
+    const invalid = interaction('visits', 'timebomb', '1,00,0');
+    await command.executeInteraction({ client: {}, interaction: invalid });
+    assert.match(invalid.replies[1].content, /whole-number milestone/);
+});
+
 test('command registers required game and type choices and defaults to existing moderator permissions', () => {
     const definition = command.data.toJSON();
     assert.equal(definition.name, 'statistics');
     assert.equal(definition.dm_permission, false);
-    assert.deepEqual(definition.options.map(option => [option.name, option.required]), [['game', true], ['type', true]]);
+    assert.deepEqual(definition.options.map(option => [option.name, option.required]), [
+        ['game', true], ['type', true], ['milestone', false]
+    ]);
     assert.deepEqual(definition.options[0].choices.map(choice => choice.name), ['Timebomb Duels', 'Custom Minigames']);
-    assert.deepEqual(definition.options[1].choices.map(choice => choice.name), ['Visits', 'CCU']);
+    assert.deepEqual(definition.options[1].choices.map(choice => choice.name), [
+        'Visits', 'CCU', 'New Players', 'Favorites', 'Likes', 'Dislikes'
+    ]);
     const source = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
     const assignment = source.match(/client\.getDefaultCommandAccessLevel = \(commandName\) => \{[\s\S]*?\n};/)[0];
     const publicNames = source.match(/const DEFAULT_PUBLIC_COMMAND_NAMES = new Set\([^\n]+/)[0];
@@ -310,12 +484,20 @@ test('missing history, unavailable service, and DMs receive explicit replies', a
 
 test('/game retains its visit embed, milestone, button, and existing update lifecycle', async t => {
     const gameCommand = require('../commands/game');
-    t.mock.method(globalThis, 'fetch', async () => ({
-        ok: true,
-        json: async () => ({
-            data: [{ id: Number(UNIVERSE_ID), name: 'Timebomb Duels', visits: 950000000, playing: 100 }]
-        })
-    }));
+    let gameFetchCalls = 0;
+    t.mock.method(globalThis, 'fetch', async url => {
+        assert.match(url, /\/v1\/games\?universeIds=/);
+        gameFetchCalls += 1;
+        return {
+            ok: true,
+            json: async () => ({
+                data: [{
+                    id: Number(UNIVERSE_ID), name: 'Timebomb Duels', visits: 950000000, playing: 100,
+                    favoritedCount: 500
+                }]
+            })
+        };
+    });
     let refresh;
     let stop;
     const timer = {};
@@ -344,6 +526,7 @@ test('/game retains its visit embed, milestone, button, and existing update life
     assert.match(initial.components[0].toJSON().components[0].url, /11379739543/);
     await refresh();
     assert.equal(updated.embeds[0].toJSON().footer.text, 'Updating in 59 seconds');
+    assert.equal(gameFetchCalls, 1);
     stop();
     assert.equal(clear.mock.callCount(), 1);
 });

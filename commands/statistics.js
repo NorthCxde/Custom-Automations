@@ -1,10 +1,21 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { GAMES } = require('../lib/roblox-game');
+const { DAY } = require('../lib/game-statistics');
 
 const count = value => Math.round(value).toLocaleString('en-US');
+const countBigInt = value => value.toLocaleString('en-US');
 const COLLECTING = '*Collecting data…*';
 const UNAVAILABLE = '*Unavailable*';
 const discordTime = (timestamp, style) => `<t:${Math.floor(timestamp / 1000)}:${style}>`;
+
+function metricCount(value) {
+    return Number.isSafeInteger(value) && value >= 0 ? `**${count(value)}**` : UNAVAILABLE;
+}
+
+function metricChange(value) {
+    if (!Number.isSafeInteger(value)) return COLLECTING;
+    return `**${value > 0 ? '+' : ''}${count(value)}**`;
+}
 
 function visitGain(period) {
     if (period.counterReset) return UNAVAILABLE;
@@ -19,7 +30,41 @@ function section(title, lines) {
     return [`### ${title}`, ...lines.map(line => `> ${line}`)].join('\n');
 }
 
-function buildStatisticsEmbed(current, summary, type, game) {
+function parseMilestone(value) {
+    if (!value) return null;
+    const text = value.trim();
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(text)) {
+        throw new Error('Enter a whole-number milestone, such as 1,000,000,000.');
+    }
+    const milestone = BigInt(text.replace(/,/g, ''));
+    if (milestone <= 0n) throw new Error('Milestone must be greater than zero.');
+    return milestone;
+}
+
+function milestoneSection(current, summary, milestone) {
+    if (milestone === null) return null;
+    const target = BigInt(current.visits);
+    if (milestone <= target) {
+        return section('Milestone', [`**${countBigInt(milestone)}** visits reached`]);
+    }
+
+    const remaining = milestone - target;
+    const lines = [`**${countBigInt(remaining)}** visits to **${countBigInt(milestone)}**`];
+    if (!Number.isFinite(summary.dailyAverage) || summary.dailyAverage <= 0) {
+        lines.push(`Estimated date: ${COLLECTING}`);
+    } else {
+        const estimate = current.timestamp
+            + Math.ceil(Number(remaining) / summary.dailyAverage) * DAY;
+        if (Number.isSafeInteger(estimate) && Number.isFinite(new Date(estimate).getTime())) {
+            lines.push(`Estimated date: ${discordTime(estimate, 'D')}`);
+        } else {
+            lines.push('Estimated date: *Unavailable for this milestone*');
+        }
+    }
+    return section('Milestone', lines);
+}
+
+function buildStatisticsEmbed(current, summary, type, game, milestone = null) {
     const sections = [];
     if (type === 'visits') {
         const average = value => (value === null
@@ -36,7 +81,9 @@ function buildStatisticsEmbed(current, summary, type, game) {
                 `Weekly: ${average(summary.weeklyAverage)}`
             ])
         );
-    } else {
+        const goal = milestoneSection(current, summary, milestone);
+        if (goal) sections.push(goal);
+    } else if (type === 'ccu') {
         sections.push(
             section('Current CCU', [`**${count(current.ccu)}** players online`]),
             section('Average CCU', [
@@ -52,6 +99,28 @@ function buildStatisticsEmbed(current, summary, type, game) {
             .filter(([, period]) => period.average !== null && !period.complete)
             .map(([label, period]) => `${label} ${(period.coverage * 100).toFixed(1)}%`);
         if (partial.length) sections.push(`-# Partial data coverage: ${partial.join(' · ')}`);
+    } else if (type === 'new_players') {
+        sections.push(section('New Players', [
+            `Past 24 hours (rolling): ${metricCount(current.newPlayers)}`,
+            `Past 7 days: ${metricChange(summary.metricChanges.badgeAwards.week)}`,
+            `Based on the “${game.badgeName}” badge`
+        ]));
+    } else {
+        const metricNames = {
+            favorites: { title: 'Favorites', field: 'favorites' },
+            likes: { title: 'Likes', field: 'likes' },
+            dislikes: { title: 'Dislikes', field: 'dislikes' }
+        };
+        const metric = metricNames[type];
+        if (!metric) throw new Error(`Invalid statistics type: ${type}`);
+        const changes = summary.metricChanges[metric.field];
+        sections.push(
+            section(metric.title, [`Current: ${metricCount(current[metric.field])}`]),
+            section('Net Change', [
+                `Past 24 hours: ${metricChange(changes.day)}`,
+                `Past 7 days: ${metricChange(changes.week)}`
+            ])
+        );
     }
 
     const tracking = summary.origin
@@ -62,7 +131,14 @@ function buildStatisticsEmbed(current, summary, type, game) {
     return new EmbedBuilder()
         .setColor(0x393A41)
         .setAuthor({ name: current.name, url: game.url })
-        .setTitle(type === 'visits' ? 'Visit Statistics' : 'CCU Statistics')
+        .setTitle({
+            visits: 'Visit Statistics',
+            ccu: 'CCU Statistics',
+            new_players: 'New Players Statistics',
+            favorites: 'Favorites Statistics',
+            likes: 'Likes Statistics',
+            dislikes: 'Dislikes Statistics'
+        }[type])
         .setDescription(sections.join('\n\n'))
         .setFooter({ text: 'Collected every 5 minutes · Does not auto-update' });
 }
@@ -82,7 +158,19 @@ module.exports = {
             .setName('type')
             .setDescription('The performance statistics to display')
             .setRequired(true)
-            .addChoices({ name: 'Visits', value: 'visits' }, { name: 'CCU', value: 'ccu' })),
+            .addChoices(
+                { name: 'Visits', value: 'visits' },
+                { name: 'CCU', value: 'ccu' },
+                { name: 'New Players', value: 'new_players' },
+                { name: 'Favorites', value: 'favorites' },
+                { name: 'Likes', value: 'likes' },
+                { name: 'Dislikes', value: 'dislikes' }
+            ))
+        .addStringOption(option => option
+            .setName('milestone')
+            .setDescription('Optional visit milestone, for example 1,000,000,000 (Visits only)')
+            .setMaxLength(30)
+            .setRequired(false)),
     async executeInteraction({ client, interaction }) {
         if (!interaction.guildId) {
             return interaction.reply({ content: 'This command must be used in a server.', flags: MessageFlags.Ephemeral });
@@ -93,6 +181,9 @@ module.exports = {
         try {
             game = GAMES[interaction.options.getString('game', true)];
             if (!game) throw new Error('Invalid statistics game');
+            const type = interaction.options.getString('type', true);
+            const milestoneInput = interaction.options.getString('milestone');
+            const milestone = type === 'visits' ? parseMilestone(milestoneInput) : null;
             const service = client.gameStatistics?.[game.key];
             if (!service) throw new Error(`${game.label} statistics history service is unavailable`);
             const current = service.latest();
@@ -100,10 +191,12 @@ module.exports = {
                 return interaction.editReply({ content: `No ${game.label} statistics have been saved yet. Background collection runs every five minutes; please try again shortly.` });
             }
             const summary = service.summarize(current);
-            const type = interaction.options.getString('type', true);
-            if (type !== 'visits' && type !== 'ccu') throw new Error(`Invalid statistics type: ${type}`);
-            embed = buildStatisticsEmbed(current, summary, type, game);
+            embed = buildStatisticsEmbed(current, summary, type, game, milestone);
         } catch (error) {
+            if (error.message.startsWith('Enter a whole-number milestone')
+                || error.message === 'Milestone must be greater than zero.') {
+                return interaction.editReply({ content: error.message });
+            }
             console.error('Failed to fetch game statistics:', error);
             return interaction.editReply({ content: 'I could not load game statistics right now. Please try again later.' });
         }
