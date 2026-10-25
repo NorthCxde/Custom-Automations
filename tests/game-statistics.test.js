@@ -442,6 +442,14 @@ test('optional milestone shows remaining visits and estimates a date from the pr
     assert.match(embed.description, /Estimated date: <t:\d+:D>/);
     assert.equal(embed.timestamp, undefined);
 
+    const ccuRequest = interaction('ccu', 'timebomb', '1,000,000,000');
+    await command.executeInteraction({
+        client: { gameStatistics: { timebomb: service } }, interaction: ccuRequest
+    });
+    const ccuEmbed = ccuRequest.replies[1].embeds[0].toJSON();
+    assert.match(ccuEmbed.description, /### Milestone\n> \*\*999,998,980\*\* visits to \*\*1,000,000,000\*\*/);
+    assert.match(ccuEmbed.description, /Estimated date: <t:\d+:D>/);
+
     const invalid = interaction('visits', 'timebomb', '1,00,0');
     await command.executeInteraction({ client: {}, interaction: invalid });
     assert.match(invalid.replies[1].content, /whole-number milestone/);
@@ -458,6 +466,7 @@ test('command registers required game and type choices and defaults to existing 
     assert.deepEqual(definition.options[1].choices.map(choice => choice.name), [
         'Visits', 'CCU', 'New Players', 'Favorites', 'Likes', 'Dislikes'
     ]);
+    assert.match(definition.options[2].description, /Optional visit milestone/);
     const source = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
     const assignment = source.match(/client\.getDefaultCommandAccessLevel = \(commandName\) => \{[\s\S]*?\n};/)[0];
     const publicNames = source.match(/const DEFAULT_PUBLIC_COMMAND_NAMES = new Set\([^\n]+/)[0];

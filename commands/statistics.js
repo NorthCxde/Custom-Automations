@@ -81,8 +81,6 @@ function buildStatisticsEmbed(current, summary, type, game, milestone = null) {
                 `Weekly: ${average(summary.weeklyAverage)}`
             ])
         );
-        const goal = milestoneSection(current, summary, milestone);
-        if (goal) sections.push(goal);
     } else if (type === 'ccu') {
         sections.push(
             section('Current CCU', [`**${count(current.ccu)}** players online`]),
@@ -122,6 +120,8 @@ function buildStatisticsEmbed(current, summary, type, game, milestone = null) {
             ])
         );
     }
+    const goal = milestoneSection(current, summary, milestone);
+    if (goal) sections.push(goal);
 
     const tracking = summary.origin
         ? `Since ${discordTime(summary.origin.timestamp, 'D')} · Updated ${discordTime(summary.lastCollected.timestamp, 'R')}`
@@ -168,7 +168,7 @@ module.exports = {
             ))
         .addStringOption(option => option
             .setName('milestone')
-            .setDescription('Optional visit milestone, for example 1,000,000,000 (Visits only)')
+            .setDescription('Optional visit milestone, for example 1,000,000,000')
             .setMaxLength(30)
             .setRequired(false)),
     async executeInteraction({ client, interaction }) {
@@ -183,7 +183,7 @@ module.exports = {
             if (!game) throw new Error('Invalid statistics game');
             const type = interaction.options.getString('type', true);
             const milestoneInput = interaction.options.getString('milestone');
-            const milestone = type === 'visits' ? parseMilestone(milestoneInput) : null;
+            const milestone = parseMilestone(milestoneInput);
             const service = client.gameStatistics?.[game.key];
             if (!service) throw new Error(`${game.label} statistics history service is unavailable`);
             const current = service.latest();
