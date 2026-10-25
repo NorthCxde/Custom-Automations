@@ -41,27 +41,32 @@ function parseMilestone(value) {
     return milestone;
 }
 
-function milestoneSection(current, summary, milestone) {
-    if (milestone === null) return null;
-    const target = BigInt(current.visits);
+function milestoneSection(current, milestone, value, unit, dailyRate, title = 'Milestone', estimateDate = true) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        return section(title, [`Current ${unit}: ${UNAVAILABLE}`]);
+    }
+    const target = BigInt(value);
     if (milestone <= target) {
-        return section('Milestone', [`**${countBigInt(milestone)}** visits reached`]);
+        return section(title, [`**${countBigInt(milestone)}** ${unit} reached`]);
     }
 
     const remaining = milestone - target;
-    const lines = [`**${countBigInt(remaining)}** visits to **${countBigInt(milestone)}**`];
-    if (!Number.isFinite(summary.dailyAverage) || summary.dailyAverage <= 0) {
+    const lines = [`**${countBigInt(remaining)}** ${unit} to **${countBigInt(milestone)}**`];
+    if (!estimateDate) return section(title, lines);
+    if (dailyRate === null || dailyRate === undefined) {
         lines.push(`Estimated date: ${COLLECTING}`);
+    } else if (!Number.isFinite(dailyRate) || dailyRate <= 0) {
+        lines.push('Estimated date: *Unavailable — no positive growth*');
     } else {
         const estimate = current.timestamp
-            + Math.ceil(Number(remaining) / summary.dailyAverage) * DAY;
+            + Math.ceil(Number(remaining) / dailyRate * DAY);
         if (Number.isSafeInteger(estimate) && Number.isFinite(new Date(estimate).getTime())) {
             lines.push(`Estimated date: ${discordTime(estimate, 'D')}`);
         } else {
             lines.push('Estimated date: *Unavailable for this milestone*');
         }
     }
-    return section('Milestone', lines);
+    return section(title, lines);
 }
 
 function buildStatisticsEmbed(current, summary, type, game, milestone = null) {
@@ -101,6 +106,7 @@ function buildStatisticsEmbed(current, summary, type, game, milestone = null) {
         sections.push(section('New Players', [
             `Past 24 hours (rolling): ${metricCount(current.newPlayers)}`,
             `Past 7 days: ${metricChange(summary.metricChanges.badgeAwards.week)}`,
+            `All time: ${metricCount(current.badgeAwards)}`,
             `Based on the “${game.badgeName}” badge`
         ]));
     } else {
@@ -120,8 +126,26 @@ function buildStatisticsEmbed(current, summary, type, game, milestone = null) {
             ])
         );
     }
-    const goal = milestoneSection(current, summary, milestone);
-    if (goal) sections.push(goal);
+    if (milestone !== null) {
+        if (type === 'new_players') {
+            sections.push(
+                milestoneSection(current, milestone, current.newPlayers, 'new players',
+                    null, 'Milestone — Past 24 Hours', false),
+                milestoneSection(current, milestone, current.badgeAwards, 'new players',
+                    summary.metricDailyRates.badgeAwards, 'Milestone — All Time')
+            );
+        } else {
+            const metric = {
+                visits: { value: current.visits, unit: 'visits', rate: summary.dailyAverage },
+                ccu: { value: current.ccu, unit: 'players online', rate: null },
+                favorites: { value: current.favorites, unit: 'favorites', rate: summary.metricDailyRates.favorites },
+                likes: { value: current.likes, unit: 'likes', rate: summary.metricDailyRates.likes },
+                dislikes: { value: current.dislikes, unit: 'dislikes', rate: summary.metricDailyRates.dislikes }
+            }[type];
+            sections.push(milestoneSection(current, milestone, metric.value, metric.unit, metric.rate,
+                'Milestone', type !== 'ccu'));
+        }
+    }
 
     const tracking = summary.origin
         ? `Since ${discordTime(summary.origin.timestamp, 'D')} · Updated ${discordTime(summary.lastCollected.timestamp, 'R')}`
@@ -168,7 +192,7 @@ module.exports = {
             ))
         .addStringOption(option => option
             .setName('milestone')
-            .setDescription('Optional visit milestone, for example 1,000,000,000')
+            .setDescription('Optional goal for the selected statistic, for example 1,000,000,000')
             .setMaxLength(30)
             .setRequired(false)),
     async executeInteraction({ client, interaction }) {

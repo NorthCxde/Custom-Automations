@@ -447,12 +447,66 @@ test('optional milestone shows remaining visits and estimates a date from the pr
         client: { gameStatistics: { timebomb: service } }, interaction: ccuRequest
     });
     const ccuEmbed = ccuRequest.replies[1].embeds[0].toJSON();
-    assert.match(ccuEmbed.description, /### Milestone\n> \*\*999,998,980\*\* visits to \*\*1,000,000,000\*\*/);
-    assert.match(ccuEmbed.description, /Estimated date: <t:\d+:D>/);
+    assert.match(ccuEmbed.description, /### Milestone\n> \*\*999,999,990\*\* players online to \*\*1,000,000,000\*\*/);
+    assert.doesNotMatch(ccuEmbed.description, /Estimated date:/);
 
     const invalid = interaction('visits', 'timebomb', '1,00,0');
     await command.executeInteraction({ client: {}, interaction: invalid });
     assert.match(invalid.replies[1].content, /whole-number milestone/);
+});
+
+test('milestones use each metric and New Players shows rolling and lifetime goals', async t => {
+    const service = storage(t);
+    const first = {
+        ...snapshot(START, 100000, 10),
+        favorites: 100, likes: 200, dislikes: 30, badgeAwards: 500, newPlayers: 40
+    };
+    const current = {
+        ...snapshot(START + DAY, 110000, 20),
+        favorites: 110, likes: 220, dislikes: 35, badgeAwards: 550, newPlayers: 50
+    };
+    service.state = { version: 1, origin: first, counterReset: false, snapshots: [first, current] };
+    const render = async (type, milestone) => {
+        const request = interaction(type, 'timebomb', milestone);
+        await command.executeInteraction({ client: { gameStatistics: { timebomb: service } }, interaction: request });
+        return request.replies[1].embeds[0].toJSON().description;
+    };
+    for (const [type, remaining, rate] of [
+        ['favorites', 890, 10], ['likes', 780, 20], ['dislikes', 965, 5]
+    ]) {
+        const text = await render(type, '1,000');
+        assert.ok(text.includes(`**${remaining}** ${type} to **1,000**`));
+        const estimate = Math.floor((current.timestamp + remaining / rate * DAY) / 1000);
+        assert.ok(text.includes(`Estimated date: <t:${estimate}:D>`));
+        assert.doesNotMatch(text, /visits to/);
+        assert.doesNotMatch(await render(type, null), /### Milestone/);
+    }
+    const players = await render('new_players', '1,000');
+    assert.match(players, /All time: \*\*550\*\*/);
+    assert.match(players, /### Milestone — Past 24 Hours\n> \*\*950\*\* new players/);
+    assert.match(players, /### Milestone — All Time\n> \*\*450\*\* new players/);
+    assert.equal((players.match(/Estimated date:/g) || []).length, 1);
+    assert.match(await render('likes', '200'), /200\*\* likes reached/);
+    current.favorites = 90;
+    assert.match(await render('favorites', '1,000'), /no positive growth/);
+    current.favorites = null;
+    assert.match(await render('favorites', '1,000'), /Current favorites: \*Unavailable\*/);
+    delete first.dislikes;
+    assert.match(await render('dislikes', '1,000'), /Estimated date: \*Collecting data/);
+});
+
+test('metric growth estimates survive restoring history without changing visit baselines', async t => {
+    const first = { ...snapshot(START), favorites: 10, likes: 20, dislikes: 5, badgeAwards: 100 };
+    const next = { ...snapshot(START + DAY, 200), favorites: 30, likes: 40, dislikes: 6, badgeAwards: 150 };
+    let index = 0;
+    const service = storage(t, async () => [first, next][index++]);
+    await service.collect();
+    await service.collect();
+    const restored = new GameStatistics(service.filePath);
+    const summary = restored.summarize(restored.latest());
+    assert.deepEqual(summary.metricDailyRates, { favorites: 20, likes: 20, dislikes: 1, badgeAwards: 50 });
+    assert.deepEqual(restored.state.origin, first);
+    assert.equal(summary.dailyAverage, 100);
 });
 
 test('command registers required game and type choices and defaults to existing moderator permissions', () => {
@@ -466,7 +520,7 @@ test('command registers required game and type choices and defaults to existing 
     assert.deepEqual(definition.options[1].choices.map(choice => choice.name), [
         'Visits', 'CCU', 'New Players', 'Favorites', 'Likes', 'Dislikes'
     ]);
-    assert.match(definition.options[2].description, /Optional visit milestone/);
+    assert.match(definition.options[2].description, /goal for the selected statistic/);
     const source = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
     const assignment = source.match(/client\.getDefaultCommandAccessLevel = \(commandName\) => \{[\s\S]*?\n};/)[0];
     const publicNames = source.match(/const DEFAULT_PUBLIC_COMMAND_NAMES = new Set\([^\n]+/)[0];
