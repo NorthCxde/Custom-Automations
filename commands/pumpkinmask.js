@@ -32,11 +32,19 @@ module.exports = {
             .setName('image')
             .setDescription('Upload an image to wear the mask (up to 10 MB)')
             .setRequired(true)),
-    async execute({ message }) {
-        const image = message.attachments.first();
-        if (!image) {
+    async execute({ message, args = [] }) {
+        let image = message.attachments.first();
+        const target = args[0];
+        const userId = target?.match(/^(?:<@!?(\d{17,20})>|(\d{17,20}))$/);
+        if (target && !userId) {
             return message.reply({
-                content: 'Attach an image to your message when using ?pumpkinmask.',
+                content: 'Please provide a valid user ID or mention, such as ?pumpkinmask @user.',
+                allowedMentions: { repliedUser: false }
+            });
+        }
+        if (!image && !target) {
+            return message.reply({
+                content: 'Attach an image to ?pumpkinmask, or use ?pumpkinmask @user / user ID for a server avatar.',
                 allowedMentions: { repliedUser: false }
             });
         }
@@ -44,6 +52,22 @@ module.exports = {
             content: GENERATING,
             allowedMentions: { repliedUser: false }
         });
+        if (userId) {
+            try {
+                if (!message.guild) {
+                    return response.edit({ content: 'Server avatars can only be used in a server.' });
+                }
+                const member = await message.guild.members.fetch({ user: userId[1] || userId[2], force: true });
+                image = { url: member.displayAvatarURL({ extension: 'png', size: 1024, forceStatic: true }) };
+            } catch (error) {
+                console.error('Failed to fetch pumpkin mask server avatar:', error);
+                return response.edit({
+                    content: error.code === 10007 || error.code === 10013
+                        ? 'That user could not be found in this server.'
+                        : 'I could not load that server avatar right now. Please try again later.'
+                });
+            }
+        }
         return generateMask(image, payload => response.edit(payload));
     },
     async executeInteraction({ interaction }) {

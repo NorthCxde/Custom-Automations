@@ -211,3 +211,58 @@ test('prefix command explains missing attachments and replaces loading with imag
     assert.match(reply.content, /Could not read that image/);
     assert.equal(reply.files, undefined);
 });
+
+test('prefix IDs and mentions use the fetched server avatar before an attached image', async t => {
+    const userId = '123456789012345678';
+    const input = await solid(128, 128);
+    for (const [target, avatar] of [
+        [userId, 'https://cdn.discordapp.com/guilds/123/users/456/avatars/server.png'],
+        [`<@${userId}>`, 'https://cdn.discordapp.com/avatars/456/global.png'],
+        [`<@!${userId}>`, 'https://cdn.discordapp.com/embed/avatars/0.png']
+    ]) {
+        const events = [];
+        t.mock.method(globalThis, 'fetch', async url => {
+            assert.equal(url.href, avatar);
+            assert.match(events[0].content, /Generating/);
+            return new Response(input);
+        });
+        const result = await command.execute({
+            args: [target],
+            message: {
+                attachments: { first: () => attachment },
+                guild: { members: { fetch: async options => {
+                    assert.deepEqual(options, { user: userId, force: true });
+                    return { displayAvatarURL: options => {
+                        assert.deepEqual(options, { extension: 'png', size: 1024, forceStatic: true });
+                        return avatar;
+                    } };
+                } } },
+                reply: async payload => {
+                    events.push(payload);
+                    return { edit: async payload => { events.push(payload); return payload; } };
+                }
+            }
+        });
+        assert.equal(result.files[0].name, 'pumpkinmask.png');
+        assert.equal(events.length, 2);
+    }
+});
+
+test('invalid targets and missing members return errors instead of using an unrelated attachment', async t => {
+    const errors = t.mock.method(console, 'error', () => {});
+    let reply;
+    const message = {
+        attachments: { first: () => attachment },
+        guild: { members: { fetch: async () => { throw Object.assign(new Error('Unknown member'), { code: 10007 }); } } },
+        reply: async payload => {
+            reply = payload;
+            return { edit: async payload => { reply = payload; return payload; } };
+        }
+    };
+    await command.execute({ message, args: ['not-a-user'] });
+    assert.match(reply.content, /valid user ID or mention/);
+    await command.execute({ message, args: ['123456789012345678'] });
+    assert.match(reply.content, /could not be found in this server/);
+    assert.equal(reply.files, undefined);
+    assert.equal(errors.mock.callCount(), 1);
+});

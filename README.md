@@ -36,9 +36,15 @@ Restart the bot to begin collection and register the new command. If needed, use
 
 Run the focused tests with `node --test tests/game-statistics.test.js`.
 
+## GIF conversion
+
+`/gif` and `?gif` show "Generating..." with the application's animated Loading emoji before downloading and converting an image or video, then replace that message with the GIF or an error. `/gif` preserves its ephemeral and spoiler options; `?gif video` uses the same loading behavior for video attachments.
+
 ## Pumpkin mask
 
 Alternatively, send `?pumpkinmask` with an image attached to the same message. It processes the first attachment, using the same loading message, mask fitting, limits, and public command permissions as the slash command.
+
+Use `?pumpkinmask @user` or `?pumpkinmask USER_ID` to mask a current server member's server avatar (falling back to their normal avatar if no server avatar is set). A provided user ID/mention takes priority over an attached image. Invalid targets receive an error; avatar downloads have the same size, timeout, and pixel limits as uploads.
 
 `/pumpkinmask image:<attachment>` shows "Generating..." with the application's animated Halloween emoji while processing, then replaces it with a public, downloadable PNG. The output keeps the uploaded image's dimensions and aspect ratio (after correcting camera orientation). It automatically selects the proportionally closest mask: `assets/pumpkin-mask.png` for wide images, or `assets/pumpkin-mask-square.png` for square and portrait images. The selected mask is scaled proportionally to fit inside that canvas, centered on top, with solid black filling any space outside it. Transparent input pixels are also black-backed. The image is not stretched or cropped, and the command does not detect or reposition faces.
 

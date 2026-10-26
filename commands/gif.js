@@ -11,6 +11,7 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
+const GENERATING = 'Generating... <a:Loading:1564411829290008737>';
 
 let sharp;
 try {
@@ -139,6 +140,7 @@ module.exports = {
         }
 
         await interaction.deferReply({ ephemeral: ephemeral });
+        await interaction.editReply({ content: GENERATING });
 
         let imagePath = null;
         try {
@@ -164,7 +166,7 @@ module.exports = {
             if (spoiler) fileName = `SPOILER_${fileName}`;
 
             const file = new AttachmentBuilder(outputPath, { name: fileName });
-            await interaction.editReply({ files: [file] });
+            await interaction.editReply({ content: '', files: [file] });
 
             fs.unlinkSync(outputPath);
         } catch (error) {
@@ -195,6 +197,10 @@ module.exports = {
             return message.reply('Sharp library is not installed on the server. Contact the bot admin.');
         }
 
+        const response = await message.reply({
+            content: GENERATING,
+            allowedMentions: { repliedUser: false }
+        });
         let imagePath = null;
         let outputPath = null;
         try {
@@ -205,20 +211,21 @@ module.exports = {
                 : await convertToGif(imagePath, outputPath);
 
             if (!success || !fs.existsSync(outputPath)) {
-                return message.reply('Failed to convert the attachment to a GIF. Make sure it is a valid image.');
+                return await response.edit({ content: 'Failed to convert the attachment to a GIF. Make sure it is a valid image.' });
             }
 
             const stats = fs.statSync(outputPath);
             if (stats.size > 100 * 1024 * 1024) {
-                return message.reply('The converted GIF exceeds Discord\'s 100MB file limit.');
+                return await response.edit({ content: 'The converted GIF exceeds Discord\'s 100MB file limit.' });
             }
 
-            return await message.reply({
+            return await response.edit({
+                content: '',
                 files: [new AttachmentBuilder(outputPath, { name: 'converted.gif' })]
             });
         } catch (error) {
             console.error('Prefix GIF conversion error:', error);
-            return message.reply(`Error converting image: ${error.message}`);
+            return await response.edit({ content: `Error converting image: ${error.message}` });
         } finally {
             if (imagePath && fs.existsSync(imagePath)) {
                 fs.unlinkSync(imagePath);
