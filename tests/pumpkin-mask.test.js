@@ -165,3 +165,49 @@ test('command logs and replies explicitly on invalid image and download failure'
     assert.match(reply.content, /could not create your pumpkin mask/);
     assert.equal(errors.mock.callCount(), 2);
 });
+
+test('prefix command processes the attached image and edits its loading reply without pinging', async t => {
+    const input = await solid(256, 256);
+    const events = [];
+    t.mock.method(globalThis, 'fetch', async () => {
+        assert.equal(events[0].content, 'Generating... <a:Halloween:1564405562068705360>');
+        return new Response(input);
+    });
+    const response = {
+        edit: async payload => { events.push(payload); return payload; }
+    };
+    const result = await command.execute({
+        message: {
+            attachments: { first: () => ({ ...attachment, size: input.length }) },
+            reply: async payload => { events.push(payload); return response; }
+        }
+    });
+    assert.deepEqual(events[0].allowedMentions, { repliedUser: false });
+    assert.equal(events.length, 2);
+    assert.equal(result.content, '');
+    assert.equal(result.files[0].name, 'pumpkinmask.png');
+    const metadata = await sharp(result.files[0].attachment).metadata();
+    assert.equal(metadata.width, 256);
+    assert.equal(metadata.height, 256);
+});
+
+test('prefix command explains missing attachments and replaces loading with image errors', async t => {
+    let reply;
+    await command.execute({
+        message: {
+            attachments: { first: () => undefined },
+            reply: async payload => { reply = payload; }
+        }
+    });
+    assert.match(reply.content, /Attach an image.*\?pumpkinmask/);
+    t.mock.method(console, 'error', () => {});
+    t.mock.method(globalThis, 'fetch', async () => new Response('invalid'));
+    await command.execute({
+        message: {
+            attachments: { first: () => attachment },
+            reply: async () => ({ edit: async payload => { reply = payload; } })
+        }
+    });
+    assert.match(reply.content, /Could not read that image/);
+    assert.equal(reply.files, undefined);
+});

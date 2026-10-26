@@ -38,6 +38,8 @@ Run the focused tests with `node --test tests/game-statistics.test.js`.
 
 ## Pumpkin mask
 
+Alternatively, send `?pumpkinmask` with an image attached to the same message. It processes the first attachment, using the same loading message, mask fitting, limits, and public command permissions as the slash command.
+
 `/pumpkinmask image:<attachment>` shows "Generating..." with the application's animated Halloween emoji while processing, then replaces it with a public, downloadable PNG. The output keeps the uploaded image's dimensions and aspect ratio (after correcting camera orientation). It automatically selects the proportionally closest mask: `assets/pumpkin-mask.png` for wide images, or `assets/pumpkin-mask-square.png` for square and portrait images. The selected mask is scaled proportionally to fit inside that canvas, centered on top, with solid black filling any space outside it. Transparent input pixels are also black-backed. The image is not stretched or cropped, and the command does not detect or reposition faces.
 
 The command defaults to public access and respects the existing `/publicperms` settings and `/manage` access overrides. PNG, JPG, WebP, GIF, and AVIF are supported up to 10 MB and 25 megapixels; animated uploads use the first frame. Restart the bot to register the command, or use `/synccommands` if necessary. Include both mask assets when deploying.
