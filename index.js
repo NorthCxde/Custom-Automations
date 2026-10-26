@@ -111,7 +111,7 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'removemod',
     'summary'
 ]);
-const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind']);
+const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind', 'pumpkinmask']);
 const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'recentbans', 'quota', 'register', 'viewinfractions']);
 
 function trelloRequestJson(url) {

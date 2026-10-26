@@ -36,6 +36,14 @@ Restart the bot to begin collection and register the new command. If needed, use
 
 Run the focused tests with `node --test tests/game-statistics.test.js`.
 
+## Pumpkin mask
+
+`/pumpkinmask image:<attachment>` shows "Generating..." with the application's animated Halloween emoji while processing, then replaces it with a public, downloadable PNG. It fits the entire uploaded image into the supplied 1175 x 768 mask canvas, centered with its aspect ratio preserved, fills uncovered or transparent areas with solid black, and composites `assets/pumpkin-mask.png` on top. It does not detect or reposition faces.
+
+The command defaults to public access and respects the existing `/publicperms` settings and `/manage` access overrides. PNG, JPG, WebP, GIF, and AVIF are supported up to 10 MB and 25 megapixels; animated uploads use the first frame. Restart the bot to register the command, or use `/synccommands` if necessary. Include the mask asset when deploying.
+
+Run the focused tests with `node --test tests/pumpkin-mask.test.js`.
+
 ## Run locally
 
 1. Install the new dependency:
