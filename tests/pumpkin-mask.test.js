@@ -8,6 +8,7 @@ const command = require('../commands/pumpkinmask');
 const { renderPumpkinMask, downloadImage, MAX_BYTES } = require('../lib/pumpkin-mask');
 
 const maskPath = path.join(__dirname, '..', 'assets', 'pumpkin-mask.png');
+const squareMaskPath = path.join(__dirname, '..', 'assets', 'pumpkin-mask-square.png');
 const attachment = {
     url: 'https://cdn.discordapp.com/attachments/123/456/image.png?ex=123',
     size: 100
@@ -17,18 +18,21 @@ async function solid(width, height, background = '#ff0000') {
     return sharp({ create: { width, height, channels: 4, background } }).png().toBuffer();
 }
 
-test('landscape and portrait inputs are scaled, centered, black padded and masked on top', async () => {
-    const { data: overlay } = await sharp(maskPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-    for (const [width, height, left, top, fittedWidth, fittedHeight] of [
-        [2350, 768, 0, 192, 1175, 384],
-        [470, 1536, 470, 0, 235, 768],
-        [1175, 768, 0, 0, 1175, 768]
+test('mask is contained and centered on the original image canvas with opaque black outside it', async () => {
+    for (const [width, height, left, top, fittedWidth, fittedHeight, selectedMask] of [
+        [2350, 768, 587, 0, 1175, 768, maskPath],
+        [470, 1536, 0, 533, 470, 470, squareMaskPath],
+        [470, 470, 0, 0, 470, 470, squareMaskPath],
+        [1175, 768, 0, 0, 1175, 768, maskPath]
     ]) {
+        const { data: resized, info: maskInfo } = await sharp(selectedMask)
+            .resize(fittedWidth, fittedHeight, { fit: 'fill' })
+            .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
         const output = await renderPumpkinMask(await solid(width, height));
         const metadata = await sharp(output).metadata();
         assert.equal(metadata.format, 'png');
-        assert.equal(metadata.width, 1175);
-        assert.equal(metadata.height, 768);
+        assert.equal(metadata.width, width);
+        assert.equal(metadata.height, height);
         const { data, info } = await sharp(output).removeAlpha().raw().toBuffer({ resolveWithObject: true });
         let paddingPixels = 0;
         let visiblePixels = 0;
@@ -37,7 +41,8 @@ test('landscape and portrait inputs are scaled, centered, black padded and maske
             for (let x = 0; x < info.width; x += 1) {
                 const index = y * info.width + x;
                 const inside = x >= left && x < left + fittedWidth && y >= top && y < top + fittedHeight;
-                const expected = inside ? 255 - overlay[index * 4 + 3] : 0;
+                const maskIndex = ((y - top) * maskInfo.width + x - left) * 4 + 3;
+                const expected = inside ? 255 - resized[maskIndex] : 0;
                 maxDifference = Math.max(maxDifference, Math.abs(data[index * 3] - expected),
                     data[index * 3 + 1], data[index * 3 + 2]);
                 if (!inside) paddingPixels += 1;
@@ -46,13 +51,13 @@ test('landscape and portrait inputs are scaled, centered, black padded and maske
         }
         assert.ok(maxDifference <= 1, `Pixel mismatch for ${width}x${height}: ${maxDifference}`);
         assert.ok(visiblePixels > 0, 'Transparent mask holes reveal the uploaded image');
-        if (width !== 1175) assert.ok(paddingPixels > 0);
+        if (fittedWidth < width || fittedHeight < height) assert.ok(paddingPixels > 0);
     }
 });
 
 test('square, transparent and EXIF-rotated images produce opaque black-backed output', async () => {
     const square = await renderPumpkinMask(await solid(256, 256));
-    assert.equal((await sharp(square).metadata()).width, 1175);
+    assert.equal((await sharp(square).metadata()).width, 256);
     const transparent = await renderPumpkinMask(await solid(400, 200, { r: 0, g: 0, b: 0, alpha: 0 }));
     const stats = await sharp(transparent).stats();
     for (const channel of stats.channels.slice(0, 3)) assert.equal(channel.max, 0);
@@ -61,7 +66,9 @@ test('square, transparent and EXIF-rotated images produce opaque black-backed ou
     const result = await renderPumpkinMask(rotated);
     const { data, info } = await sharp(result).removeAlpha().raw().toBuffer({ resolveWithObject: true });
     const pixel = (x, y) => [...data.subarray((y * info.width + x) * 3, (y * info.width + x) * 3 + 3)];
-    assert.deepEqual(pixel(227, 185), [0, 0, 0], 'EXIF rotation makes a portrait image with black side padding');
+    assert.equal(info.width, 235);
+    assert.equal(info.height, 768);
+    assert.deepEqual(pixel(100, 100), [0, 0, 0], 'EXIF rotation makes a portrait canvas with black mask padding');
 });
 
 test('invalid, unsupported and oversized decoded images have explicit input errors', async () => {
