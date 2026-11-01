@@ -18,7 +18,6 @@ function metricChange(value) {
 }
 
 function visitGain(period) {
-    if (period.counterReset) return UNAVAILABLE;
     return period.visits === null ? COLLECTING : `**${count(period.visits)}**`;
 }
 
@@ -73,7 +72,7 @@ function buildStatisticsEmbed(current, summary, type, game, milestone = null) {
     const sections = [];
     if (type === 'visits') {
         const average = value => (value === null
-            ? (summary.counterReset ? UNAVAILABLE : COLLECTING)
+            ? COLLECTING
             : `**${count(value)}**`);
         sections.push(
             section('Current Visits', [`**${count(current.visits)}**`]),
@@ -86,6 +85,14 @@ function buildStatisticsEmbed(current, summary, type, game, milestone = null) {
                 `Weekly: ${average(summary.weeklyAverage)}`
             ])
         );
+        const corrected = [
+            summary.day.counterReset ? '24-hour net change' : null,
+            summary.week.counterReset ? '7-day net change' : null,
+            summary.counterReset ? 'all-history averages and milestone estimates' : null
+        ].filter(Boolean);
+        if (corrected.length) {
+            sections.push(`-# Roblox count decrease detected: ${corrected.join(', ')} include net corrections, not gross new visits.`);
+        }
     } else if (type === 'ccu') {
         sections.push(
             section('Current CCU', [`**${count(current.ccu)}** players online`]),

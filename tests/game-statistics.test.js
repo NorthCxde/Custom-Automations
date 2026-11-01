@@ -190,17 +190,67 @@ test('outages are excluded from CCU averages and stale visit baselines are unava
     assert.equal(empty.coverage, 0);
 });
 
-test('counter decreases invalidate affected gains and persist across restarts', async t => {
+test('counter decreases flag net growth without disabling gains or averages across restarts', async t => {
     let calls = 0;
     const samples = [snapshot(START, 1000), snapshot(START + INTERVAL, 500),
         snapshot(START + 2 * INTERVAL, 1100)];
     const service = storage(t, async () => samples[calls++]);
     for (const sample of samples) await service.collect();
     const restored = new GameStatistics(service.filePath);
-    assert.equal(restored.summarize(restored.latest()).dailyAverage, null);
+    assert.equal(restored.summarize(restored.latest()).dailyAverage, 100 * DAY / (2 * INTERVAL));
     const result = summarizeWindow(samples, samples.at(-1), 2 * INTERVAL);
-    assert.equal(result.visits, null);
+    assert.equal(result.visits, 100);
     assert.equal(result.counterReset, true);
+});
+
+test('retained seven-day visits, averages and milestone estimates recover with persisted reset flags', async t => {
+    const first = snapshot(START, 1000);
+    const samples = [
+        first, snapshot(START + WEEK, 2000),
+        snapshot(START + WEEK + DAY, 1500),
+        snapshot(START + 2 * WEEK - DAY, 3900),
+        snapshot(START + 2 * WEEK, 4000)
+    ];
+    let next = 0;
+    const service = storage(t, async () => samples[next++]);
+    for (const sample of samples) await service.collect();
+    const restored = new GameStatistics(service.filePath);
+    const before = fs.readFileSync(service.filePath, 'utf8');
+    const summary = restored.summarize(restored.latest());
+    assert.equal(summary.week.visits, 2000);
+    assert.equal(summary.day.visits, 100);
+    assert.equal(summary.week.counterReset, true);
+    assert.equal(summary.day.counterReset, false);
+    assert.equal(summary.counterReset, true);
+    assert.equal(summary.dailyAverage, 3000 / 14);
+    assert.equal(summary.weeklyAverage, 1500);
+    const request = interaction('visits', 'timebomb', '5000');
+    await command.executeInteraction({ client: { gameStatistics: { timebomb: restored } }, interaction: request });
+    const text = request.replies.at(-1).embeds[0].toJSON().description;
+    assert.match(text, /Past 7 days: \*\*2,000\*\*/);
+    assert.match(text, /Daily: \*\*214\*\*/);
+    assert.match(text, /Weekly: \*\*1,500\*\*/);
+    assert.match(text, /Estimated date: <t:\d+:D>/);
+    assert.match(text, /Roblox count decrease detected/);
+    assert.equal(fs.readFileSync(service.filePath, 'utf8'), before);
+    assert.equal(restored.state.origin.timestamp, START);
+});
+
+test('negative net visits are preserved and missing window baselines still need collection', async t => {
+    const first = snapshot(START, 1000);
+    const last = snapshot(START + DAY, 900);
+    const service = storage(t, async () => last);
+    service.state = { version: 1, origin: first, counterReset: true, snapshots: [first, last] };
+    const summary = service.summarize(last);
+    assert.equal(summary.day.visits, -100);
+    assert.equal(summary.dailyAverage, -100);
+    assert.equal(summary.week.visits, null);
+    const request = interaction('visits', 'timebomb', '2000');
+    await command.executeInteraction({ client: { gameStatistics: { timebomb: service } }, interaction: request });
+    const text = request.replies.at(-1).embeds[0].toJSON().description;
+    assert.match(text, /Past 24 hours: \*\*-100\*\*/);
+    assert.match(text, /Past 7 days: \*Collecting data/);
+    assert.match(text, /no positive growth/);
 });
 
 test('raw history is bounded while all-history average retains its original baseline', async t => {
