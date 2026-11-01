@@ -231,7 +231,7 @@ test('retained seven-day visits, averages and milestone estimates recover with p
     assert.match(text, /Daily: \*\*214\*\*/);
     assert.match(text, /Weekly: \*\*1,500\*\*/);
     assert.match(text, /Estimated date: <t:\d+:D>/);
-    assert.match(text, /Roblox count decrease detected/);
+    assert.doesNotMatch(text, /Roblox count decrease detected/);
     assert.equal(fs.readFileSync(service.filePath, 'utf8'), before);
     assert.equal(restored.state.origin.timestamp, START);
 });
