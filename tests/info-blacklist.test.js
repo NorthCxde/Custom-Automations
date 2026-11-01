@@ -168,7 +168,7 @@ test('due-date updates reject API errors, missing IDs and dates overridden by Tr
     await assert.rejects(setBlacklistDueDate(credentials, 'card', dueDate), /did not retain/);
 });
 
-test('delayed verification corrects an automation override and stops once the saved date matches', async t => {
+test('delayed verification corrects an automation override and stops after two matching lookups', async t => {
     const timers = require('node:timers/promises');
     let elapsed = 0;
     t.mock.method(timers, 'setTimeout', async delay => { elapsed += delay; });
@@ -187,13 +187,13 @@ test('delayed verification corrects an automation override and stops once the sa
         return { ok: true, json: async () => ({ due: savedDate }) };
     });
     await verifyBlacklistDueDate({ key: 'test-key', token: 'test-token' }, 'card', dueDate);
-    assert.equal(elapsed, 10000);
-    assert.equal(reads, 2);
+    assert.equal(elapsed, 15000);
+    assert.equal(reads, 3);
     assert.equal(writes, 1);
     assert.equal(savedDate, dueDate);
 });
 
-test('matching date on the first delayed lookup stops all further checks and writes', async t => {
+test('two matching delayed lookups stop all further checks and writes', async t => {
     const timers = require('node:timers/promises');
     let waits = 0;
     let reads = 0;
@@ -208,8 +208,52 @@ test('matching date on the first delayed lookup stops all further checks and wri
         return { ok: true, json: async () => ({ due: dueDate }) };
     });
     await verifyBlacklistDueDate({ key: 'test-key', token: 'test-token' }, 'card', dueDate);
-    assert.equal(waits, 1);
-    assert.equal(reads, 1);
+    assert.equal(waits, 2);
+    assert.equal(reads, 2);
+});
+
+test('an override between confirmations resets the count and requires two new matches', async t => {
+    const timers = require('node:timers/promises');
+    let waits = 0;
+    let reads = 0;
+    let writes = 0;
+    t.mock.method(timers, 'setTimeout', async () => { waits++; });
+    const dueDate = '2026-11-08T16:00:00.000Z';
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        if (options?.method === 'PUT') {
+            writes++;
+            return { ok: true, json: async () => ({ due: dueDate }) };
+        }
+        reads++;
+        return {
+            ok: true,
+            json: async () => ({ due: reads === 2 ? '2026-11-16T06:59:00.000Z' : dueDate })
+        };
+    });
+    await verifyBlacklistDueDate({ key: 'test-key', token: 'test-token' }, 'card', dueDate);
+    assert.equal(reads, 4);
+    assert.equal(waits, 4);
+    assert.equal(writes, 1);
+});
+
+test('only one match at the end of the verification window is not success', async t => {
+    const timers = require('node:timers/promises');
+    t.mock.method(timers, 'setTimeout', async () => {});
+    const dueDate = '2026-11-08T16:00:00.000Z';
+    let reads = 0;
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        if (options?.method === 'PUT') return { ok: true, json: async () => ({ due: dueDate }) };
+        reads++;
+        return {
+            ok: true,
+            json: async () => ({ due: reads === 6 ? dueDate : '2026-11-16T06:59:00.000Z' })
+        };
+    });
+    await assert.rejects(
+        verifyBlacklistDueDate({ key: 'test-key', token: 'test-token' }, 'card', dueDate),
+        /did not confirm.*twice/
+    );
+    assert.equal(reads, 6);
 });
 
 test('persistent automation conflicts and verification API failures cannot report success', async t => {
