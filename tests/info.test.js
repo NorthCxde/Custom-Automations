@@ -10,6 +10,9 @@ function user(id, displayName = 'Target') {
 
 function mockSearch(t, handler) {
     t.mock.method(globalThis, 'fetch', async (url, options) => {
+        if (url.startsWith('https://badges.roblox.com/')) {
+            return { ok: true, json: async () => ({ data: [] }) };
+        }
         assert.ok(options.signal instanceof AbortSignal);
         assert.equal(new URL(url).pathname, '/v1/users/search');
         assert.equal(new URL(url).searchParams.get('limit'), '100');
@@ -35,14 +38,14 @@ test('search filters exact case-insensitive display names, deduplicates and foll
     assert.equal(calls, 2);
 });
 
-test('search caps results at 75 and bounds sparse-match searches to 10 requests', async t => {
+test('search caps results at 100 and bounds sparse-match searches to 10 requests', async t => {
     let calls = 0;
     mockSearch(t, () => {
         calls++;
         return { data: Array.from({ length: 100 }, (_, index) => user(index + 1)), nextPageCursor: 'next' };
     });
     const result = await command.searchDisplayName('Target');
-    assert.equal(result.users.length, 75);
+    assert.equal(result.users.length, 100);
     assert.equal(result.limited, true);
     assert.equal(calls, 1);
     calls = 0;
@@ -58,22 +61,22 @@ test('search caps results at 75 and bounds sparse-match searches to 10 requests'
 
 test('pages have 25 numbered username-ID entries and correct Back/Next boundaries', () => {
     const result = {
-        displayName: 'Target', users: Array.from({ length: 75 }, (_, index) => user(index + 1)), limited: true
+        displayName: 'Target', users: Array.from({ length: 100 }, (_, index) => user(index + 1)), limited: true
     };
-    for (let page = 0; page < 3; page++) {
+    for (let page = 0; page < 4; page++) {
         const payload = command.buildDisplayNamePage(result, page, 'session');
         const embed = payload.embeds[0].toJSON();
         assert.equal(payload.content, '');
-        assert.equal(embed.description.split('\n').length, 25);
-        assert.ok(embed.description.startsWith(`${page * 25 + 1}. `));
+        assert.equal(embed.description.split('\n').filter(line => /^\d+\./.test(line)).length, 25);
+        assert.ok(embed.description.includes(`\n${page * 25 + 1}. `));
         assert.ok(embed.description.endsWith(` - ${(page + 1) * 25}`));
         assert.match(embed.description, /https:\/\/www\.roblox\.com\/users\/\d+\/profile/);
-        assert.match(embed.footer.text, new RegExp(`Page ${page + 1}/3`));
+        assert.match(embed.footer.text, new RegExp(`Page ${page + 1}/4`));
         assert.match(embed.footer.text, /Search limit reached.*may omit accounts/);
         assert.ok(embed.description.length <= 4096);
         const buttons = payload.components[0].toJSON().components;
         assert.equal(buttons[0].disabled, page === 0);
-        assert.equal(buttons[1].disabled, page === 2);
+        assert.equal(buttons[1].disabled, page === 3);
     }
     const empty = command.buildDisplayNamePage({ displayName: 'Target', users: [], limited: false }, 0, 'session');
     assert.match(empty.embeds[0].toJSON().description, /No exact display-name matches/);
@@ -167,4 +170,75 @@ test('existing username lookup still shows profile info and Ban/Unban buttons', 
     const payload = request.replies.at(-1);
     assert.equal(payload.embeds[0].toJSON().title, 'Original');
     assert.deepEqual(payload.components[0].toJSON().components.map(button => button.label), ['Ban', 'Unban']);
+});
+
+test('both game badges prioritize players stably without mutating search results', async t => {
+    const result = { displayName: 'Target', users: [user(1), user(2), user(3), user(4)], limited: false };
+    const original = JSON.stringify(result);
+    let active = 0;
+    let peak = 0;
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        assert.ok(options.signal instanceof AbortSignal);
+        const parsed = new URL(url);
+        assert.equal(parsed.searchParams.get('badgeIds'), '2142457718,2124646244');
+        const id = Number(parsed.pathname.split('/')[3]);
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise(resolve => setImmediate(resolve));
+        active--;
+        const badges = id === 2 ? [2142457718] : id === 3 ? [2124646244] : id === 4 ? [2142457718, 2124646244] : [];
+        return {
+            ok: true,
+            json: async () => ({ data: badges.map(badgeId => ({ badgeId, awardedDate: '2020-01-01T00:00:00Z' })) })
+        };
+    });
+    const ranked = await command.prioritizeGamePlayers(result);
+    assert.deepEqual(ranked.users.map(user => user.id), [2, 3, 4, 1]);
+    assert.deepEqual(ranked.users[0].games, ['Timebomb Duels']);
+    assert.deepEqual(ranked.users[1].games, ['Custom Minigames']);
+    assert.deepEqual(ranked.users[2].games, ['Timebomb Duels', 'Custom Minigames']);
+    assert.equal(ranked.badgeCheckFailures, 0);
+    assert.equal(JSON.stringify(result), original);
+    assert.ok(peak <= 4);
+    const description = command.buildDisplayNamePage(ranked, 0, 'session').embeds[0].toJSON().description;
+    assert.ok(description.indexOf('**Top Results**') < description.indexOf('**Other Results**'));
+    assert.ok(description.includes('4. [user\\_1]'));
+});
+
+test('badge rate limits stop further requests and show incomplete-ranking warning', async t => {
+    let calls = 0;
+    t.mock.method(console, 'error', () => {});
+    t.mock.method(globalThis, 'fetch', async () => {
+        calls++;
+        return { ok: false, status: 429 };
+    });
+    const result = { displayName: 'Target', users: Array.from({ length: 100 }, (_, index) => user(index + 1)), limited: true };
+    const ranked = await command.prioritizeGamePlayers(result);
+    assert.ok(calls <= 4);
+    assert.equal(ranked.badgeCheckFailures, 100);
+    assert.deepEqual(ranked.users.map(user => user.id), result.users.map(user => user.id));
+    const embed = command.buildDisplayNamePage(ranked, 0, 'session').embeds[0].toJSON();
+    assert.match(embed.footer.text, /100 badge checks unavailable; ranking incomplete/);
+    assert.doesNotMatch(embed.description, /Top Results/);
+});
+
+test('Top Results spanning pages keep 25 users per page and all 100 unique entries', () => {
+    const result = {
+        displayName: 'Target', limited: true,
+        users: Array.from({ length: 100 }, (_, index) => ({
+            ...user(index + 1), games: index < 30 ? ['Timebomb Duels'] : []
+        }))
+    };
+    const lines = [];
+    for (let page = 0; page < 4; page++) {
+        const embed = command.buildDisplayNamePage(result, page, 'session').embeds[0].toJSON();
+        const entries = embed.description.split('\n').filter(line => /^\d+\./.test(line));
+        assert.equal(entries.length, 25);
+        lines.push(...entries);
+        if (page === 1) {
+            assert.match(embed.description, /Top Results/);
+            assert.match(embed.description, /Other Results/);
+        }
+    }
+    assert.equal(new Set(lines).size, 100);
 });

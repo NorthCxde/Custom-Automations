@@ -253,10 +253,10 @@ async function searchDisplayName(input) {
             if (user.displayName.toLowerCase() !== displayName.toLowerCase() || seenIds.has(user.id)) continue;
             seenIds.add(user.id);
             users.push({ id: user.id, name: user.name });
-            if (users.length === 75) break;
+            if (users.length === 100) break;
         }
         cursor = result.nextPageCursor;
-        if (users.length === 75) {
+        if (users.length === 100) {
             limited = true;
             break;
         }
@@ -268,17 +268,71 @@ async function searchDisplayName(input) {
     return { displayName, users, limited };
 }
 
+async function prioritizeGamePlayers(result) {
+    const signal = AbortSignal.timeout(30000);
+    const ranked = result.users.map(user => ({ ...user, games: [] }));
+    let next = 0;
+    let failures = 0;
+    let rateLimited = false;
+    await Promise.all(Array.from({ length: Math.min(4, ranked.length) }, async () => {
+        while (next < ranked.length) {
+            const user = ranked[next++];
+            if (rateLimited || signal.aborted) {
+                failures++;
+                continue;
+            }
+            try {
+                const response = await fetch(
+                    `https://badges.roblox.com/v1/users/${user.id}/badges/awarded-dates?badgeIds=${TIMEBOMB_BADGE_ID},${CUSTOM_MINIGAMES_BADGE_ID}`,
+                    { signal }
+                );
+                if (!response.ok) {
+                    if (response.status === 429) rateLimited = true;
+                    throw new Error(`Roblox badge check failed with status ${response.status}`);
+                }
+                const data = await response.json();
+                if (!Array.isArray(data.data)) throw new Error('Roblox returned invalid badge-award results');
+                for (const [badgeId, game] of [
+                    [TIMEBOMB_BADGE_ID, 'Timebomb Duels'], [CUSTOM_MINIGAMES_BADGE_ID, 'Custom Minigames']
+                ]) {
+                    if (data.data.some(award => String(award.badgeId) === badgeId &&
+                        typeof award.awardedDate === 'string' && Number.isFinite(Date.parse(award.awardedDate)))) {
+                        user.games.push(game);
+                    }
+                }
+            } catch (error) {
+                failures++;
+                console.error(`Failed to check game badges for Roblox user ${user.id}:`, error.message);
+            }
+        }
+    }));
+    return {
+        ...result,
+        users: [...ranked.filter(user => user.games.length), ...ranked.filter(user => !user.games.length)],
+        badgeCheckFailures: failures
+    };
+}
+
 function buildDisplayNamePage(result, page, interactionId) {
     const pageCount = Math.max(1, Math.ceil(result.users.length / 25));
     const start = page * 25;
-    const lines = result.users.slice(start, start + 25).map((user, index) =>
-        `${start + index + 1}. [${escapeMarkdown(user.name)}](https://www.roblox.com/users/${user.id}/profile) - ${user.id}`);
+    const lines = [];
+    let section = null;
+    for (const [index, user] of result.users.slice(start, start + 25).entries()) {
+        const heading = user.games?.length ? 'Top Results' : 'Other Results';
+        if (heading !== section) {
+            if (lines.length) lines.push('');
+            lines.push(`**${heading}**`);
+            section = heading;
+        }
+        lines.push(`${start + index + 1}. [${escapeMarkdown(user.name)}](https://www.roblox.com/users/${user.id}/profile) - ${user.id}`);
+    }
     const embed = new EmbedBuilder()
         .setColor(0x36393f)
         .setTitle(`Display Name: ${result.displayName}`)
         .setDescription(lines.length ? lines.join('\n') : 'No exact display-name matches were found in the searched results.')
         .setFooter({
-            text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}. Roblox search may omit accounts.`
+            text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}. Top Results own a played badge.${result.badgeCheckFailures ? ` ${result.badgeCheckFailures} badge checks unavailable; ranking incomplete.` : ''} Roblox search may omit accounts.`
         });
     const components = pageCount > 1 ? [new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -299,6 +353,13 @@ async function showDisplayNameSearch(interaction, displayName) {
     let result;
     try {
         result = await searchDisplayName(displayName);
+        if (result.users.length) {
+            await interaction.editReply({
+                content: 'Checking game history... <a:Loading:1564411829290008737>',
+                embeds: [], components: []
+            });
+            result = await prioritizeGamePlayers(result);
+        }
     } catch (error) {
         console.error('Failed to search Roblox display names:', error);
         await interaction.editReply({
@@ -354,7 +415,7 @@ module.exports = {
         .addStringOption(option =>
             option
                 .setName('display_name')
-                .setDescription('Display Name: find up to 75 users with this exact Roblox display name')
+                .setDescription('Display Name: find up to 100 users with this exact Roblox display name')
                 .setMaxLength(20)
                 .setRequired(false)
         ),
@@ -395,5 +456,6 @@ module.exports = {
     buildInfoComponents,
     fetchExistingTrelloCards,
     searchDisplayName,
+    prioritizeGamePlayers,
     buildDisplayNamePage
 };

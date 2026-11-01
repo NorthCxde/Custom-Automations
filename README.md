@@ -42,7 +42,9 @@ Run the focused tests with `node --test tests/game-statistics.test.js`.
 
 ## Roblox blacklists
 
-`/info user:<username or ID>` retains its existing profile lookup. Alternatively, use `/info display_name:<Display Name>` to search for exact Roblox display-name matches (case-insensitive). Supply exactly one of these options. Results are ephemeral and numbered as username - ID, with profile links, 25 per page and up to three pages. Back/Next buttons expire after five minutes. Searches scan at most 1,000 Roblox search results and display at most 75 unique matches; Roblox search may omit accounts, so this is not an exhaustive account directory. Empty matches and API failures are reported explicitly. Restart to register the changed options, or use `/synccommands`.
+`/info user:<username or ID>` retains its existing profile lookup. Alternatively, use `/info display_name:<Display Name>` to search for exact Roblox display-name matches (case-insensitive). Supply exactly one of these options. Results are ephemeral and numbered as username - ID, with profile links, 25 per page and up to four pages. Back/Next buttons expire after five minutes. Searches scan at most 1,000 Roblox search results and display at most 100 unique matches; Roblox search may omit accounts, so this is not an exhaustive account directory. Empty matches and API failures are reported explicitly. Restart to register the changed options, or use `/synccommands`.
+
+Display-name results check both games' played-badge award dates, with at most four concurrent requests and a 30-second timeout for the badge-check phase. Badge-confirmed players appear first under **Top Results**, followed by **Other Results**, preserving search order within each group. A played badge is evidence of prior play, not current presence or proof of wrongdoing. Other Results does not mean "never played"; unavailable checks are counted in a visible warning. Rate limiting stops additional badge requests. The animated Loading emoji appears while checking; page navigation reuses the cached ranking.
 
 Run the display-name tests with `node --test tests/info.test.js`.
 
