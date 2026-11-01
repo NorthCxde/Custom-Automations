@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { MessageFlags } = require('discord.js');
 const command = require('../commands/info');
+const displayNameCommand = require('../commands/displayname');
 
 function user(id, displayName = 'Target') {
     return { id, name: `user_${id}`, displayName };
@@ -103,14 +104,19 @@ function interaction(values) {
     };
 }
 
-test('optional options require exactly one input and reject empty/ambiguous requests', async () => {
+test('info requires only user and displayname requires only display_name', async () => {
     const options = command.data.toJSON().options;
-    assert.deepEqual(options.map(option => [option.name, option.required]), [['user', false], ['display_name', false]]);
-    for (const values of [{}, { user: '123', display_name: 'Target' }, { display_name: '   ' }]) {
+    assert.deepEqual(options.map(option => [option.name, option.required]), [['user', true]]);
+    assert.equal(displayNameCommand.data.toJSON().name, 'displayname');
+    assert.deepEqual(displayNameCommand.data.toJSON().options.map(option => [option.name, option.required]), [['display_name', true]]);
+    for (const [handler, values, expected] of [
+        [command, { user: '   ' }, /username or user ID is required/],
+        [displayNameCommand, { display_name: '   ' }, /display name is required/]
+    ]) {
         const request = interaction(values);
-        await command.executeInteraction({ interaction: request });
+        await handler.executeInteraction({ interaction: request });
         assert.equal(request.replies.length, 1);
-        assert.match(request.replies[0].content, /either user.*not both/);
+        assert.match(request.replies[0].content, expected);
         assert.equal(request.replies[0].flags, MessageFlags.Ephemeral);
     }
 });
@@ -122,7 +128,7 @@ test('display-name execution stays ephemeral and buttons paginate cached results
         return { data: Array.from({ length: 75 }, (_, index) => user(index + 1)), nextPageCursor: null };
     });
     const request = interaction({ display_name: 'Target' });
-    await command.executeInteraction({ interaction: request });
+    await displayNameCommand.executeInteraction({ interaction: request });
     assert.equal(request.replies[0].flags, MessageFlags.Ephemeral);
     assert.equal(request.collectorOptions.time, 300000);
     assert.equal(request.collectorOptions.filter({ user: { id: 'other' }, customId: 'info_display_next:session' }), false);
@@ -149,7 +155,7 @@ test('failed/malformed/repeated search pages reject rather than return successfu
     t.mock.method(globalThis, 'fetch', async () => ({ ok: false, status: 429 }));
     t.mock.method(console, 'error', () => {});
     const request = interaction({ display_name: 'Target' });
-    await command.executeInteraction({ interaction: request });
+    await displayNameCommand.executeInteraction({ interaction: request });
     assert.match(request.replies.at(-1).content, /search failed or timed out/);
     assert.deepEqual(request.replies.at(-1).components, []);
 });

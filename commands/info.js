@@ -342,7 +342,7 @@ function buildDisplayNamePage(result, page, interactionId) {
         .setTitle(`Display Name: ${result.displayName}`)
         .setDescription(lines.length ? lines.join('\n') : 'No exact display-name matches were found in the searched results.')
         .setFooter({
-            text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}. Top Results own a played badge.${result.badgeCheckFailures ? ` ${result.badgeCheckFailures} badge checks unavailable; ranking incomplete.` : ''} Roblox search may omit accounts.`
+            text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}. Top results own a badge from a played game.${result.badgeCheckFailures ? ` ${result.badgeCheckFailures} badge checks unavailable; ranking incomplete.` : ''} Roblox search may omit accounts.`
         });
     if (overflow.length) embed.addFields({ name: 'Continued', value: overflow.join('\n') });
     const components = pageCount > 1 ? [new ActionRowBuilder().addComponents(
@@ -397,7 +397,7 @@ async function showDisplayNameSearch(interaction, displayName) {
             console.error('Failed to update Roblox display-name results:', error);
             collector.stop('error');
             try {
-                await interaction.followUp({ content: 'Could not change search pages. Run /info again.', flags: MessageFlags.Ephemeral });
+                await interaction.followUp({ content: 'Could not change search pages. Run /displayname again.', flags: MessageFlags.Ephemeral });
             } catch (replyError) {
                 console.error('Failed to send display-name pagination error:', replyError);
             }
@@ -421,27 +421,18 @@ module.exports = {
             option
                 .setName('user')
                 .setDescription('Roblox user ID or username')
-                .setRequired(false)
-        )
-        .addStringOption(option =>
-            option
-                .setName('display_name')
-                .setDescription('Display Name: find up to 100 users with this exact Roblox display name')
-                .setMaxLength(20)
-                .setRequired(false)
+                .setRequired(true)
         ),
     async executeInteraction({ interaction }) {
         try {
-            const input = interaction.options.getString('user')?.trim();
-            const displayName = interaction.options.getString('display_name')?.trim();
-            if ((!input && !displayName) || (input && displayName)) {
+            const input = interaction.options.getString('user', true).trim();
+            if (!input) {
                 return interaction.reply({
-                    content: 'Provide either user (username/ID) or display_name, but not both.',
+                    content: 'A Roblox username or user ID is required.',
                     flags: MessageFlags.Ephemeral
                 });
             }
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-            if (displayName) return await showDisplayNameSearch(interaction, displayName);
             const user = await resolveUser(input);
             const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, interaction.user.id);
 
@@ -468,5 +459,6 @@ module.exports = {
     fetchExistingTrelloCards,
     searchDisplayName,
     prioritizeGamePlayers,
-    buildDisplayNamePage
+    buildDisplayNamePage,
+    showDisplayNameSearch
 };
