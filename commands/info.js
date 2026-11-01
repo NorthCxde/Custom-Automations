@@ -4,7 +4,8 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    MessageFlags
+    MessageFlags,
+    escapeMarkdown
 } = require('discord.js');
 
 const ROBLOX_USERS_API = 'https://users.roblox.com/v1';
@@ -228,6 +229,117 @@ function buildInfoComponents(userId) {
     ];
 }
 
+async function searchDisplayName(input) {
+    const displayName = input.trim();
+    const users = [];
+    const seenIds = new Set();
+    const seenCursors = new Set();
+    const signal = AbortSignal.timeout(30000);
+    let cursor = null;
+    let limited = false;
+    for (let page = 0; page < 10; page++) {
+        const params = new URLSearchParams({ keyword: displayName, limit: '100' });
+        if (cursor) params.set('cursor', cursor);
+        const result = await fetchJson(`${ROBLOX_USERS_API}/users/search?${params}`, { signal });
+        if (!Array.isArray(result.data) ||
+            (result.nextPageCursor != null && typeof result.nextPageCursor !== 'string')) {
+            throw new Error('Roblox returned invalid user-search results');
+        }
+        for (const user of result.data) {
+            if (!Number.isSafeInteger(user.id) || user.id <= 0 ||
+                typeof user.name !== 'string' || typeof user.displayName !== 'string') {
+                throw new Error('Roblox returned an invalid user-search entry');
+            }
+            if (user.displayName.toLowerCase() !== displayName.toLowerCase() || seenIds.has(user.id)) continue;
+            seenIds.add(user.id);
+            users.push({ id: user.id, name: user.name });
+            if (users.length === 75) break;
+        }
+        cursor = result.nextPageCursor;
+        if (users.length === 75) {
+            limited = true;
+            break;
+        }
+        if (!cursor) break;
+        if (seenCursors.has(cursor)) throw new Error('Roblox repeated a user-search page cursor');
+        seenCursors.add(cursor);
+        if (page === 9) limited = true;
+    }
+    return { displayName, users, limited };
+}
+
+function buildDisplayNamePage(result, page, interactionId) {
+    const pageCount = Math.max(1, Math.ceil(result.users.length / 25));
+    const start = page * 25;
+    const lines = result.users.slice(start, start + 25).map((user, index) =>
+        `${start + index + 1}. [${escapeMarkdown(user.name)}](https://www.roblox.com/users/${user.id}/profile) - ${user.id}`);
+    const embed = new EmbedBuilder()
+        .setColor(0x36393f)
+        .setTitle(`Display Name: ${result.displayName}`)
+        .setDescription(lines.length ? lines.join('\n') : 'No exact display-name matches were found in the searched results.')
+        .setFooter({
+            text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}. Roblox search may omit accounts.`
+        });
+    const components = pageCount > 1 ? [new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`info_display_back:${interactionId}`)
+            .setLabel('Back')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page === 0),
+        new ButtonBuilder()
+            .setCustomId(`info_display_next:${interactionId}`)
+            .setLabel('Next')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(page === pageCount - 1)
+    )] : [];
+    return { content: '', embeds: [embed], components };
+}
+
+async function showDisplayNameSearch(interaction, displayName) {
+    let result;
+    try {
+        result = await searchDisplayName(displayName);
+    } catch (error) {
+        console.error('Failed to search Roblox display names:', error);
+        await interaction.editReply({
+            content: 'Roblox display-name search failed or timed out. Please try again later.',
+            embeds: [], components: []
+        });
+        return;
+    }
+    let page = 0;
+    const message = await interaction.editReply(buildDisplayNamePage(result, page, interaction.id));
+    if (result.users.length <= 25) return;
+    const backId = `info_display_back:${interaction.id}`;
+    const nextId = `info_display_next:${interaction.id}`;
+    const collector = message.createMessageComponentCollector({
+        filter: button => button.user.id === interaction.user.id && [backId, nextId].includes(button.customId),
+        time: 5 * 60 * 1000
+    });
+    collector.on('collect', async button => {
+        page = Math.max(0, Math.min(Math.ceil(result.users.length / 25) - 1,
+            page + (button.customId === nextId ? 1 : -1)));
+        try {
+            await button.update(buildDisplayNamePage(result, page, interaction.id));
+        } catch (error) {
+            console.error('Failed to update Roblox display-name results:', error);
+            collector.stop('error');
+            try {
+                await interaction.followUp({ content: 'Could not change search pages. Run /info again.', flags: MessageFlags.Ephemeral });
+            } catch (replyError) {
+                console.error('Failed to send display-name pagination error:', replyError);
+            }
+        }
+    });
+    collector.on('end', async () => {
+        try {
+            await interaction.editReply({ components: [] });
+        } catch (error) {
+            console.error('Failed to remove expired display-name search buttons:', error);
+        }
+    });
+}
+
 module.exports = {
     name: 'info',
     data: new SlashCommandBuilder()
@@ -237,12 +349,27 @@ module.exports = {
             option
                 .setName('user')
                 .setDescription('Roblox user ID or username')
-                .setRequired(true)
+                .setRequired(false)
+        )
+        .addStringOption(option =>
+            option
+                .setName('display_name')
+                .setDescription('Display Name: find up to 75 users with this exact Roblox display name')
+                .setMaxLength(20)
+                .setRequired(false)
         ),
     async executeInteraction({ interaction }) {
         try {
+            const input = interaction.options.getString('user')?.trim();
+            const displayName = interaction.options.getString('display_name')?.trim();
+            if ((!input && !displayName) || (input && displayName)) {
+                return interaction.reply({
+                    content: 'Provide either user (username/ID) or display_name, but not both.',
+                    flags: MessageFlags.Ephemeral
+                });
+            }
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-            const input = interaction.options.getString('user', true);
+            if (displayName) return await showDisplayNameSearch(interaction, displayName);
             const user = await resolveUser(input);
             const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, interaction.user.id);
 
@@ -266,5 +393,7 @@ module.exports = {
     fetchInfoData,
     buildInfoEmbed,
     buildInfoComponents,
-    fetchExistingTrelloCards
+    fetchExistingTrelloCards,
+    searchDisplayName,
+    buildDisplayNamePage
 };

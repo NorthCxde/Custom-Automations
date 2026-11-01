@@ -42,6 +42,10 @@ Run the focused tests with `node --test tests/game-statistics.test.js`.
 
 ## Roblox blacklists
 
+`/info user:<username or ID>` retains its existing profile lookup. Alternatively, use `/info display_name:<Display Name>` to search for exact Roblox display-name matches (case-insensitive). Supply exactly one of these options. Results are ephemeral and numbered as username - ID, with profile links, 25 per page and up to three pages. Back/Next buttons expire after five minutes. Searches scan at most 1,000 Roblox search results and display at most 75 unique matches; Roblox search may omit accounts, so this is not an exhaustive account directory. Empty matches and API failures are reported explicitly. Restart to register the changed options, or use `/synccommands`.
+
+Run the display-name tests with `node --test tests/info.test.js`.
+
 In `/info`, click Ban to choose Blacklist or TB Duels Blacklist (the existing two-week duration), or the green **1 Week** button. The one-week path opens a required Trello-comment modal, then shows the two list choices. Selecting a list creates a card with a due date seven days from creation and posts the context as a Trello comment using your registered credentials. Existing cards are not duplicated or modified. Moderator access and ban-stat logging are unchanged.
 
 The one-week path explicitly updates the due date after card creation and posts the comment, then checks the saved date every five seconds for up to 30 seconds, reapplying it if the board's automation overwrites it. Checks stop after two consecutive matching lookups; a mismatch resets the confirmation count. It does not report success based only on the immediate update response. Failed updates or verification produce a warning identifying whether the comment was saved. Automation running after confirmation can still change the date; adjust the board's default two-week rule to exclude one-week cards for a permanent guarantee.
