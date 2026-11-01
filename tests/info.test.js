@@ -10,7 +10,7 @@ function user(id, displayName = 'Target') {
 
 function mockSearch(t, handler) {
     t.mock.method(globalThis, 'fetch', async (url, options) => {
-        if (url.startsWith('https://badges.roblox.com/')) {
+        if (url.startsWith('https://inventory.roblox.com/')) {
             return { ok: true, json: async () => ({ data: [] }) };
         }
         assert.ok(options.signal instanceof AbortSignal);
@@ -180,7 +180,9 @@ test('both game badges prioritize players stably without mutating search results
     t.mock.method(globalThis, 'fetch', async (url, options) => {
         assert.ok(options.signal instanceof AbortSignal);
         const parsed = new URL(url);
-        assert.equal(parsed.searchParams.get('badgeIds'), '2142457718,2124646244');
+        assert.equal(parsed.hostname, 'inventory.roblox.com');
+        const badgeId = Number(parsed.pathname.split('/').at(-1));
+        assert.ok([2142457718, 2124646244].includes(badgeId));
         const id = Number(parsed.pathname.split('/')[3]);
         active++;
         peak = Math.max(peak, active);
@@ -189,7 +191,7 @@ test('both game badges prioritize players stably without mutating search results
         const badges = id === 2 ? [2142457718] : id === 3 ? [2124646244] : id === 4 ? [2142457718, 2124646244] : [];
         return {
             ok: true,
-            json: async () => ({ data: badges.map(badgeId => ({ badgeId, awardedDate: '2020-01-01T00:00:00Z' })) })
+            json: async () => ({ data: badges.includes(badgeId) ? [{ id: badgeId }] : [] })
         };
     });
     const ranked = await command.prioritizeGamePlayers(result);
@@ -220,6 +222,31 @@ test('badge rate limits stop further requests and show incomplete-ranking warnin
     const embed = command.buildDisplayNamePage(ranked, 0, 'session').embeds[0].toJSON();
     assert.match(embed.footer.text, /100 badge checks unavailable; ranking incomplete/);
     assert.doesNotMatch(embed.description, /Top Results/);
+});
+
+test('a confirmed badge remains a Top Result when the other game check fails', async t => {
+    t.mock.method(console, 'error', () => {});
+    t.mock.method(globalThis, 'fetch', async url => {
+        if (url.endsWith('/2142457718')) return { ok: false, status: 403 };
+        assert.ok(url.endsWith('/items/Badge/2124646244'));
+        return { ok: true, json: async () => ({ data: [{ id: '2124646244' }] }) };
+    });
+    const ranked = await command.prioritizeGamePlayers({
+        displayName: 'Target', users: [user(1)], limited: false
+    });
+    assert.deepEqual(ranked.users[0].games, ['Custom Minigames']);
+    assert.equal(ranked.badgeCheckFailures, 1);
+    assert.match(command.buildDisplayNamePage(ranked, 0, 'session').embeds[0].toJSON().description, /Top Results/);
+});
+
+test('invalid inventory responses are flagged rather than classified as no game history', async t => {
+    t.mock.method(console, 'error', () => {});
+    t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => ({}) }));
+    const ranked = await command.prioritizeGamePlayers({
+        displayName: 'Target', users: [user(1)], limited: false
+    });
+    assert.equal(ranked.badgeCheckFailures, 1);
+    assert.deepEqual(ranked.users[0].games, []);
 });
 
 test('Top Results spanning pages keep 25 users per page and all 100 unique entries', () => {

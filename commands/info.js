@@ -79,10 +79,19 @@ async function fetchInventoryPrivacy(userId) {
     }
 }
 
+async function fetchBadgeOwnership(userId, badgeId, options = {}) {
+    const response = await fetch(`${ROBLOX_INVENTORY_API}/users/${userId}/items/Badge/${badgeId}`, options);
+    if (!response.ok) {
+        throw Object.assign(new Error(`Roblox badge check failed with status ${response.status}`), { status: response.status });
+    }
+    const result = await response.json();
+    if (!Array.isArray(result.data)) throw new Error('Roblox returned invalid badge-ownership results');
+    return result.data.some(item => String(item.id) === badgeId);
+}
+
 async function ownsBadge(userId, badgeId) {
     try {
-        const result = await fetchJson(`${ROBLOX_INVENTORY_API}/users/${userId}/items/Badge/${badgeId}`);
-        return Array.isArray(result?.data) && result.data.some(item => String(item.id) === badgeId);
+        return await fetchBadgeOwnership(userId, badgeId);
     } catch {
         return false;
     }
@@ -281,29 +290,25 @@ async function prioritizeGamePlayers(result) {
                 failures++;
                 continue;
             }
-            try {
-                const response = await fetch(
-                    `https://badges.roblox.com/v1/users/${user.id}/badges/awarded-dates?badgeIds=${TIMEBOMB_BADGE_ID},${CUSTOM_MINIGAMES_BADGE_ID}`,
-                    { signal }
-                );
-                if (!response.ok) {
-                    if (response.status === 429) rateLimited = true;
-                    throw new Error(`Roblox badge check failed with status ${response.status}`);
+            let checkFailed = false;
+            for (const [badgeId, game] of [
+                [TIMEBOMB_BADGE_ID, 'Timebomb Duels'], [CUSTOM_MINIGAMES_BADGE_ID, 'Custom Minigames']
+            ]) {
+                if (rateLimited || signal.aborted) {
+                    checkFailed = true;
+                    break;
                 }
-                const data = await response.json();
-                if (!Array.isArray(data.data)) throw new Error('Roblox returned invalid badge-award results');
-                for (const [badgeId, game] of [
-                    [TIMEBOMB_BADGE_ID, 'Timebomb Duels'], [CUSTOM_MINIGAMES_BADGE_ID, 'Custom Minigames']
-                ]) {
-                    if (data.data.some(award => String(award.badgeId) === badgeId &&
-                        typeof award.awardedDate === 'string' && Number.isFinite(Date.parse(award.awardedDate)))) {
+                try {
+                    if (await fetchBadgeOwnership(user.id, badgeId, { signal })) {
                         user.games.push(game);
                     }
+                } catch (error) {
+                    checkFailed = true;
+                    if (error.status === 429) rateLimited = true;
+                    console.error(`Failed to check game badge ${badgeId} for Roblox user ${user.id}:`, error.message);
                 }
-            } catch (error) {
-                failures++;
-                console.error(`Failed to check game badges for Roblox user ${user.id}:`, error.message);
             }
+            if (checkFailed) failures++;
         }
     }));
     return {
