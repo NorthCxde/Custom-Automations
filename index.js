@@ -5977,7 +5977,7 @@ client.on('interactionCreate', async (interaction) => {
                 }
                 if (days === 7) {
                     await interaction.editReply({
-                        content: 'Loading... <a:Loading:1564411829290008737>',
+                        content: 'Changing due date... <a:Loading:1564411829290008737>',
                         components: []
                     });
                     await blacklistActions.verifyBlacklistDueDate(credentials, card.id, dueDate);

@@ -48,7 +48,7 @@ The one-week path explicitly updates the due date after card creation and posts 
 
 The comment draft is private to the submitting moderator and server, expires after ten minutes, and is lost on restart. If card creation succeeds but the comment fails, the bot explicitly tells you to check the date and add the comment manually. This sets a Trello due date; it does not introduce automatic card archiving.
 
-During one-week due-date verification, the bot shows "Loading..." with the animated Loading emoji, then replaces it with the refreshed info embed or an error.
+During one-week due-date verification, the bot shows "Changing due date..." with the animated Loading emoji, then replaces it with the refreshed info embed or an error.
 
 Run the focused tests with `node --test tests/info-blacklist.test.js`.
 
