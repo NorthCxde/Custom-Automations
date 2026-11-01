@@ -1,0 +1,135 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { ButtonStyle, TextInputStyle } = require('discord.js');
+const {
+    buildBlacklistMenu, handleWeekInteraction, getBlacklistRequest,
+    createBlacklistCard, addBlacklistComment
+} = require('../lib/info-blacklist');
+
+const client = { isManuallyAddedModerator: id => id === 'moderator' };
+let sequence = 0;
+
+function interaction(customId, modal = false) {
+    return {
+        id: `draft${++sequence}`,
+        customId,
+        user: { id: 'moderator' },
+        guildId: 'guild',
+        isButton: () => !modal,
+        isModalSubmit: () => modal,
+        fields: { getTextInputValue: () => '  alt farming\nContext & evidence: https://example.com/?a=1&b=2  ' },
+        reply: async function (payload) { this.response = payload; },
+        showModal: async function (payload) { this.modal = payload.toJSON(); }
+    };
+}
+
+test('menu preserves two red two-week options and adds a green 1 Week option', () => {
+    const buttons = buildBlacklistMenu('531359446').toJSON().components;
+    assert.deepEqual(buttons.map(button => [button.label, button.style]), [
+        ['Blacklist', ButtonStyle.Danger], ['TB Duels Blacklist', ButtonStyle.Danger],
+        ['1 Week', ButtonStyle.Success]
+    ]);
+    for (const button of buttons.slice(0, 2)) {
+        const request = getBlacklistRequest(interaction(button.custom_id));
+        assert.equal(request.days, 14);
+        assert.equal(request.comment, null);
+    }
+});
+
+test('1 Week opens required paragraph modal before offering both lists and retaining context', async () => {
+    const start = interaction('info_blacklist_week:531359446');
+    assert.equal(await handleWeekInteraction(client, start), true);
+    assert.equal(start.response, undefined);
+    const input = start.modal.components[0].components[0];
+    assert.equal(input.custom_id, 'blacklist_comment');
+    assert.equal(input.style, TextInputStyle.Paragraph);
+    assert.equal(input.required, true);
+    assert.equal(input.max_length, 4000);
+
+    for (const listName of ['Blacklist', 'TB Duels Blacklist']) {
+        const submit = interaction(start.modal.custom_id, true);
+        assert.equal(await handleWeekInteraction(client, submit), true);
+        assert.equal(submit.response.ephemeral, true);
+        const buttons = submit.response.components[0].toJSON().components;
+        assert.deepEqual(buttons.map(button => button.label), ['Blacklist', 'TB Duels Blacklist']);
+        const button = buttons.find(button => button.label === listName);
+        assert.ok(button.custom_id.length <= 100);
+        const selection = interaction(button.custom_id);
+        assert.deepEqual(getBlacklistRequest(selection), {
+            userId: '531359446', listName, days: 7,
+            comment: 'alt farming\nContext & evidence: https://example.com/?a=1&b=2'
+        });
+        assert.throws(() => getBlacklistRequest(selection), /expired or was already used/);
+    }
+});
+
+test('permission, owner, server, expiry and invalid-input guards prevent unauthorized drafts', async t => {
+    const denied = interaction('info_blacklist_week:531359446');
+    denied.user.id = 'outsider';
+    await handleWeekInteraction(client, denied);
+    assert.match(denied.response.content, /manually added/);
+    assert.equal(denied.modal, undefined);
+    const deniedModal = interaction('info_blacklist_week_comment:531359446', true);
+    deniedModal.user.id = 'outsider';
+    await handleWeekInteraction(client, deniedModal);
+    assert.match(deniedModal.response.content, /manually added/);
+    const blank = interaction('info_blacklist_week_comment:531359446', true);
+    blank.fields.getTextInputValue = () => '   ';
+    await handleWeekInteraction(client, blank);
+    assert.match(blank.response.content, /Enter a Trello comment/);
+    const invalid = interaction('info_blacklist_week:invalid');
+    await handleWeekInteraction(client, invalid);
+    assert.match(invalid.response.content, /Invalid Roblox/);
+
+    const submit = interaction('info_blacklist_week_comment:531359446', true);
+    await handleWeekInteraction(client, submit);
+    const customId = submit.response.components[0].toJSON().components[0].custom_id;
+    const wrongOwner = interaction(customId);
+    wrongOwner.user.id = 'other';
+    assert.throws(() => getBlacklistRequest(wrongOwner), /another moderator or server/);
+    const wrongGuild = interaction(customId);
+    wrongGuild.guildId = 'other';
+    assert.throws(() => getBlacklistRequest(wrongGuild), /another moderator or server/);
+    assert.throws(() => getBlacklistRequest(interaction(customId.replace('531359446', '123'))), /another moderator/);
+    t.mock.method(Date, 'now', () => new Date('2099-01-01T00:00:00Z').getTime());
+    assert.throws(() => getBlacklistRequest(interaction(customId)), /expired/);
+    assert.throws(() => getBlacklistRequest(interaction('info_blacklist_add:531359446:Other list')), /Invalid blacklist/);
+    assert.equal(await handleWeekInteraction(client, interaction('unrelated')), false);
+});
+
+test('Trello requests set exact seven/fourteen-day due dates and post context as a comment, not description', async t => {
+    const now = new Date('2026-11-01T16:00:00Z').getTime();
+    t.mock.method(Date, 'now', () => now);
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        calls.push({ url: new URL(url), options });
+        return { ok: true, json: async () => ({ id: 'card', shortUrl: 'https://trello.com/c/card' }) };
+    });
+    const credentials = { key: 'test-key', token: 'test-token' };
+    for (const days of [7, 14]) {
+        const { card, dueDate } = await createBlacklistCard(credentials, 'selected-list', '531359446', days);
+        assert.equal(new Date(dueDate).getTime() - now, days * 86400000);
+        assert.equal(card.id, 'card');
+        const call = calls.at(-1);
+        assert.equal(call.options.method, 'POST');
+        assert.equal(call.url.searchParams.get('idList'), 'selected-list');
+        assert.equal(call.url.searchParams.get('name'), '531359446');
+        assert.equal(call.url.searchParams.get('due'), dueDate);
+        assert.equal(call.url.searchParams.has('desc'), false);
+    }
+    const comment = 'alt farming & context\nhttps://example.com/?a=1&b=2';
+    await addBlacklistComment(credentials, 'card', comment);
+    const call = calls.at(-1);
+    assert.equal(call.url.pathname, '/1/cards/card/actions/comments');
+    assert.equal(call.options.method, 'POST');
+    assert.equal(call.options.body.get('text'), comment);
+    assert.equal(call.options.body.get('token'), 'test-token');
+});
+
+test('Trello card/comment failures reject explicitly and never appear successful', async t => {
+    t.mock.method(globalThis, 'fetch', async () => ({ ok: false, status: 403 }));
+    const credentials = { key: 'test-key', token: 'test-token' };
+    await assert.rejects(createBlacklistCard(credentials, 'list', '123', 7), /card creation failed.*403/);
+    await assert.rejects(addBlacklistComment(credentials, 'card', 'context'), /comment creation failed.*403/);
+    await assert.rejects(addBlacklistComment(credentials, null, 'context'), /card ID/);
+});

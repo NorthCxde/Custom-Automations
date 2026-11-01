@@ -5531,6 +5531,9 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
 
+    const blacklistActions = require('./lib/info-blacklist');
+    if (await blacklistActions.handleWeekInteraction(client, interaction)) return;
+
     if (interaction.isModalSubmit()) {
         if (interaction.customId.startsWith('forumping_close_reason_modal:')) {
             if (!interaction.guild || !interaction.channel?.isThread()) {
@@ -5806,16 +5809,7 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: 'You must be manually added as a moderator before using this action.', ephemeral: true });
             }
             const userId = interaction.customId.slice('info_blacklist_menu:'.length);
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`info_blacklist_add:${userId}:Blacklist`)
-                    .setLabel('Blacklist')
-                    .setStyle(ButtonStyle.Danger),
-                new ButtonBuilder()
-                    .setCustomId(`info_blacklist_add:${userId}:TB Duels Blacklist`)
-                    .setLabel('TB Duels Blacklist')
-                    .setStyle(ButtonStyle.Danger)
-            );
+            const row = blacklistActions.buildBlacklistMenu(userId);
 
             return interaction.reply({
                 content: `Choose blacklist type for: **${userId}**`,
@@ -5900,11 +5894,11 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        if (interaction.customId.startsWith('info_blacklist_add:')) {
+        if (interaction.customId.startsWith('info_blacklist_add:') ||
+            interaction.customId.startsWith('info_blacklist_week_add:')) {
             if (!client.isManuallyAddedModerator(interaction.user.id)) {
                 return interaction.reply({ content: 'You must be manually added as a moderator before using this action.', ephemeral: true });
             }
-            const [, userId, listName] = interaction.customId.split(':');
             const { getEffectiveCredentials } = require('./commands/trelloCredentials');
             const credentials = getEffectiveCredentials(interaction.user.id);
 
@@ -5915,9 +5909,18 @@ client.on('interactionCreate', async (interaction) => {
                 });
             }
 
+            let request;
+            try {
+                request = blacklistActions.getBlacklistRequest(interaction);
+            } catch (error) {
+                return interaction.reply({ content: error.message, ephemeral: true });
+            }
+            const { userId, listName, days, comment } = request;
             await interaction.deferReply({ ephemeral: true });
 
             let cardCreated = false;
+            let commentAdded = false;
+            let cardUrl = '';
             try {
                 const auth = new URLSearchParams({ key: credentials.key, token: credentials.token });
                 const listsResponse = await fetch(`https://api.trello.com/1/boards/QpzzqyE8/lists?fields=id,name&${auth}`);
@@ -5943,20 +5946,9 @@ client.on('interactionCreate', async (interaction) => {
                     return interaction.editReply(`**${userId}** has already been blacklisted in **${listName}**.${endMessage}`);
                 }
 
-                const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-                const cardParams = new URLSearchParams({
-                    idList: targetList.id,
-                    name: userId,
-                    due: dueDate,
-                    ...Object.fromEntries(auth)
-                });
-                const cardResponse = await fetch(`https://api.trello.com/1/cards?${cardParams}`, { method: 'POST' });
-                if (!cardResponse.ok) throw new Error(`Trello card creation failed with status ${cardResponse.status}`);
-
-                const card = await cardResponse.json();
-                const cardUrl = String(card?.shortUrl || card?.url || '').trim();
-                if (!cardUrl) throw new Error('Trello did not return a card URL');
+                const { card, dueDate } = await blacklistActions.createBlacklistCard(credentials, targetList.id, userId, days);
                 cardCreated = true;
+                cardUrl = String(card?.shortUrl || card?.url || '').trim();
 
                 if (typeof client.addModLog === 'function' && interaction.guild) {
                     client.addModLog(interaction.guild.id, {
@@ -5972,6 +5964,12 @@ client.on('interactionCreate', async (interaction) => {
                         timestamp: new Date().toISOString()
                     });
                 }
+
+                if (comment) {
+                    await blacklistActions.addBlacklistComment(credentials, card.id, comment);
+                    commentAdded = true;
+                }
+                if (!cardUrl) throw new Error('Trello did not return a card URL');
 
                 const allTrelloCards = [...(infoData.trelloCards || []), { listName, url: cardUrl, due: dueDate }]
                     .filter((card, index, cards) => cards.findIndex(existing =>
@@ -6003,6 +6001,12 @@ client.on('interactionCreate', async (interaction) => {
             } catch (err) {
                 console.error('Failed to create Trello blacklist card:', err);
                 if (cardCreated) {
+                    if (comment && !commentAdded) {
+                        return interaction.editReply({
+                            content: `The one-week card was added to **${listName}**, but its comment could not be saved. Please add the comment manually${cardUrl ? `: ${cardUrl}` : ' in Trello'}.`,
+                            components: []
+                        });
+                    }
                     return interaction.editReply('The Trello card was added, but the refreshed info embed could not be displayed.');
                 }
                 return interaction.editReply('I could not create the Trello card. Check your registered credentials and board access.');
