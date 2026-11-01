@@ -5920,6 +5920,7 @@ client.on('interactionCreate', async (interaction) => {
 
             let cardCreated = false;
             let commentAdded = false;
+            let dueDateSet = false;
             let dueDateUpdated = false;
             let cardUrl = '';
             try {
@@ -5968,11 +5969,19 @@ client.on('interactionCreate', async (interaction) => {
 
                 if (days === 7) {
                     await blacklistActions.setBlacklistDueDate(credentials, card.id, dueDate);
-                    dueDateUpdated = true;
+                    dueDateSet = true;
                 }
                 if (comment) {
                     await blacklistActions.addBlacklistComment(credentials, card.id, comment);
                     commentAdded = true;
+                }
+                if (days === 7) {
+                    await interaction.editReply({
+                        content: `Card added to **${listName}**. Checking the one-week due date against Trello automation (30 seconds)...`,
+                        components: []
+                    });
+                    await blacklistActions.verifyBlacklistDueDate(credentials, card.id, dueDate);
+                    dueDateUpdated = true;
                 }
                 if (!cardUrl) throw new Error('Trello did not return a card URL');
 
@@ -6006,15 +6015,15 @@ client.on('interactionCreate', async (interaction) => {
             } catch (err) {
                 console.error('Failed to create Trello blacklist card:', err);
                 if (cardCreated) {
-                    if (days === 7 && !dueDateUpdated) {
+                    if (days === 7 && !dueDateUpdated && (!dueDateSet || commentAdded)) {
                         return interaction.editReply({
-                            content: `The card was added to **${listName}**, but its due date could not be changed to one week. The comment has not been added. Please update the due date and add the comment manually${cardUrl ? `: ${cardUrl}` : ' in Trello'}.`,
+                            content: `The card was added to **${listName}**, but its one-week due date could not be confirmed. ${commentAdded ? 'Your comment was saved.' : 'The comment has not been added.'} Please check the Trello automation rule and correct the due date manually${cardUrl ? `: ${cardUrl}` : ' in Trello'}.`,
                             components: []
                         });
                     }
                     if (comment && !commentAdded) {
                         return interaction.editReply({
-                            content: `The one-week card was added to **${listName}**, but its comment could not be saved. Please add the comment manually${cardUrl ? `: ${cardUrl}` : ' in Trello'}.`,
+                            content: `The one-week card was added to **${listName}**, but its comment could not be saved and its due date has not been checked for later automation changes. Please check the due date and add the comment manually${cardUrl ? `: ${cardUrl}` : ' in Trello'}.`,
                             components: []
                         });
                     }

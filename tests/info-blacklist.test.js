@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { ButtonStyle, TextInputStyle } = require('discord.js');
 const {
     buildBlacklistMenu, handleWeekInteraction, getBlacklistRequest,
-    createBlacklistCard, addBlacklistComment, setBlacklistDueDate
+    createBlacklistCard, addBlacklistComment, setBlacklistDueDate, verifyBlacklistDueDate
 } = require('../lib/info-blacklist');
 
 const client = { isManuallyAddedModerator: id => id === 'moderator' };
@@ -166,4 +166,45 @@ test('due-date updates reject API errors, missing IDs and dates overridden by Tr
         ok: true, json: async () => ({ due: '2026-11-16T06:59:00.000Z' })
     }));
     await assert.rejects(setBlacklistDueDate(credentials, 'card', dueDate), /did not retain/);
+});
+
+test('delayed verification catches automation after initial success and checks the full 30-second window', async t => {
+    const timers = require('node:timers/promises');
+    let elapsed = 0;
+    t.mock.method(timers, 'setTimeout', async delay => { elapsed += delay; });
+    const dueDate = '2026-11-08T16:00:00.000Z';
+    let savedDate = dueDate;
+    let reads = 0;
+    let writes = 0;
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        if (options?.method === 'PUT') {
+            writes++;
+            savedDate = options.body.get('due');
+        } else {
+            reads++;
+            assert.equal(new URL(url).searchParams.get('fields'), 'due');
+            if (reads === 2 || reads === 4) savedDate = '2026-11-16T06:59:00.000Z';
+        }
+        return { ok: true, json: async () => ({ due: savedDate }) };
+    });
+    await verifyBlacklistDueDate({ key: 'test-key', token: 'test-token' }, 'card', dueDate);
+    assert.equal(elapsed, 30000);
+    assert.equal(reads, 6);
+    assert.equal(writes, 2);
+    assert.equal(savedDate, dueDate);
+});
+
+test('persistent automation conflicts and verification API failures cannot report success', async t => {
+    const timers = require('node:timers/promises');
+    t.mock.method(timers, 'setTimeout', async () => {});
+    const credentials = { key: 'test-key', token: 'test-token' };
+    const dueDate = '2026-11-08T16:00:00.000Z';
+    t.mock.method(globalThis, 'fetch', async (url, options) => ({
+        ok: true,
+        json: async () => ({ due: options?.method === 'PUT' ? dueDate : '2026-11-16T06:59:00.000Z' })
+    }));
+    await assert.rejects(verifyBlacklistDueDate(credentials, 'card', dueDate), /kept overriding/);
+    t.mock.method(globalThis, 'fetch', async () => ({ ok: false, status: 403 }));
+    await assert.rejects(verifyBlacklistDueDate(credentials, 'card', dueDate), /verification failed.*403/);
+    await assert.rejects(verifyBlacklistDueDate(credentials, null, dueDate), /card ID/);
 });
