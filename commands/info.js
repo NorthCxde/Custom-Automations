@@ -330,8 +330,13 @@ function buildDisplayNamePage(result, page, interactionId) {
             lines.push(`**${heading}**`);
             section = heading;
         }
-        lines.push(`${start + index + 1}. [${escapeMarkdown(user.name)}](https://www.roblox.com/users/${user.id}/profile) - ${user.id}`);
+        const played = user.games?.length
+            ? ` - ${user.games.length === 2 ? 'Played Both Games' : `Played ${user.games[0]}`}`
+            : '';
+        lines.push(`${start + index + 1}. [${escapeMarkdown(user.name)}](https://www.roblox.com/users/${user.id}/profile) - ${user.id}${played}`);
     }
+    const overflow = [];
+    while (lines.join('\n').length > 4096) overflow.unshift(lines.pop());
     const embed = new EmbedBuilder()
         .setColor(0x36393f)
         .setTitle(`Display Name: ${result.displayName}`)
@@ -339,6 +344,7 @@ function buildDisplayNamePage(result, page, interactionId) {
         .setFooter({
             text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}. Top Results own a played badge.${result.badgeCheckFailures ? ` ${result.badgeCheckFailures} badge checks unavailable; ranking incomplete.` : ''} Roblox search may omit accounts.`
         });
+    if (overflow.length) embed.addFields({ name: 'Continued', value: overflow.join('\n') });
     const components = pageCount > 1 ? [new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`info_display_back:${interactionId}`)

@@ -48,6 +48,8 @@ Display-name results use the same inventory badge-ownership lookup and badge IDs
 
 Run the display-name tests with `node --test tests/info.test.js`.
 
+Each Top Results entry includes **Played Timebomb Duels**, **Played Custom Minigames**, or **Played Both Games**, based on confirmed badge ownership. Other Results entries do not receive a played label.
+
 In `/info`, click Ban to choose Blacklist or TB Duels Blacklist (the existing two-week duration), or the green **1 Week** button. The one-week path opens a required Trello-comment modal, then shows the two list choices. Selecting a list creates a card with a due date seven days from creation and posts the context as a Trello comment using your registered credentials. Existing cards are not duplicated or modified. Moderator access and ban-stat logging are unchanged.
 
 The one-week path explicitly updates the due date after card creation and posts the comment, then checks the saved date every five seconds for up to 30 seconds, reapplying it if the board's automation overwrites it. Checks stop after two consecutive matching lookups; a mismatch resets the confirmation count. It does not report success based only on the immediate update response. Failed updates or verification produce a warning identifying whether the comment was saved. Automation running after confirmation can still change the date; adjust the board's default two-week rule to exclude one-week cards for a permanent guarantee.

@@ -269,3 +269,35 @@ test('Top Results spanning pages keep 25 users per page and all 100 unique entri
     }
     assert.equal(new Set(lines).size, 100);
 });
+
+test('Top Results show exact played-game labels while Other Results stay unlabeled', () => {
+    const result = {
+        displayName: 'Target', users: [
+            { ...user(1), games: ['Timebomb Duels'] },
+            { ...user(2), games: ['Custom Minigames'] },
+            { ...user(3), games: ['Timebomb Duels', 'Custom Minigames'] },
+            { ...user(4), games: [] }
+        ]
+    };
+    const description = command.buildDisplayNamePage(result, 0, 'session').embeds[0].toJSON().description;
+    assert.match(description, / - 1 - Played Timebomb Duels/);
+    assert.match(description, / - 2 - Played Custom Minigames/);
+    assert.match(description, / - 3 - Played Both Games/);
+    assert.ok(description.endsWith(' - 4'));
+});
+
+test('long usernames with played labels preserve all 25 entries within Discord embed limits', () => {
+    const result = {
+        displayName: 'Target',
+        users: Array.from({ length: 25 }, (_, index) => ({
+            id: Number.MAX_SAFE_INTEGER - index, name: '_'.repeat(20), games: ['Custom Minigames']
+        }))
+    };
+    const embed = command.buildDisplayNamePage(result, 0, 'session').embeds[0].toJSON();
+    assert.ok(embed.description.length <= 4096);
+    for (const field of embed.fields || []) assert.ok(field.value.length <= 1024);
+    const text = [embed.description, ...(embed.fields || []).map(field => field.value)].join('\n');
+    assert.equal(text.split('\n').filter(line => /^\d+\./.test(line)).length, 25);
+    assert.equal((text.match(/Played Custom Minigames/g) || []).length, 25);
+    assert.ok(text.length + embed.title.length + embed.footer.text.length + 9 <= 6000);
+});
