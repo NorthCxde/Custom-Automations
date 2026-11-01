@@ -8,18 +8,26 @@ const WARN_ACTIONS  = ['Warn'];
 const MS_7D  = 7  * 24 * 60 * 60 * 1000;
 const MS_30D = 30 * 24 * 60 * 60 * 1000;
 
-function countActions(logs, moderatorId, actionTypes, sinceMs, now = Date.now(), resetAt = null) {
+function countActions(logs, moderatorId, actionTypes, sinceMs, now = Date.now(), resetAt = null, range = null) {
     return logs.filter(log => {
         if (log.source === 'trello_blacklist') return false;
         if (String(log.moderatorId) !== String(moderatorId)) return false;
         if (!actionTypes.includes(log.action)) return false;
         const timestamp = new Date(log.timestamp).getTime();
+        if (range && (!Number.isFinite(timestamp) || timestamp < range.start || timestamp >= range.end)) return false;
         if (resetAt !== null && (!Number.isFinite(timestamp) || timestamp <= resetAt)) return false;
         if (sinceMs !== null) {
             if (!Number.isFinite(timestamp) || now - timestamp > sinceMs) return false;
         }
         return true;
     }).length;
+}
+
+function getDiscordModstatsCountsInRange(client, guildId, moderatorId, range) {
+    const logs = client.modLogs.get(guildId) || [];
+    const actionTypes = { mutes: MUTE_ACTIONS, bans: BAN_ACTIONS, kicks: KICK_ACTIONS, warns: WARN_ACTIONS };
+    return Object.fromEntries(Object.entries(actionTypes).map(([metric, actions]) =>
+        [metric, countActions(logs, moderatorId, actions, null, Date.now(), null, range)]));
 }
 
 function getDiscordModstatsCounts(client, guildId, moderatorId, period = 'all', now = Date.now()) {
@@ -76,6 +84,7 @@ function buildModStatsEmbed(client, guildId, user, displayName, avatarUrl) {
 
 module.exports = {
     getDiscordModstatsCounts,
+    getDiscordModstatsCountsInRange,
     name: 'modstats',
     description: 'Get moderation statistics for a mod/admin (based on mod log entries).',
     data: new SlashCommandBuilder()

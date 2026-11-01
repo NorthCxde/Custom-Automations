@@ -39,10 +39,9 @@ function getTimeZoneOffsetMs(date) {
 }
 
 function getEasternMidnightUtc(year, month) {
-    let timestamp = Date.UTC(year, month, 1);
-    timestamp -= getTimeZoneOffsetMs(new Date(timestamp));
-    timestamp -= getTimeZoneOffsetMs(new Date(timestamp));
-    return timestamp;
+    const utcMidnight = Date.UTC(year, month, 1);
+    const estimate = utcMidnight - getTimeZoneOffsetMs(new Date(utcMidnight));
+    return utcMidnight - getTimeZoneOffsetMs(new Date(estimate));
 }
 
 function getMonthRange(date = new Date()) {

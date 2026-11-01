@@ -40,6 +40,12 @@ Run the focused tests with `node --test tests/game-statistics.test.js`.
 
 `/gif` and `?gif` show "Generating..." with the application's animated Loading emoji before downloading and converting an image or video, then replace that message with the GIF or an error. `/gif` preserves its ephemeral and spoiler options; `?gif video` uses the same loading behavior for video attachments.
 
+## Moderator summary
+
+`/summary month:Last month` regenerates the previous calendar month's summary from saved moderation logs and month-specific Roblox-ban overrides. Omitting `month` (or selecting Current month) summarizes the current month. Months follow America/New_York time, including year transitions. `last_month:Yes` compares the selected month against the month before it; `half` only changes the title.
+
+Optional `server_stats` uses Discord moderation logs within the selected calendar month, excluding Trello Roblox bans. Rolling 7-day/30-day/all-time Discord-stat overrides are not included because they cannot be assigned to a calendar month; `/modstats` retains its existing behavior. Trainees and moderator membership are based on current configuration and server roles, not archived role membership. No summary snapshot is automatically archived, and selecting a month does not reset or modify saved logs.
+
 ## Pumpkin mask
 
 Alternatively, send `?pumpkinmask` with an image attached to the same message. It processes the first attachment, using the same loading message, mask fitting, limits, and public command permissions as the slash command.

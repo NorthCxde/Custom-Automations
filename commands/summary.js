@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const statsCommand = require('./stats');
+const { getDiscordModstatsCountsInRange } = require('./modstats');
 
 const QUOTA_PERCENT = 8;
 const MAX_ROWS = 25;
@@ -13,8 +14,16 @@ function formatMonth(date) {
     });
 }
 
+function getSummaryDate(monthSelection = 'current', now = new Date()) {
+    if (monthSelection === 'current') return now;
+    if (monthSelection !== 'last') throw new Error(`Invalid summary month: ${monthSelection}`);
+    const { year, month } = statsCommand.getMonthRange(now);
+    return new Date(Date.UTC(year, month - 1, 15, 12));
+}
+
 function getRecentModeratorStats(client, guildId, logs, date = new Date()) {
     const stats = new Map();
+    const range = statsCommand.getMonthRange(date);
     const moderatorIds = new Set(logs.map(entry => String(entry.moderatorId || '').trim()).filter(Boolean));
     for (const moderatorId of client.modStatsOverrides?.get(guildId)?.keys() || []) moderatorIds.add(String(moderatorId));
     for (const rawModeratorId of moderatorIds) {
@@ -23,7 +32,7 @@ function getRecentModeratorStats(client, guildId, logs, date = new Date()) {
             ? String(client.statsOwnerId || rawModeratorId)
             : rawModeratorId;
         const current = stats.get(moderatorId) || { mutes: 0, discordBans: 0 };
-        const counts = require('./modstats').getDiscordModstatsCounts(client, guildId, rawModeratorId, '30d', date.getTime());
+        const counts = getDiscordModstatsCountsInRange(client, guildId, rawModeratorId, range);
         current.mutes += counts.mutes;
         current.discordBans += counts.bans;
         stats.set(moderatorId, current);
@@ -138,6 +147,9 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
         }
         if (fieldValue) embed.addFields({ name: '\u200b', value: traineeHeading + fieldValue });
     }
+    if (includeServerStats) {
+        embed.setFooter({ text: 'Discord stats use calendar-month logs, not rolling-period overrides.' });
+    }
     return embed;
 }
 
@@ -154,6 +166,14 @@ module.exports = {
             .addChoices(
                 { name: 'Visible', value: 'visible' },
                 { name: 'Ephemeral', value: 'ephemeral' }
+            ))
+        .addStringOption(option => option
+            .setName('month')
+            .setDescription('Month to summarize (defaults to Current month)')
+            .setRequired(false)
+            .addChoices(
+                { name: 'Current month', value: 'current' },
+                { name: 'Last month', value: 'last' }
             ))
         .addBooleanOption(option => option
             .setName('server_stats')
@@ -193,6 +213,7 @@ module.exports = {
         const includeLastMonth = interaction.options.getString('last_month') === 'yes';
         const isMidMonth = interaction.options.getString('half') === 'yes';
         const includeTrainees = interaction.options.getString('trainee') !== 'no';
+        const summaryDate = getSummaryDate(interaction.options.getString('month') || 'current');
         await interaction.deferReply({ ephemeral: visibility !== 'visible' });
         let traineeIds = [];
         if (includeTrainees) {
@@ -212,8 +233,9 @@ module.exports = {
             }
         }
         return interaction.editReply({
-            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats, traineeIds, includeLastMonth, new Date(), isMidMonth)]
+            embeds: [buildSummaryEmbed(client, interaction.guild, includeServerStats, traineeIds, includeLastMonth, summaryDate, isMidMonth)]
         });
     },
-    buildSummaryEmbed
+    buildSummaryEmbed,
+    getSummaryDate
 };
