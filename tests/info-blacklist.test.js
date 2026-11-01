@@ -168,12 +168,12 @@ test('due-date updates reject API errors, missing IDs and dates overridden by Tr
     await assert.rejects(setBlacklistDueDate(credentials, 'card', dueDate), /did not retain/);
 });
 
-test('delayed verification catches automation after initial success and checks the full 30-second window', async t => {
+test('delayed verification corrects an automation override and stops once the saved date matches', async t => {
     const timers = require('node:timers/promises');
     let elapsed = 0;
     t.mock.method(timers, 'setTimeout', async delay => { elapsed += delay; });
     const dueDate = '2026-11-08T16:00:00.000Z';
-    let savedDate = dueDate;
+    let savedDate = '2026-11-16T06:59:00.000Z';
     let reads = 0;
     let writes = 0;
     t.mock.method(globalThis, 'fetch', async (url, options) => {
@@ -183,15 +183,33 @@ test('delayed verification catches automation after initial success and checks t
         } else {
             reads++;
             assert.equal(new URL(url).searchParams.get('fields'), 'due');
-            if (reads === 2 || reads === 4) savedDate = '2026-11-16T06:59:00.000Z';
         }
         return { ok: true, json: async () => ({ due: savedDate }) };
     });
     await verifyBlacklistDueDate({ key: 'test-key', token: 'test-token' }, 'card', dueDate);
-    assert.equal(elapsed, 30000);
-    assert.equal(reads, 6);
-    assert.equal(writes, 2);
+    assert.equal(elapsed, 10000);
+    assert.equal(reads, 2);
+    assert.equal(writes, 1);
     assert.equal(savedDate, dueDate);
+});
+
+test('matching date on the first delayed lookup stops all further checks and writes', async t => {
+    const timers = require('node:timers/promises');
+    let waits = 0;
+    let reads = 0;
+    t.mock.method(timers, 'setTimeout', async delay => {
+        assert.equal(delay, 5000);
+        waits++;
+    });
+    const dueDate = '2026-11-08T16:00:00.000Z';
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        assert.equal(options, undefined, 'No update should be sent for an already matching date');
+        reads++;
+        return { ok: true, json: async () => ({ due: dueDate }) };
+    });
+    await verifyBlacklistDueDate({ key: 'test-key', token: 'test-token' }, 'card', dueDate);
+    assert.equal(waits, 1);
+    assert.equal(reads, 1);
 });
 
 test('persistent automation conflicts and verification API failures cannot report success', async t => {

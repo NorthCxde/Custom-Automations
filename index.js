@@ -5977,7 +5977,7 @@ client.on('interactionCreate', async (interaction) => {
                 }
                 if (days === 7) {
                     await interaction.editReply({
-                        content: `Card added to **${listName}**. Checking the one-week due date against Trello automation (30 seconds)...`,
+                        content: `Card added to **${listName}**. Checking the one-week due date against Trello automation (up to 30 seconds)...`,
                         components: []
                     });
                     await blacklistActions.verifyBlacklistDueDate(credentials, card.id, dueDate);
