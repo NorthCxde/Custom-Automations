@@ -5920,6 +5920,7 @@ client.on('interactionCreate', async (interaction) => {
 
             let cardCreated = false;
             let commentAdded = false;
+            let dueDateUpdated = false;
             let cardUrl = '';
             try {
                 const auth = new URLSearchParams({ key: credentials.key, token: credentials.token });
@@ -5965,6 +5966,10 @@ client.on('interactionCreate', async (interaction) => {
                     });
                 }
 
+                if (days === 7) {
+                    await blacklistActions.setBlacklistDueDate(credentials, card.id, dueDate);
+                    dueDateUpdated = true;
+                }
                 if (comment) {
                     await blacklistActions.addBlacklistComment(credentials, card.id, comment);
                     commentAdded = true;
@@ -6001,6 +6006,12 @@ client.on('interactionCreate', async (interaction) => {
             } catch (err) {
                 console.error('Failed to create Trello blacklist card:', err);
                 if (cardCreated) {
+                    if (days === 7 && !dueDateUpdated) {
+                        return interaction.editReply({
+                            content: `The card was added to **${listName}**, but its due date could not be changed to one week. The comment has not been added. Please update the due date and add the comment manually${cardUrl ? `: ${cardUrl}` : ' in Trello'}.`,
+                            components: []
+                        });
+                    }
                     if (comment && !commentAdded) {
                         return interaction.editReply({
                             content: `The one-week card was added to **${listName}**, but its comment could not be saved. Please add the comment manually${cardUrl ? `: ${cardUrl}` : ' in Trello'}.`,

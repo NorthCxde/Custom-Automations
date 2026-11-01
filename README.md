@@ -44,7 +44,7 @@ Run the focused tests with `node --test tests/game-statistics.test.js`.
 
 In `/info`, click Ban to choose Blacklist or TB Duels Blacklist (the existing two-week duration), or the green **1 Week** button. The one-week path opens a required Trello-comment modal, then shows the two list choices. Selecting a list creates a card with a due date seven days from creation and posts the context as a Trello comment using your registered credentials. Existing cards are not duplicated or modified. Moderator access and ban-stat logging are unchanged.
 
-The comment draft is private to the submitting moderator and server, expires after ten minutes, and is lost on restart. If card creation succeeds but the comment fails, the bot explicitly tells you to add the comment manually. This sets a Trello due date; it does not introduce automatic card archiving.
+The one-week path explicitly updates the due date after card creation to override the board's default two-week date and checks the returned date before posting the comment. If the update fails, the bot warns that the card exists but its date and comment need manual attention. The comment draft is private to the submitting moderator and server, expires after ten minutes, and is lost on restart. If card creation succeeds but the comment fails, the bot explicitly tells you to add the comment manually. This sets a Trello due date; it does not introduce automatic card archiving.
 
 Run the focused tests with `node --test tests/info-blacklist.test.js`.
 

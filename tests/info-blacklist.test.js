@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { ButtonStyle, TextInputStyle } = require('discord.js');
 const {
     buildBlacklistMenu, handleWeekInteraction, getBlacklistRequest,
-    createBlacklistCard, addBlacklistComment
+    createBlacklistCard, addBlacklistComment, setBlacklistDueDate
 } = require('../lib/info-blacklist');
 
 const client = { isManuallyAddedModerator: id => id === 'moderator' };
@@ -132,4 +132,38 @@ test('Trello card/comment failures reject explicitly and never appear successful
     await assert.rejects(createBlacklistCard(credentials, 'list', '123', 7), /card creation failed.*403/);
     await assert.rejects(addBlacklistComment(credentials, 'card', 'context'), /comment creation failed.*403/);
     await assert.rejects(addBlacklistComment(credentials, null, 'context'), /card ID/);
+});
+
+test('one-week due-date update overrides the board default and verifies the returned date', async t => {
+    const credentials = { key: 'test-key', token: 'test-token' };
+    const dueDate = '2026-11-08T16:00:00.000Z';
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        calls.push({ url, options });
+        return {
+            ok: true,
+            json: async () => options.method === 'POST'
+                ? { id: 'card', due: '2026-11-16T06:59:00.000Z' }
+                : { id: 'card', due: dueDate }
+        };
+    });
+    const { card } = await createBlacklistCard(credentials, 'list', '123', 7);
+    await setBlacklistDueDate(credentials, card.id, dueDate);
+    assert.equal(calls[1].url, 'https://api.trello.com/1/cards/card');
+    assert.equal(calls[1].options.method, 'PUT');
+    assert.equal(calls[1].options.body.get('due'), dueDate);
+    assert.equal(calls[1].options.body.get('dueComplete'), 'false');
+    assert.equal(calls[1].options.body.get('token'), 'test-token');
+});
+
+test('due-date updates reject API errors, missing IDs and dates overridden by Trello', async t => {
+    const credentials = { key: 'test-key', token: 'test-token' };
+    const dueDate = '2026-11-08T16:00:00.000Z';
+    t.mock.method(globalThis, 'fetch', async () => ({ ok: false, status: 403 }));
+    await assert.rejects(setBlacklistDueDate(credentials, 'card', dueDate), /due-date update failed.*403/);
+    await assert.rejects(setBlacklistDueDate(credentials, null, dueDate), /card ID/);
+    t.mock.method(globalThis, 'fetch', async () => ({
+        ok: true, json: async () => ({ due: '2026-11-16T06:59:00.000Z' })
+    }));
+    await assert.rejects(setBlacklistDueDate(credentials, 'card', dueDate), /did not retain/);
 });
