@@ -5122,24 +5122,34 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         const checkSingleUserForBlacklist = duplicateReport.shouldAutoCloseDuplicate({
             isAutomaticTicket, interaction, openerId: ticketOpenerId, detectedUserCount: resolvedUsers.size
         });
+        const checkAutomaticBlacklist = isAutomaticTicket && !interaction;
+        let ownerTrelloCredentials = null;
+        if (checkAutomaticBlacklist) {
+            try {
+                const { getEffectiveCredentials } = require('./commands/trelloCredentials');
+                ownerTrelloCredentials = getEffectiveCredentials(TICKET_TRELLO_USER_ID);
+                if (!ownerTrelloCredentials) {
+                    console.error(`Cannot check Trello blacklist for automatic ticket ${thread.id}: owner Trello credentials are unavailable.`);
+                }
+            } catch (error) {
+                console.error(`Cannot load Trello credentials for automatic ticket ${thread.id}:`, error);
+            }
+        }
         if (isAutomaticTicket && resolvedUsers.size > 1) {
             console.log(`Ticket ${thread.id} has ${resolvedUsers.size} Roblox users; keeping it open for review and sending all info embeds.`);
         }
         for (const user of resolvedUsers.values()) {
             try {
                 let infoData;
-                if (checkSingleUserForBlacklist) {
-                    const { getEffectiveCredentials } = require('./commands/trelloCredentials');
-                    if (!getEffectiveCredentials(TICKET_TRELLO_USER_ID)) {
-                        console.error(`Cannot check Trello blacklist for automatic ticket ${thread.id}: owner Trello credentials are unavailable.`);
-                    } else {
-                        try {
-                            infoData = await fetchInfoData(user.id, TICKET_TRELLO_USER_ID, { requireCredentials: true });
-                            const blacklistCard = duplicateReport.findBlacklistCard(infoData.trelloCards || []);
-                            if (blacklistCard) duplicateCandidate = { user, blacklistCard };
-                        } catch (error) {
-                            console.error(`Cannot verify Trello blacklist for Roblox user ${user.id} in ticket ${thread.id}; keeping the ticket open:`, error);
-                        }
+                let alreadyBlacklisted = false;
+                if (checkAutomaticBlacklist && ownerTrelloCredentials) {
+                    try {
+                        infoData = await fetchInfoData(user.id, TICKET_TRELLO_USER_ID, { requireCredentials: true });
+                        const blacklistCard = duplicateReport.findBlacklistCard(infoData.trelloCards || []);
+                        alreadyBlacklisted = Boolean(blacklistCard);
+                        if (blacklistCard && checkSingleUserForBlacklist) duplicateCandidate = { user, blacklistCard };
+                    } catch (error) {
+                        console.error(`Cannot verify Trello blacklist for Roblox user ${user.id} in ticket ${thread.id}; keeping the ticket open:`, error);
                     }
                 }
                 if (!infoData) {
@@ -5148,8 +5158,11 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
                 const { avatarUrl, gameActivity, trelloCards } = infoData;
                 if (!isAllowedTicketRobloxUser(user, gameActivity)) continue;
                 const payload = {
-                    embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards, { showTrelloCards: Boolean(interaction) })],
-                    components: buildInfoComponents(user.id)
+                    embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards, {
+                        showTrelloCards: Boolean(interaction),
+                        status: alreadyBlacklisted ? '⚠️Already Banned' : null
+                    })],
+                    components: buildInfoComponents(user.id, { alreadyBanned: alreadyBlacklisted })
                 };
 
                 let sent = false;

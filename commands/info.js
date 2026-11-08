@@ -170,7 +170,9 @@ function formatDueCountdown(value) {
     return `Ends <t:${timestamp}:R>`;
 }
 
-function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = [], { showTrelloCards = true } = {}) {
+function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = [], {
+    showTrelloCards = true, status = null
+} = {}) {
     const username = String(user.name || 'Unknown');
     const displayName = String(user.displayName || '').trim();
     const titleName = displayName && displayName !== username ? `${displayName} (@${username})` : username;
@@ -200,7 +202,8 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = [], { showT
         profileDescription,
         '',
         '**Game Activity**',
-        gameActivity
+        gameActivity,
+        ...(status ? ['', '**Status**', status] : [])
     ].join('\n');
 
     const description = showTrelloCards
@@ -226,19 +229,19 @@ async function fetchInfoData(userId, discordUserId, options = {}) {
     return { user, avatarUrl, gameActivity, trelloCards };
 }
 
-function buildInfoComponents(userId) {
-    return [
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
+function buildInfoComponents(userId, { alreadyBanned = false } = {}) {
+    const buttons = [];
+    if (!alreadyBanned) {
+        buttons.push(new ButtonBuilder()
                 .setCustomId(`info_blacklist_menu:${userId}`)
                 .setLabel('Ban')
-                .setStyle(ButtonStyle.Danger),
-            new ButtonBuilder()
-                .setCustomId(`info_unban_menu:${userId}`)
-                .setLabel('Unban')
-                .setStyle(ButtonStyle.Secondary)
-        )
-    ];
+                .setStyle(ButtonStyle.Danger));
+    }
+    buttons.push(new ButtonBuilder()
+        .setCustomId(`info_unban_menu:${userId}`)
+        .setLabel('Unban')
+        .setStyle(ButtonStyle.Secondary));
+    return [new ActionRowBuilder().addComponents(buttons)];
 }
 
 async function searchDisplayName(input) {

@@ -178,6 +178,18 @@ test('existing username lookup still shows profile info and Ban/Unban buttons', 
     assert.deepEqual(payload.components[0].toJSON().components.map(button => button.label), ['Ban', 'Unban']);
 });
 
+test('already-banned automatic info shows Status and hides only the Ban button', () => {
+    const user = { id: 123, name: 'ReportedUser', displayName: 'ReportedUser', created: '2020-01-01T00:00:00Z' };
+    const embed = command.buildInfoEmbed(user, null, '✅ Has played Timebomb Duels', [], {
+        showTrelloCards: false, status: '⚠️Already Banned'
+    }).toJSON();
+    assert.match(embed.description, /\*\*Status\*\*\n⚠️Already Banned/);
+    assert.deepEqual(command.buildInfoComponents('123', { alreadyBanned: true })[0]
+        .toJSON().components.map(button => button.label), ['Unban']);
+    assert.deepEqual(command.buildInfoComponents('123')[0]
+        .toJSON().components.map(button => button.label), ['Ban', 'Unban']);
+});
+
 test('both game badges prioritize players stably without mutating search results', async t => {
     const result = { displayName: 'Target', users: [user(1), user(2), user(3), user(4)], limited: false };
     const original = JSON.stringify(result);
