@@ -48,6 +48,7 @@ if (envToken && configToken && envToken !== configToken) {
 
 const prefix = "?";
 const TICKET_REPORTS_BOT_ID = '1325579039888511056';
+const TICKET_RECONCILIATION_INTERVAL_MS = 5 * 60 * 1000;
 const APPEALS_PARENT_CHANNEL_ID = '1406849439104106677';
 const APPEALS_LOG_CHANNEL_ID = '1553170746539516075';
 const APPEALS_LOG_ROLE_ID = '1553172407341162526';
@@ -4666,6 +4667,7 @@ client.on('clientReady', async () => {
     client.scheduleRemindersOnStartup();
     client.scheduleTempBansOnStartup();
     client.bootstrapInviteCaches();
+    client.startTicketReconciliation();
 });
 
 client.on('guildMemberAdd', async (member) => {
@@ -5032,17 +5034,24 @@ function isAllowedTicketRobloxUser(user, gameActivity = '') {
     return /Has played (?:Timebomb Duels|Custom Minigames)/.test(String(gameActivity));
 }
 
-client.scanTicketThread = async (thread, { force = false, interaction = null, trelloUserId = null } = {}) => {
+client.scanTicketThread = async (thread, {
+    force = false, interaction = null, trelloUserId = null, reconcileOnly = false, manualReconcile = false
+} = {}) => {
     const isAutomaticTicket = thread?.parentId === '964450684613328916';
     const isWhitelistedScanThread = thread?.parentId === '1406849874925719583';
     if (!thread?.guildId || (!isAutomaticTicket && !(force && isWhitelistedScanThread))) return { sentCount: 0 };
-    if (!force && (!client.ticketScanEnabled || client.ticketScanHandledThreads.has(thread.id))) return { sentCount: 0 };
+    if (!force && ((!client.ticketScanEnabled && !manualReconcile)
+        || (!reconcileOnly && client.ticketScanHandledThreads.has(thread.id)))) {
+        return { sentCount: 0 };
+    }
 
     try {
-        const messages = await thread.messages.fetch({ limit: 25 }).catch(() => null);
-        const questionnaireMessages = messages
-            ? [...messages.values()].filter(isTicketQuestionnaireMessage)
-            : [];
+        const messages = await thread.messages.fetch({ limit: 100 }).catch(error => {
+            console.error(`Failed to fetch messages for ticket thread ${thread.id}:`, error);
+            return null;
+        });
+        if (!messages) return { sentCount: 0 };
+        const questionnaireMessages = [...messages.values()].filter(isTicketQuestionnaireMessage);
         const ticketContent = questionnaireMessages
             .map(getTicketMessageSearchText)
             .join('\n');
@@ -5057,7 +5066,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
 
         if (!usernameCandidates.length && !userIdCandidates.length) return { sentCount: 0 };
 
-        if (!force) {
+        if (!force && !reconcileOnly) {
             client.ticketScanHandledThreads.add(thread.id);
             client.saveTicketScanState();
         }
@@ -5115,6 +5124,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         }
 
         let sentCount = 0;
+        let reconciledEmbedUserCount = 0;
         let duplicateCandidate = null;
         if (isAutomaticTicket && !ticketOpenerId) {
             console.error(`Could not identify the ticket opener from the Reports member-added message in thread ${thread.id}; automatic duplicate closure is disabled for this ticket.`);
@@ -5151,6 +5161,13 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
                 }
                 const { avatarUrl, gameActivity, trelloCards } = infoData;
                 if (!isAllowedTicketRobloxUser(user, gameActivity)) continue;
+                if (reconcileOnly) {
+                    if (duplicateReport.hasInfoEmbedForUser(messages, client.user.id, user.id)) {
+                        reconciledEmbedUserCount++;
+                        if (blacklistCard) duplicateCandidate = { user, blacklistCard };
+                    }
+                    continue;
+                }
                 const payload = {
                     embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards, {
                         showTrelloCards: Boolean(interaction),
@@ -5186,12 +5203,13 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
             }
         }
 
-        if (isAutomaticTicket && sentCount > 1) {
-            console.log(`Ticket ${thread.id} sent ${sentCount} Roblox info embeds; keeping it open for review.`);
+        const eligibleEmbedCount = reconcileOnly ? reconciledEmbedUserCount : sentCount;
+        if (isAutomaticTicket && eligibleEmbedCount > 1) {
+            console.log(`Ticket ${thread.id} has ${eligibleEmbedCount} eligible Roblox info embeds; keeping it open for review.`);
         }
 
         const shouldCloseDuplicate = duplicateReport.shouldAutoCloseDuplicate({
-            isAutomaticTicket, interaction, openerId: ticketOpenerId, sentEmbedCount: sentCount
+            isAutomaticTicket, interaction, openerId: ticketOpenerId, sentEmbedCount: eligibleEmbedCount
         });
         if (duplicateCandidate && shouldCloseDuplicate) {
             const opener = {
@@ -5215,11 +5233,63 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         }
 
         console.log(`Ticket scan ${thread.id}: resolved [${[...resolvedUsers.values()].map(user => `${user.name}:${user.id}`).join(', ')}], sent ${sentCount} info embed(s).`);
-        return { sentCount };
+        return { sentCount, reconciled: reconcileOnly };
     } catch (err) {
         console.error(`Failed to scan ticket thread ${thread?.id || 'unknown'}:`, err);
         return { sentCount: 0 };
     }
+};
+
+client.reconcileOpenReportTickets = async ({ force = false } = {}) => {
+    if ((!client.ticketScanEnabled && !force) || client.ticketReconciliationRunning) {
+        return { busy: client.ticketReconciliationRunning };
+    }
+    client.ticketReconciliationRunning = true;
+    try {
+        const reportChannel = await client.channels.fetch('964450684613328916');
+        if (!reportChannel?.threads?.fetchActive) {
+            throw new Error('The exploit-report channel does not support active-thread fetching.');
+        }
+        const { threads } = await reportChannel.threads.fetchActive();
+        const openTickets = [...threads.values()].filter(thread =>
+            thread.parentId === '964450684613328916' && !thread.archived && !thread.locked
+        );
+        console.log(`Reconciling ${openTickets.length} open exploit-report ticket(s) for new blacklist matches.`);
+        const summary = {
+            scannedTicketCount: 0,
+            duplicateNoticeCount: 0,
+            closedTicketCount: 0,
+            cancelledTicketCount: 0
+        };
+        for (const thread of openTickets) {
+            let result;
+            if (!client.ticketScanHandledThreads.has(thread.id)) {
+                result = await client.scanTicketThread(thread, { manualReconcile: force });
+            } else {
+                result = await client.scanTicketThread(thread, { reconcileOnly: true });
+            }
+            summary.scannedTicketCount++;
+            if (result?.duplicateClosed || result?.closeCancelled) summary.duplicateNoticeCount++;
+            if (result?.duplicateClosed) summary.closedTicketCount++;
+            if (result?.closeCancelled) summary.cancelledTicketCount++;
+        }
+        return summary;
+    } catch (error) {
+        console.error('Failed to reconcile open exploit-report tickets:', error);
+        return { error: true };
+    } finally {
+        client.ticketReconciliationRunning = false;
+    }
+};
+
+client.startTicketReconciliation = () => {
+    if (client.ticketReconciliationTimer) return;
+    client.ticketReconciliationTimer = setInterval(
+        () => client.reconcileOpenReportTickets(),
+        TICKET_RECONCILIATION_INTERVAL_MS
+    );
+    client.ticketReconciliationTimer.unref();
+    client.reconcileOpenReportTickets();
 };
 
 client.scheduleTicketThreadScan = (thread) => {

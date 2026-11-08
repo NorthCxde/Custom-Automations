@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { MessageType, ButtonStyle } = require('discord.js');
 const {
-    REPORTED_MESSAGE, findTicketOpenerId, findBlacklistCard,
+    REPORTED_MESSAGE, findTicketOpenerId, findBlacklistCard, hasInfoEmbedForUser,
     shouldAutoCloseDuplicate, notifyAndCloseDuplicate, waitForCloseDecision, CLOSE_DELAY_MS
 } = require('../lib/duplicate-report');
 
@@ -38,6 +38,21 @@ test('either active Trello blacklist list identifies a duplicate card case-insen
         { listName: ' tb duels blacklist ', url: 'https://trello.example/card' }
     ]).listName, ' tb duels blacklist ');
     assert.equal(findBlacklistCard([{ listName: 'Other' }]), null);
+});
+
+test('reconciliation recognizes only the bot info embed for the exact Roblox user', () => {
+    const info = (authorId, userId, description = `**Roblox Information**\nName (${userId})`) => ({
+        author: { id: authorId },
+        embeds: [{ description }]
+    });
+    const messages = new Map([
+        ['other-bot', info('other-bot', '12345678')],
+        ['wrong-user', info(REPORTS_BOT, '123456789')],
+        ['not-info', info(REPORTS_BOT, '12345678', 'A different embed (12345678)')],
+        ['match', info(REPORTS_BOT, '12345678')]
+    ]);
+    assert.equal(hasInfoEmbedForUser(messages, REPORTS_BOT, '12345678'), true);
+    assert.equal(hasInfoEmbedForUser(messages, REPORTS_BOT, '98765432'), false);
 });
 
 test('automatic duplicate closure is restricted to one sent info embed in automatic tickets', () => {
