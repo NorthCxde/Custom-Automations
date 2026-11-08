@@ -40,11 +40,11 @@ test('either active Trello blacklist list identifies a duplicate card case-insen
     assert.equal(findBlacklistCard([{ listName: 'Other' }]), null);
 });
 
-test('automatic duplicate closure is restricted to one detected user in automatic tickets', () => {
-    const base = { isAutomaticTicket: true, interaction: null, openerId: 'reporter', detectedUserCount: 1 };
+test('automatic duplicate closure is restricted to one sent info embed in automatic tickets', () => {
+    const base = { isAutomaticTicket: true, interaction: null, openerId: 'reporter', sentEmbedCount: 1 };
     assert.equal(shouldAutoCloseDuplicate(base), true);
-    assert.equal(shouldAutoCloseDuplicate({ ...base, detectedUserCount: 2 }), false);
-    assert.equal(shouldAutoCloseDuplicate({ ...base, detectedUserCount: 0 }), false);
+    assert.equal(shouldAutoCloseDuplicate({ ...base, sentEmbedCount: 2 }), false);
+    assert.equal(shouldAutoCloseDuplicate({ ...base, sentEmbedCount: 0 }), false);
     assert.equal(shouldAutoCloseDuplicate({ ...base, isAutomaticTicket: false }), false);
     assert.equal(shouldAutoCloseDuplicate({ ...base, interaction: {} }), false);
     assert.equal(shouldAutoCloseDuplicate({ ...base, openerId: null }), false);

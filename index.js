@@ -5119,9 +5119,6 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         if (isAutomaticTicket && !ticketOpenerId) {
             console.error(`Could not identify the ticket opener from the Reports member-added message in thread ${thread.id}; automatic duplicate closure is disabled for this ticket.`);
         }
-        const checkSingleUserForBlacklist = duplicateReport.shouldAutoCloseDuplicate({
-            isAutomaticTicket, interaction, openerId: ticketOpenerId, detectedUserCount: resolvedUsers.size
-        });
         const checkAutomaticBlacklist = isAutomaticTicket && !interaction;
         let ownerTrelloCredentials = null;
         if (checkAutomaticBlacklist) {
@@ -5135,19 +5132,16 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
                 console.error(`Cannot load Trello credentials for automatic ticket ${thread.id}:`, error);
             }
         }
-        if (isAutomaticTicket && resolvedUsers.size > 1) {
-            console.log(`Ticket ${thread.id} has ${resolvedUsers.size} Roblox users; keeping it open for review and sending all info embeds.`);
-        }
         for (const user of resolvedUsers.values()) {
             try {
                 let infoData;
                 let alreadyBlacklisted = false;
+                let blacklistCard = null;
                 if (checkAutomaticBlacklist && ownerTrelloCredentials) {
                     try {
                         infoData = await fetchInfoData(user.id, TICKET_TRELLO_USER_ID, { requireCredentials: true });
-                        const blacklistCard = duplicateReport.findBlacklistCard(infoData.trelloCards || []);
+                        blacklistCard = duplicateReport.findBlacklistCard(infoData.trelloCards || []);
                         alreadyBlacklisted = Boolean(blacklistCard);
-                        if (blacklistCard && checkSingleUserForBlacklist) duplicateCandidate = { user, blacklistCard };
                     } catch (error) {
                         console.error(`Cannot verify Trello blacklist for Roblox user ${user.id} in ticket ${thread.id}; keeping the ticket open:`, error);
                     }
@@ -5183,6 +5177,7 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
 
                 if (!sent) continue;
                 sentCount++;
+                if (blacklistCard) duplicateCandidate = { user, blacklistCard };
                 if (sentCount < resolvedUsers.size) {
                     await new Promise(resolve => setTimeout(resolve, 1200));
                 }
@@ -5191,7 +5186,14 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
             }
         }
 
-        if (duplicateCandidate && sentCount === 1) {
+        if (isAutomaticTicket && sentCount > 1) {
+            console.log(`Ticket ${thread.id} sent ${sentCount} Roblox info embeds; keeping it open for review.`);
+        }
+
+        const shouldCloseDuplicate = duplicateReport.shouldAutoCloseDuplicate({
+            isAutomaticTicket, interaction, openerId: ticketOpenerId, sentEmbedCount: sentCount
+        });
+        if (duplicateCandidate && shouldCloseDuplicate) {
             const opener = {
                 id: ticketOpenerId,
                 send: async content => {
