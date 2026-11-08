@@ -5137,9 +5137,17 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
                                     return user.send(content);
                                 }
                             };
-                            await duplicateReport.notifyAndCloseDuplicate({ thread, opener });
-                            console.log(`Automatically closed duplicate ticket ${thread.id}; Roblox user ${user.id} is listed in ${blacklistCard.listName}.`);
-                            return { sentCount, duplicateClosed: true, openerId: ticketOpenerId, userId: String(user.id) };
+                            const closeResult = await duplicateReport.notifyAndCloseDuplicate({ thread, opener });
+                            console.log(closeResult.cancelled
+                                ? `Automatic closure cancelled for duplicate ticket ${thread.id}; Roblox user ${user.id} is listed in ${blacklistCard.listName}.`
+                                : `Automatically closed duplicate ticket ${thread.id}; Roblox user ${user.id} is listed in ${blacklistCard.listName}.`);
+                            return {
+                                sentCount,
+                                duplicateClosed: closeResult.closed,
+                                closeCancelled: closeResult.cancelled,
+                                openerId: ticketOpenerId,
+                                userId: String(user.id)
+                            };
                         }
                     }
                 }
