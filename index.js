@@ -33,6 +33,7 @@ const {
 const fs = require("fs");
 const path = require("path");
 const { GameStatistics } = require('./lib/game-statistics');
+const duplicateReport = require('./lib/duplicate-report');
 const { GAMES: ROBLOX_GAMES, fetchGameData: fetchRobloxGameData } = require('./lib/roblox-game');
 const https = require("https");
 const { DEFAULT_INFRACTION_RULES, sanitizeInfractionRules, cloneInfractionRules, cloneInfractionRule, parseDurationMs } = require('./infractions');
@@ -51,6 +52,7 @@ const APPEALS_PARENT_CHANNEL_ID = '1406849439104106677';
 const APPEALS_LOG_CHANNEL_ID = '1553170746539516075';
 const APPEALS_LOG_ROLE_ID = '1553172407341162526';
 const APPEALS_TRELLO_USER_ID = '1486503754617323530';
+const TICKET_TRELLO_USER_ID = '1486503754617323530';
 const STATS_OWNER_ID = '1486503754617323530';
 const HARD_CODED_ADMINS = [
     '1486503754617323530',
@@ -5062,6 +5064,9 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
 
         const { resolveUser, fetchInfoData, buildInfoEmbed, buildInfoComponents } = require('./commands/info');
         const resolvedUsers = new Map();
+        const ticketOpenerId = isAutomaticTicket
+            ? duplicateReport.findTicketOpenerId(messages, TICKET_REPORTS_BOT_ID)
+            : null;
 
         console.log(`Ticket scan ${thread.id}: username candidates [${usernameCandidates.join(', ')}], ID candidates [${userIdCandidates.join(', ')}].`);
 
@@ -5110,9 +5115,38 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         }
 
         let sentCount = 0;
+        if (isAutomaticTicket && !ticketOpenerId) {
+            console.error(`Could not identify the ticket opener from the Reports member-added message in thread ${thread.id}; automatic duplicate closure is disabled for this ticket.`);
+        }
         for (const user of resolvedUsers.values()) {
             try {
-                const { avatarUrl, gameActivity, trelloCards } = await fetchInfoData(user.id, trelloUserId || thread.ownerId || '0');
+                const canCheckBlacklist = isAutomaticTicket && !interaction && Boolean(ticketOpenerId);
+                let infoData;
+                if (canCheckBlacklist) {
+                    const { getEffectiveCredentials } = require('./commands/trelloCredentials');
+                    if (!getEffectiveCredentials(TICKET_TRELLO_USER_ID)) {
+                        console.error(`Cannot check Trello blacklist for automatic ticket ${thread.id}: owner Trello credentials are unavailable.`);
+                    } else {
+                        infoData = await fetchInfoData(user.id, TICKET_TRELLO_USER_ID, { requireCredentials: true });
+                        const blacklistCard = duplicateReport.findBlacklistCard(infoData.trelloCards || []);
+                        if (blacklistCard) {
+                            const opener = {
+                                id: ticketOpenerId,
+                                send: async content => {
+                                    const user = await client.users.fetch(ticketOpenerId);
+                                    return user.send(content);
+                                }
+                            };
+                            await duplicateReport.notifyAndCloseDuplicate({ thread, opener });
+                            console.log(`Automatically closed duplicate ticket ${thread.id}; Roblox user ${user.id} is listed in ${blacklistCard.listName}.`);
+                            return { sentCount, duplicateClosed: true, openerId: ticketOpenerId, userId: String(user.id) };
+                        }
+                    }
+                }
+                if (!infoData) {
+                    infoData = await fetchInfoData(user.id, trelloUserId || thread.ownerId || '0');
+                }
+                const { avatarUrl, gameActivity, trelloCards } = infoData;
                 if (!isAllowedTicketRobloxUser(user, gameActivity)) continue;
                 const payload = {
                     embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards, { showTrelloCards: Boolean(interaction) })],

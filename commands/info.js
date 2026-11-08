@@ -112,10 +112,13 @@ async function fetchGameActivity(userId) {
     return history.length ? history.join('\n') : '❌ No game history';
 }
 
-async function fetchExistingTrelloCards(userId, discordUserId) {
+async function fetchExistingTrelloCards(userId, discordUserId, { requireCredentials = false } = {}) {
     const { getEffectiveCredentials } = require('./trelloCredentials');
     const credentials = getEffectiveCredentials(discordUserId);
-    if (!credentials) return [];
+    if (!credentials) {
+        if (requireCredentials) throw new Error('Registered Trello credentials are required to check blacklist status.');
+        return [];
+    }
 
     const auth = new URLSearchParams({ key: credentials.key, token: credentials.token });
     const listsResponse = await fetch(`https://api.trello.com/1/boards/${TRELLO_BOARD_ID}/lists?fields=id,name&${auth}`);
@@ -213,12 +216,12 @@ function buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards = [], { showT
     return embed;
 }
 
-async function fetchInfoData(userId, discordUserId) {
+async function fetchInfoData(userId, discordUserId, options = {}) {
     const user = await fetchJson(`${ROBLOX_USERS_API}/users/${userId}`);
     const [avatarUrl, gameActivity, trelloCards] = await Promise.all([
         fetchAvatarUrl(user.id),
         fetchGameActivity(user.id),
-        fetchExistingTrelloCards(user.id, discordUserId)
+        fetchExistingTrelloCards(user.id, discordUserId, options)
     ]);
     return { user, avatarUrl, gameActivity, trelloCards };
 }
