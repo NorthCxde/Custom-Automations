@@ -49,6 +49,7 @@ if (envToken && configToken && envToken !== configToken) {
 const prefix = "?";
 const TICKET_REPORTS_BOT_ID = '1325579039888511056';
 const TICKET_RECONCILIATION_INTERVAL_MS = 5 * 60 * 1000;
+const WHITELISTED_TICKET_CHANNEL_ID = '1406849874925719583';
 const APPEALS_PARENT_CHANNEL_ID = '1406849439104106677';
 const APPEALS_LOG_CHANNEL_ID = '1553170746539516075';
 const APPEALS_LOG_ROLE_ID = '1553172407341162526';
@@ -5038,8 +5039,8 @@ client.scanTicketThread = async (thread, {
     force = false, interaction = null, trelloUserId = null, reconcileOnly = false, manualReconcile = false
 } = {}) => {
     const isAutomaticTicket = thread?.parentId === '964450684613328916';
-    const isWhitelistedScanThread = thread?.parentId === '1406849874925719583';
-    if (!thread?.guildId || (!isAutomaticTicket && !(force && isWhitelistedScanThread))) return { sentCount: 0 };
+    const isWhitelistedScanThread = thread?.parentId === WHITELISTED_TICKET_CHANNEL_ID;
+    if (!thread?.guildId || (!isAutomaticTicket && !isWhitelistedScanThread)) return { sentCount: 0 };
     if (!force && ((!client.ticketScanEnabled && !manualReconcile)
         || (!reconcileOnly && client.ticketScanHandledThreads.has(thread.id)))) {
         return { sentCount: 0 };
@@ -5129,7 +5130,7 @@ client.scanTicketThread = async (thread, {
         if (isAutomaticTicket && !ticketOpenerId) {
             console.error(`Could not identify the ticket opener from the Reports member-added message in thread ${thread.id}; automatic duplicate closure is disabled for this ticket.`);
         }
-        const checkAutomaticBlacklist = isAutomaticTicket && !interaction;
+        const checkAutomaticBlacklist = (isAutomaticTicket || isWhitelistedScanThread) && !interaction;
         let ownerTrelloCredentials = null;
         if (checkAutomaticBlacklist) {
             try {
@@ -5164,7 +5165,7 @@ client.scanTicketThread = async (thread, {
                 if (reconcileOnly) {
                     if (duplicateReport.hasInfoEmbedForUser(messages, client.user.id, user.id)) {
                         reconciledEmbedUserCount++;
-                        if (blacklistCard) duplicateCandidate = { user, blacklistCard };
+                        if (blacklistCard && isAutomaticTicket) duplicateCandidate = { user, blacklistCard };
                     }
                     continue;
                 }
@@ -5282,14 +5283,43 @@ client.reconcileOpenReportTickets = async ({ force = false } = {}) => {
     }
 };
 
+client.scanOpenWhitelistedInfoTickets = async () => {
+    if (!client.ticketScanEnabled || client.whitelistedInfoScanRunning) return;
+    client.whitelistedInfoScanRunning = true;
+    try {
+        const channel = await client.channels.fetch(WHITELISTED_TICKET_CHANNEL_ID);
+        if (!channel?.threads?.fetchActive) {
+            throw new Error('The whitelisted ticket channel does not support active-thread fetching.');
+        }
+        const { threads } = await channel.threads.fetchActive();
+        const unscannedTickets = [...threads.values()].filter(thread =>
+            thread.parentId === WHITELISTED_TICKET_CHANNEL_ID
+            && !thread.archived
+            && !thread.locked
+            && !client.ticketScanHandledThreads.has(thread.id)
+        );
+        if (unscannedTickets.length) {
+            console.log(`Scanning ${unscannedTickets.length} unscanned thread(s) in the whitelisted ticket channel for exploit reports.`);
+        }
+        for (const thread of unscannedTickets) {
+            await client.scanTicketThread(thread);
+        }
+    } catch (error) {
+        console.error('Failed to scan open whitelisted ticket threads:', error);
+    } finally {
+        client.whitelistedInfoScanRunning = false;
+    }
+};
+
 client.startTicketReconciliation = () => {
     if (client.ticketReconciliationTimer) return;
-    client.ticketReconciliationTimer = setInterval(
-        () => client.reconcileOpenReportTickets(),
-        TICKET_RECONCILIATION_INTERVAL_MS
-    );
+    const scanOpenTickets = async () => {
+        await client.scanOpenWhitelistedInfoTickets();
+        await client.reconcileOpenReportTickets();
+    };
+    client.ticketReconciliationTimer = setInterval(scanOpenTickets, TICKET_RECONCILIATION_INTERVAL_MS);
     client.ticketReconciliationTimer.unref();
-    client.reconcileOpenReportTickets();
+    scanOpenTickets();
 };
 
 client.scheduleTicketThreadScan = (thread) => {
@@ -5545,9 +5575,11 @@ client.on('threadCreate', async (thread) => {
 
     try {
         if (!thread?.guildId || !thread.parentId) return;
-        if (thread.parentId !== '964450684613328916') return;
+        if (thread.parentId !== '964450684613328916'
+            && thread.parentId !== WHITELISTED_TICKET_CHANNEL_ID) return;
         if (!client.ticketScanEnabled) return;
         client.scheduleTicketThreadScan(thread);
+        if (thread.parentId !== '964450684613328916') return;
 
         const roleId = client.getForumPingRoleId(thread.guildId, thread.parentId);
         if (!roleId) return;
@@ -5581,7 +5613,8 @@ client.on('threadCreate', async (thread) => {
 client.on('messageCreate', async (message) => {
     if (!message?.author?.bot || message.author.id === client.user?.id) return;
     if (message.author.id !== TICKET_REPORTS_BOT_ID) return;
-    if (!message.channel?.isThread?.() || message.channel.parentId !== '964450684613328916') return;
+    if (!message.channel?.isThread?.()
+        || !['964450684613328916', WHITELISTED_TICKET_CHANNEL_ID].includes(message.channel.parentId)) return;
     if (!isTicketQuestionnaireMessage(message)) return;
 
     client.scheduleTicketThreadScan(message.channel);
