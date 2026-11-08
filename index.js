@@ -5115,39 +5115,30 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
         }
 
         let sentCount = 0;
+        let duplicateCandidate = null;
         if (isAutomaticTicket && !ticketOpenerId) {
             console.error(`Could not identify the ticket opener from the Reports member-added message in thread ${thread.id}; automatic duplicate closure is disabled for this ticket.`);
         }
+        const checkSingleUserForBlacklist = duplicateReport.shouldAutoCloseDuplicate({
+            isAutomaticTicket, interaction, openerId: ticketOpenerId, detectedUserCount: resolvedUsers.size
+        });
+        if (isAutomaticTicket && resolvedUsers.size > 1) {
+            console.log(`Ticket ${thread.id} has ${resolvedUsers.size} Roblox users; keeping it open for review and sending all info embeds.`);
+        }
         for (const user of resolvedUsers.values()) {
             try {
-                const canCheckBlacklist = isAutomaticTicket && !interaction && Boolean(ticketOpenerId);
                 let infoData;
-                if (canCheckBlacklist) {
+                if (checkSingleUserForBlacklist) {
                     const { getEffectiveCredentials } = require('./commands/trelloCredentials');
                     if (!getEffectiveCredentials(TICKET_TRELLO_USER_ID)) {
                         console.error(`Cannot check Trello blacklist for automatic ticket ${thread.id}: owner Trello credentials are unavailable.`);
                     } else {
-                        infoData = await fetchInfoData(user.id, TICKET_TRELLO_USER_ID, { requireCredentials: true });
-                        const blacklistCard = duplicateReport.findBlacklistCard(infoData.trelloCards || []);
-                        if (blacklistCard) {
-                            const opener = {
-                                id: ticketOpenerId,
-                                send: async content => {
-                                    const user = await client.users.fetch(ticketOpenerId);
-                                    return user.send(content);
-                                }
-                            };
-                            const closeResult = await duplicateReport.notifyAndCloseDuplicate({ thread, opener });
-                            console.log(closeResult.cancelled
-                                ? `Automatic closure cancelled for duplicate ticket ${thread.id}; Roblox user ${user.id} is listed in ${blacklistCard.listName}.`
-                                : `Automatically closed duplicate ticket ${thread.id}; Roblox user ${user.id} is listed in ${blacklistCard.listName}.`);
-                            return {
-                                sentCount,
-                                duplicateClosed: closeResult.closed,
-                                closeCancelled: closeResult.cancelled,
-                                openerId: ticketOpenerId,
-                                userId: String(user.id)
-                            };
+                        try {
+                            infoData = await fetchInfoData(user.id, TICKET_TRELLO_USER_ID, { requireCredentials: true });
+                            const blacklistCard = duplicateReport.findBlacklistCard(infoData.trelloCards || []);
+                            if (blacklistCard) duplicateCandidate = { user, blacklistCard };
+                        } catch (error) {
+                            console.error(`Cannot verify Trello blacklist for Roblox user ${user.id} in ticket ${thread.id}; keeping the ticket open:`, error);
                         }
                     }
                 }
@@ -5185,6 +5176,27 @@ client.scanTicketThread = async (thread, { force = false, interaction = null, tr
             } catch (err) {
                 console.error(`Failed to send scanned ticket info for Roblox user ${user.id}:`, err);
             }
+        }
+
+        if (duplicateCandidate && sentCount === 1) {
+            const opener = {
+                id: ticketOpenerId,
+                send: async content => {
+                    const user = await client.users.fetch(ticketOpenerId);
+                    return user.send(content);
+                }
+            };
+            const closeResult = await duplicateReport.notifyAndCloseDuplicate({ thread, opener });
+            console.log(closeResult.cancelled
+                ? `Automatic closure cancelled for duplicate ticket ${thread.id}; Roblox user ${duplicateCandidate.user.id} is listed in ${duplicateCandidate.blacklistCard.listName}.`
+                : `Automatically closed duplicate ticket ${thread.id}; Roblox user ${duplicateCandidate.user.id} is listed in ${duplicateCandidate.blacklistCard.listName}.`);
+            return {
+                sentCount,
+                duplicateClosed: closeResult.closed,
+                closeCancelled: closeResult.cancelled,
+                openerId: ticketOpenerId,
+                userId: String(duplicateCandidate.user.id)
+            };
         }
 
         console.log(`Ticket scan ${thread.id}: resolved [${[...resolvedUsers.values()].map(user => `${user.name}:${user.id}`).join(', ')}], sent ${sentCount} info embed(s).`);

@@ -4,7 +4,7 @@ const { EventEmitter } = require('node:events');
 const { MessageType, ButtonStyle } = require('discord.js');
 const {
     REPORTED_MESSAGE, findTicketOpenerId, findBlacklistCard,
-    notifyAndCloseDuplicate, waitForCloseDecision, CLOSE_DELAY_MS
+    shouldAutoCloseDuplicate, notifyAndCloseDuplicate, waitForCloseDecision, CLOSE_DELAY_MS
 } = require('../lib/duplicate-report');
 
 const REPORTS_BOT = '1325579039888511056';
@@ -38,6 +38,16 @@ test('either active Trello blacklist list identifies a duplicate card case-insen
         { listName: ' tb duels blacklist ', url: 'https://trello.example/card' }
     ]).listName, ' tb duels blacklist ');
     assert.equal(findBlacklistCard([{ listName: 'Other' }]), null);
+});
+
+test('automatic duplicate closure is restricted to one detected user in automatic tickets', () => {
+    const base = { isAutomaticTicket: true, interaction: null, openerId: 'reporter', detectedUserCount: 1 };
+    assert.equal(shouldAutoCloseDuplicate(base), true);
+    assert.equal(shouldAutoCloseDuplicate({ ...base, detectedUserCount: 2 }), false);
+    assert.equal(shouldAutoCloseDuplicate({ ...base, detectedUserCount: 0 }), false);
+    assert.equal(shouldAutoCloseDuplicate({ ...base, isAutomaticTicket: false }), false);
+    assert.equal(shouldAutoCloseDuplicate({ ...base, interaction: {} }), false);
+    assert.equal(shouldAutoCloseDuplicate({ ...base, openerId: null }), false);
 });
 
 test('duplicate notice has a red Dont Close button that is available only during the countdown', async () => {
