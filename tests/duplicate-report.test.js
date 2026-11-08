@@ -7,7 +7,7 @@ const {
 
 const REPORTS_BOT = '1325579039888511056';
 
-function addMessage(id, { authorId = REPORTS_BOT, type = MessageType.ThreadMemberUpdate, mentions = [] } = {}) {
+function addMessage(id, { authorId = REPORTS_BOT, type = MessageType.RecipientAdd, mentions = [] } = {}) {
     return {
         id,
         type,
@@ -25,7 +25,9 @@ test('opener is the first non-bot member added by Reports', () => {
         ['5', addMessage('5', { type: MessageType.Default, mentions: [{ id: 'not-a-system-message' }] })]
     ]);
     assert.equal(findTicketOpenerId(messages, REPORTS_BOT), 'ticket-opener');
-    assert.equal(findTicketOpenerId(new Map([['1', addMessage('1', { mentions: [] })]]), REPORTS_BOT), null);
+    assert.equal(findTicketOpenerId(new Map([['1', addMessage('1', {
+        type: MessageType.ThreadCreated, mentions: [{ id: 'not-an-add-message' }]
+    })]]), REPORTS_BOT), null);
 });
 
 test('either active Trello blacklist list identifies a duplicate card case-insensitively', () => {
