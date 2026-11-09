@@ -5036,13 +5036,12 @@ function isAllowedTicketRobloxUser(user, gameActivity = '') {
 }
 
 client.scanTicketThread = async (thread, {
-    force = false, interaction = null, trelloUserId = null, reconcileOnly = false, manualReconcile = false
+    force = false, interaction = null, trelloUserId = null
 } = {}) => {
     const isAutomaticTicket = thread?.parentId === '964450684613328916';
     const isWhitelistedScanThread = thread?.parentId === WHITELISTED_TICKET_CHANNEL_ID;
     if (!thread?.guildId || (!isAutomaticTicket && !isWhitelistedScanThread)) return { sentCount: 0 };
-    if (!force && ((!client.ticketScanEnabled && !manualReconcile)
-        || (!reconcileOnly && client.ticketScanHandledThreads.has(thread.id)))) {
+    if (!force && (!client.ticketScanEnabled || client.ticketScanHandledThreads.has(thread.id))) {
         return { sentCount: 0 };
     }
 
@@ -5067,7 +5066,7 @@ client.scanTicketThread = async (thread, {
 
         if (!usernameCandidates.length && !userIdCandidates.length) return { sentCount: 0 };
 
-        if (!force && !reconcileOnly) {
+        if (!force) {
             client.ticketScanHandledThreads.add(thread.id);
             client.saveTicketScanState();
         }
@@ -5125,7 +5124,6 @@ client.scanTicketThread = async (thread, {
         }
 
         let sentCount = 0;
-        let reconciledEmbedUserCount = 0;
         let duplicateCandidate = null;
         if (isAutomaticTicket && !ticketOpenerId) {
             console.error(`Could not identify the ticket opener from the Reports member-added message in thread ${thread.id}; automatic duplicate closure is disabled for this ticket.`);
@@ -5162,13 +5160,6 @@ client.scanTicketThread = async (thread, {
                 }
                 const { avatarUrl, gameActivity, trelloCards } = infoData;
                 if (!isAllowedTicketRobloxUser(user, gameActivity)) continue;
-                if (reconcileOnly) {
-                    if (duplicateReport.hasInfoEmbedForUser(messages, client.user.id, user.id)) {
-                        reconciledEmbedUserCount++;
-                        if (blacklistCard && isAutomaticTicket) duplicateCandidate = { user, blacklistCard };
-                    }
-                    continue;
-                }
                 const payload = {
                     embeds: [buildInfoEmbed(user, avatarUrl, gameActivity, trelloCards, {
                         showTrelloCards: Boolean(interaction),
@@ -5204,7 +5195,7 @@ client.scanTicketThread = async (thread, {
             }
         }
 
-        const eligibleEmbedCount = reconcileOnly ? reconciledEmbedUserCount : sentCount;
+        const eligibleEmbedCount = sentCount;
         if (isAutomaticTicket && eligibleEmbedCount > 1) {
             console.log(`Ticket ${thread.id} has ${eligibleEmbedCount} eligible Roblox info embeds; keeping it open for review.`);
         }
@@ -5234,7 +5225,7 @@ client.scanTicketThread = async (thread, {
         }
 
         console.log(`Ticket scan ${thread.id}: resolved [${[...resolvedUsers.values()].map(user => `${user.name}:${user.id}`).join(', ')}], sent ${sentCount} info embed(s).`);
-        return { sentCount, reconciled: reconcileOnly };
+        return { sentCount };
     } catch (err) {
         console.error(`Failed to scan ticket thread ${thread?.id || 'unknown'}:`, err);
         return { sentCount: 0 };
@@ -5255,24 +5246,33 @@ client.reconcileOpenReportTickets = async ({ force = false } = {}) => {
         const openTickets = [...threads.values()].filter(thread =>
             thread.parentId === '964450684613328916' && !thread.archived && !thread.locked
         );
-        console.log(`Reconciling ${openTickets.length} open exploit-report ticket(s) for new blacklist matches.`);
+        const { getEffectiveCredentials } = require('./commands/trelloCredentials');
+        const credentials = getEffectiveCredentials(TICKET_TRELLO_USER_ID);
+        if (!credentials) throw new Error('Owner Trello credentials are unavailable for duplicate reconciliation.');
+        const { fetchTrelloBlacklistSnapshot } = require('./commands/info');
+        const blacklistCards = await fetchTrelloBlacklistSnapshot(credentials);
         const summary = {
             scannedTicketCount: 0,
             duplicateNoticeCount: 0,
             closedTicketCount: 0,
-            cancelledTicketCount: 0
+            cancelledTicketCount: 0,
+            failedTicketCount: 0
         };
         for (const thread of openTickets) {
-            let result;
-            if (!client.ticketScanHandledThreads.has(thread.id)) {
-                result = await client.scanTicketThread(thread, { manualReconcile: force });
-            } else {
-                result = await client.scanTicketThread(thread, { reconcileOnly: true });
+            if (!force && !client.ticketScanEnabled) break;
+            try {
+                const result = await duplicateReport.reconcileTicket({
+                    thread, botId: client.user.id, reportsBotId: TICKET_REPORTS_BOT_ID,
+                    blacklistCards, fetchUser: id => client.users.fetch(id)
+                });
+                summary.scannedTicketCount++;
+                if (result.duplicateClosed || result.closeCancelled) summary.duplicateNoticeCount++;
+                if (result.duplicateClosed) summary.closedTicketCount++;
+                if (result.closeCancelled) summary.cancelledTicketCount++;
+            } catch (error) {
+                summary.failedTicketCount++;
+                console.error(`Duplicate reconciliation failed for ticket ${thread.id}: ${error.message}`);
             }
-            summary.scannedTicketCount++;
-            if (result?.duplicateClosed || result?.closeCancelled) summary.duplicateNoticeCount++;
-            if (result?.duplicateClosed) summary.closedTicketCount++;
-            if (result?.closeCancelled) summary.cancelledTicketCount++;
         }
         return summary;
     } catch (error) {
@@ -5283,38 +5283,9 @@ client.reconcileOpenReportTickets = async ({ force = false } = {}) => {
     }
 };
 
-client.scanOpenWhitelistedInfoTickets = async () => {
-    if (!client.ticketScanEnabled || client.whitelistedInfoScanRunning) return;
-    client.whitelistedInfoScanRunning = true;
-    try {
-        const channel = await client.channels.fetch(WHITELISTED_TICKET_CHANNEL_ID);
-        if (!channel?.threads?.fetchActive) {
-            throw new Error('The whitelisted ticket channel does not support active-thread fetching.');
-        }
-        const { threads } = await channel.threads.fetchActive();
-        const unscannedTickets = [...threads.values()].filter(thread =>
-            thread.parentId === WHITELISTED_TICKET_CHANNEL_ID
-            && !thread.archived
-            && !thread.locked
-            && !client.ticketScanHandledThreads.has(thread.id)
-        );
-        if (unscannedTickets.length) {
-            console.log(`Scanning ${unscannedTickets.length} unscanned thread(s) in the whitelisted ticket channel for exploit reports.`);
-        }
-        for (const thread of unscannedTickets) {
-            await client.scanTicketThread(thread);
-        }
-    } catch (error) {
-        console.error('Failed to scan open whitelisted ticket threads:', error);
-    } finally {
-        client.whitelistedInfoScanRunning = false;
-    }
-};
-
 client.startTicketReconciliation = () => {
     if (client.ticketReconciliationTimer) return;
     const scanOpenTickets = async () => {
-        await client.scanOpenWhitelistedInfoTickets();
         await client.reconcileOpenReportTickets();
     };
     client.ticketReconciliationTimer = setInterval(scanOpenTickets, TICKET_RECONCILIATION_INTERVAL_MS);
@@ -6201,6 +6172,9 @@ client.on('interactionCreate', async (interaction) => {
                         });
                     }
                     return interaction.editReply('The Trello card was added, but the refreshed info embed could not be displayed.');
+                }
+                if (/Roblox.*status 429/i.test(String(err.message))) {
+                    return interaction.editReply('Roblox is rate-limiting the bot. The Trello card was not created. Please try again later.');
                 }
                 return interaction.editReply('I could not create the Trello card. Check your registered credentials and board access.');
             }

@@ -26,6 +26,7 @@ module.exports = {
             `Duplicate scan completed across **${result.scannedTicketCount}** open exploit-report ticket(s). `
             + `Started **${noticeCount}** duplicate close countdown(s); **${closedCount}** ticket(s) closed, `
             + `and **${cancelledCount}** countdown(s) cancelled.`
+            + (result.failedTicketCount ? ` **${result.failedTicketCount}** ticket(s) could not be checked; see the bot logs.` : '')
         );
     }
 };

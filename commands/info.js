@@ -120,8 +120,16 @@ async function fetchExistingTrelloCards(userId, discordUserId, { requireCredenti
         return [];
     }
 
+    const cards = await fetchTrelloBlacklistSnapshot(credentials);
+    return cards.filter(card => card.userId === String(userId))
+        .map(({ userId: _userId, ...card }) => card);
+}
+
+async function fetchTrelloBlacklistSnapshot(credentials) {
     const auth = new URLSearchParams({ key: credentials.key, token: credentials.token });
-    const listsResponse = await fetch(`https://api.trello.com/1/boards/${TRELLO_BOARD_ID}/lists?fields=id,name&${auth}`);
+    const listsResponse = await fetch(`https://api.trello.com/1/boards/${TRELLO_BOARD_ID}/lists?fields=id,name&${auth}`, {
+        signal: AbortSignal.timeout(30000)
+    });
     if (!listsResponse.ok) throw new Error(`Trello list lookup failed with status ${listsResponse.status}`);
 
     const lists = await listsResponse.json();
@@ -130,14 +138,16 @@ async function fetchExistingTrelloCards(userId, discordUserId, { requireCredenti
         const list = lists.find(entry => String(entry.name || '').trim().toLowerCase() === listName.toLowerCase());
         if (!list) continue;
 
-        const cardsResponse = await fetch(`https://api.trello.com/1/lists/${list.id}/cards?fields=id,name,shortUrl,url,due&${auth}`);
+        const cardsResponse = await fetch(`https://api.trello.com/1/lists/${list.id}/cards?fields=id,name,shortUrl,url,due&${auth}`, {
+            signal: AbortSignal.timeout(30000)
+        });
         if (!cardsResponse.ok) throw new Error(`Trello card lookup failed with status ${cardsResponse.status}`);
 
         const cards = await cardsResponse.json();
         for (const card of cards) {
-            if (String(card.name || '').trim() !== String(userId)) continue;
             const url = String(card.shortUrl || card.url || '').trim();
             if (url) matchingCards.push({
+                userId: String(card.name || '').trim(),
                 id: String(card.id || ''),
                 listName,
                 url,
@@ -463,6 +473,7 @@ module.exports = {
     buildInfoEmbed,
     buildInfoComponents,
     fetchExistingTrelloCards,
+    fetchTrelloBlacklistSnapshot,
     searchDisplayName,
     prioritizeGamePlayers,
     buildDisplayNamePage,
