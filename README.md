@@ -40,6 +40,10 @@ Run the focused tests with `node --test tests/game-statistics.test.js`.
 
 `/gif` and `?gif` show "Generating..." with the application's animated Loading emoji before downloading and converting an image or video, then replace that message with the GIF or an error. `/gif` preserves its ephemeral and spoiler options; `?gif video` uses the same loading behavior for video attachments.
 
+## Transcript scan
+
+`/transcriptscan count:<1–10000> list:<1–100>` ranks the people mentioned in the **Opened By** field of the newest `count` Ticket Closed transcript embeds in channel `964450455247794246`. Other mentions, including **Closed By** and **Claimed By**, are not counted; moderators are included if they opened a ticket. The private leaderboard shows up to `list` people, 25 per page. It reports the number of transcript embeds scanned and how many had no recognizable opener. Fewer than `count` may be available; messages and embeds that are not Ticket Closed transcripts do not count toward the limit. The command uses the existing `/perms` moderator role access and requires the bot to be able to read the channel and its history. Restart the bot or run `/synccommands` to register it.
+
 ## Roblox blacklists
 
 Moderator quota is **6%** of monthly Roblox blacklist bans. `/stats`, `/quota`, and `/summary` use the same threshold; changing the threshold does not reset ban logs or saved overrides. `/quota` calculates additional bans needed accounting for their effect on the total.
