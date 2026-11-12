@@ -4,6 +4,7 @@ const {
 
 const TRANSCRIPT_CHANNEL_ID = '964450455247794246';
 const PAGE_SIZE = 25;
+const PROGRESS_INTERVAL_MS = 2000;
 
 function getOpenedBy(embed) {
     const fields = (embed.fields || []).filter(field =>
@@ -14,7 +15,7 @@ function getOpenedBy(embed) {
     return match ? match[1] : null;
 }
 
-async function scanTranscripts(channel, limit) {
+async function scanTranscripts(channel, limit, onProgress = null) {
     const counts = new Map();
     let scanned = 0;
     let unrecognized = 0;
@@ -37,6 +38,7 @@ async function scanTranscripts(channel, limit) {
         const oldest = ordered[ordered.length - 1].id;
         if (before && BigInt(oldest) >= BigInt(before)) throw new Error('Transcript message pagination did not advance.');
         before = oldest;
+        if (onProgress && scanned < limit && messages.size === 100) await onProgress(scanned);
         if (messages.size < 100) break;
     }
     return {
@@ -65,7 +67,7 @@ function buildPage(result, listLimit, page, interactionId) {
         new ButtonBuilder().setCustomId(`transcriptscan_next:${interactionId}`)
             .setLabel('Next').setStyle(ButtonStyle.Primary).setDisabled(page === pageCount - 1)
     )] : [];
-    return { embeds: [embed], components, allowedMentions: { parse: [] } };
+    return { content: '', embeds: [embed], components, allowedMentions: { parse: [] } };
 }
 
 module.exports = {
@@ -91,13 +93,22 @@ module.exports = {
             return interaction.reply({ content: 'Count must be 1–10,000 and list must be 1–100.', flags: MessageFlags.Ephemeral });
         }
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const progressMessage = scanned => `Searching transcripts... <a:Loading:1564411829290008737> (${scanned}/${count})`;
+        await interaction.editReply(progressMessage(0));
+        let lastProgressUpdate = 0;
+        let lastProgressCount = 0;
         let result;
         try {
             const channel = await client.channels.fetch(TRANSCRIPT_CHANNEL_ID);
             if (!channel?.isTextBased?.() || !channel.messages?.fetch || channel.guildId !== interaction.guildId) {
                 throw new Error('Transcript channel is unavailable in this server.');
             }
-            result = await scanTranscripts(channel, count);
+            result = await scanTranscripts(channel, count, async scanned => {
+                if (scanned === lastProgressCount || Date.now() - lastProgressUpdate < PROGRESS_INTERVAL_MS) return;
+                await interaction.editReply(progressMessage(scanned));
+                lastProgressUpdate = Date.now();
+                lastProgressCount = scanned;
+            });
         } catch (error) {
             console.error('Failed to scan transcript messages:', error);
             return interaction.editReply('Could not scan transcripts. Check the bot’s access to the transcript channel and try again.');

@@ -87,7 +87,10 @@ test('scan 1000 embeds and show only top 15 with no user pings', async () => {
     const client = { isMemberAllowed: () => true, channels: { fetch: async () => channel } };
     await command.executeInteraction({ client, interaction: request });
     assert.deepEqual(request.replies[0], { flags: MessageFlags.Ephemeral });
-    const payload = request.replies[1];
+    assert.equal(request.replies[1], 'Searching transcripts... <a:Loading:1564411829290008737> (0/1000)');
+    assert.equal(request.replies[2], 'Searching transcripts... <a:Loading:1564411829290008737> (100/1000)');
+    const payload = request.replies[request.replies.length - 1];
+    assert.equal(payload.content, '');
     assert.equal(payload.embeds[0].toJSON().description.split('\n').length, 15);
     assert.match(payload.embeds[0].toJSON().description, /50\*\* ticket/);
     assert.match(payload.embeds[0].toJSON().footer.text, /Scanned 1000 transcript/);
@@ -144,14 +147,63 @@ test('permissions, channel and fetch failures are reported without successful pa
         client: { isMemberAllowed: () => true, channels: { fetch: async () => channel } },
         interaction: request
     });
-    assert.match(request.replies[1], /Could not scan transcripts/);
+    assert.equal(request.replies[1], 'Searching transcripts... <a:Loading:1564411829290008737> (0/1000)');
+    assert.match(request.replies[request.replies.length - 1], /Could not scan transcripts/);
     const wrongGuild = interaction();
     channel.guildId = 'different-guild';
     await command.executeInteraction({
         client: { isMemberAllowed: () => true, channels: { fetch: async () => channel } },
         interaction: wrongGuild
     });
-    assert.match(wrongGuild.replies[1], /Could not scan transcripts/);
+    assert.match(wrongGuild.replies[wrongGuild.replies.length - 1], /Could not scan transcripts/);
+});
+
+test('loading message stays visible while transcript history is being fetched', async () => {
+    const request = interaction(1, 1);
+    const channel = channelFor(history(1));
+    const fetch = channel.messages.fetch;
+    let release;
+    const waiting = new Promise(resolve => { release = resolve; });
+    channel.messages.fetch = async options => {
+        await waiting;
+        return fetch(options);
+    };
+    const client = { isMemberAllowed: () => true, channels: { fetch: async () => channel } };
+    const scan = command.executeInteraction({ client, interaction: request });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(request.replies, [
+        { flags: MessageFlags.Ephemeral },
+        'Searching transcripts... <a:Loading:1564411829290008737> (0/1)'
+    ]);
+    release();
+    await scan;
+    assert.equal(request.replies[2].content, '');
+    assert.match(request.replies[2].embeds[0].toJSON().title, /Top ticket openers/);
+});
+
+test('progress counts transcript embeds and throttles updates between fetched pages', async t => {
+    let now = 100000;
+    t.mock.method(Date, 'now', () => now);
+    const request = interaction(350, 15);
+    const channel = channelFor(history(400));
+    const fetch = channel.messages.fetch;
+    channel.messages.fetch = async options => {
+        const page = await fetch(options);
+        now += 1000;
+        if (!options.before) page.get('1000000').embeds = [{ title: 'Other' }];
+        return page;
+    };
+    await command.executeInteraction({
+        client: { isMemberAllowed: () => true, channels: { fetch: async () => channel } },
+        interaction: request
+    });
+    const loading = request.replies.filter(reply => typeof reply === 'string' && reply.startsWith('Searching transcripts'));
+    assert.deepEqual(loading, [
+        'Searching transcripts... <a:Loading:1564411829290008737> (0/350)',
+        'Searching transcripts... <a:Loading:1564411829290008737> (99/350)',
+        'Searching transcripts... <a:Loading:1564411829290008737> (299/350)'
+    ]);
+    assert.match(request.replies[request.replies.length - 1].embeds[0].toJSON().footer.text, /Scanned 350 transcript/);
 });
 
 test('a repeated history page is rejected rather than returning a partial leaderboard', async () => {
