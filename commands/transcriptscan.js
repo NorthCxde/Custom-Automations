@@ -56,7 +56,7 @@ function buildPage(result, listLimit, page, interactionId) {
         .map((row, index) => `${page * PAGE_SIZE + index + 1}. <@${row.userId}> — **${row.count}** ticket(s)`);
     const embed = new EmbedBuilder()
         .setColor(0x36393f)
-        .setTitle('Top ticket openers')
+        .setTitle('Top Reporters')
         .setDescription(lines.length ? lines.join('\n') : 'No recognizable ticket openers were found.')
         .setFooter({
             text: `Scanned ${result.scanned} transcript embed(s) | ${result.unrecognized} without a recognizable opener | Page ${page + 1}/${pageCount}`

@@ -178,7 +178,7 @@ test('loading message stays visible while transcript history is being fetched', 
     release();
     await scan;
     assert.equal(request.replies[2].content, '');
-    assert.match(request.replies[2].embeds[0].toJSON().title, /Top ticket openers/);
+    assert.equal(request.replies[2].embeds[0].toJSON().title, 'Top Reporters');
 });
 
 test('progress counts transcript embeds and throttles updates between fetched pages', async t => {
