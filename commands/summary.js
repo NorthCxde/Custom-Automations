@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const statsCommand = require('./stats');
 const { getDiscordModstatsCountsInRange } = require('./modstats');
 
-const QUOTA_PERCENT = 8;
+const { QUOTA_PERCENT } = statsCommand;
 const MAX_ROWS = 25;
 const STATS_TIME_ZONE = 'America/New_York';
 const TRAINEE_ROLE_ID = '1217365422501003284';

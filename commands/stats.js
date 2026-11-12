@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 
-const QUOTA_PERCENT = 8;
+const QUOTA_PERCENT = 6;
 const QUOTA_TIME_ZONE = 'America/New_York';
 
 function isBanEntry(entry) {
