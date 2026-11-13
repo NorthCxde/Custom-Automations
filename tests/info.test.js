@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { MessageFlags } = require('discord.js');
 const command = require('../commands/info');
-const displayNameCommand = require('../commands/displayname');
+const displayNameCommand = require('../commands/search');
 
 function user(id, displayName = 'Target') {
     return { id, name: `user_${id}`, displayName };
@@ -39,16 +39,16 @@ test('search filters exact case-insensitive display names, deduplicates and foll
     assert.equal(calls, 2);
 });
 
-test('search caps results at 100 and bounds sparse-match searches to 10 requests', async t => {
+test('search caps results at 150 and bounds sparse-match searches to 10 requests', async t => {
     let calls = 0;
     mockSearch(t, () => {
         calls++;
-        return { data: Array.from({ length: 100 }, (_, index) => user(index + 1)), nextPageCursor: 'next' };
+        return { data: Array.from({ length: 100 }, (_, index) => user((calls - 1) * 100 + index + 1)), nextPageCursor: `next${calls}` };
     });
     const result = await command.searchDisplayName('Target');
-    assert.equal(result.users.length, 100);
+    assert.equal(result.users.length, 150);
     assert.equal(result.limited, true);
-    assert.equal(calls, 1);
+    assert.equal(calls, 2);
     calls = 0;
     mockSearch(t, () => {
         calls++;
@@ -60,24 +60,24 @@ test('search caps results at 100 and bounds sparse-match searches to 10 requests
     assert.deepEqual(sparse.users, []);
 });
 
-test('pages have 25 numbered username-ID entries and correct Back/Next boundaries', () => {
+test('pages have 15 numbered username-ID entries and correct Back/Next boundaries', () => {
     const result = {
-        displayName: 'Target', users: Array.from({ length: 100 }, (_, index) => user(index + 1)), limited: true
+        displayName: 'Target', users: Array.from({ length: 150 }, (_, index) => user(index + 1)), limited: true
     };
-    for (let page = 0; page < 4; page++) {
+    for (let page = 0; page < 10; page++) {
         const payload = command.buildDisplayNamePage(result, page, 'session');
         const embed = payload.embeds[0].toJSON();
         assert.equal(payload.content, '');
-        assert.equal(embed.description.split('\n').filter(line => /^\d+\./.test(line)).length, 25);
-        assert.ok(embed.description.includes(`\n${page * 25 + 1}. `));
-        assert.ok(embed.description.endsWith(` - ${(page + 1) * 25}`));
+        assert.equal(embed.description.split('\n').filter(line => /^\d+\./.test(line)).length, 15);
+        assert.ok(embed.description.includes(`\n${page * 15 + 1}. `));
+        assert.ok(embed.description.endsWith(` - ${(page + 1) * 15}`));
         assert.match(embed.description, /https:\/\/www\.roblox\.com\/users\/\d+\/profile/);
-        assert.match(embed.footer.text, new RegExp(`Page ${page + 1}/4`));
+        assert.match(embed.footer.text, new RegExp(`Page ${page + 1}/10`));
         assert.match(embed.footer.text, /Search limit reached.*may omit accounts/);
         assert.ok(embed.description.length <= 4096);
         const buttons = payload.components[0].toJSON().components;
         assert.equal(buttons[0].disabled, page === 0);
-        assert.equal(buttons[1].disabled, page === 3);
+        assert.equal(buttons[1].disabled, page === 9);
     }
     const empty = command.buildDisplayNamePage({ displayName: 'Target', users: [], limited: false }, 0, 'session');
     assert.match(empty.embeds[0].toJSON().description, /No exact display-name matches/);
@@ -104,14 +104,14 @@ function interaction(values) {
     };
 }
 
-test('info requires only user and displayname requires only display_name', async () => {
+test('info requires user and search requires displayname with optional item', async () => {
     const options = command.data.toJSON().options;
     assert.deepEqual(options.map(option => [option.name, option.required]), [['user', true]]);
-    assert.equal(displayNameCommand.data.toJSON().name, 'displayname');
-    assert.deepEqual(displayNameCommand.data.toJSON().options.map(option => [option.name, option.required]), [['display_name', true]]);
+    assert.equal(displayNameCommand.data.toJSON().name, 'search');
+    assert.deepEqual(displayNameCommand.data.toJSON().options.map(option => [option.name, Boolean(option.required)]), [['displayname', true], ['item', false]]);
     for (const [handler, values, expected] of [
         [command, { user: '   ' }, /username or user ID is required/],
-        [displayNameCommand, { display_name: '   ' }, /display name is required/]
+        [displayNameCommand, { displayname: '   ' }, /display name is required/]
     ]) {
         const request = interaction(values);
         await handler.executeInteraction({ interaction: request });
@@ -125,9 +125,9 @@ test('display-name execution stays ephemeral and buttons paginate cached results
     let calls = 0;
     mockSearch(t, () => {
         calls++;
-        return { data: Array.from({ length: 75 }, (_, index) => user(index + 1)), nextPageCursor: null };
+        return { data: Array.from({ length: 45 }, (_, index) => user(index + 1)), nextPageCursor: null };
     });
-    const request = interaction({ display_name: 'Target' });
+    const request = interaction({ displayname: 'Target' });
     await displayNameCommand.executeInteraction({ interaction: request });
     assert.equal(request.replies[0].flags, MessageFlags.Ephemeral);
     assert.equal(request.collectorOptions.time, 300000);
@@ -154,7 +154,7 @@ test('failed/malformed/repeated search pages reject rather than return successfu
     }
     t.mock.method(globalThis, 'fetch', async () => ({ ok: false, status: 429 }));
     t.mock.method(console, 'error', () => {});
-    const request = interaction({ display_name: 'Target' });
+    const request = interaction({ displayname: 'Target' });
     await displayNameCommand.executeInteraction({ interaction: request });
     assert.match(request.replies.at(-1).content, /search failed or timed out/);
     assert.deepEqual(request.replies.at(-1).components, []);
@@ -225,6 +225,98 @@ test('both game badges prioritize players stably without mutating search results
     assert.ok(description.includes('4. [user\\_1]'));
 });
 
+test('item owners with a badge rank first, followed by item owners and badge owners', async t => {
+    const result = { displayName: 'Target', users: [user(1), user(2), user(3), user(4), user(5)], limited: false };
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        assert.ok(options.signal instanceof AbortSignal);
+        const path = new URL(url).pathname.split('/');
+        const id = Number(path[3]);
+        if (path[5] === 'Asset') {
+            assert.equal(path[6], '123456789');
+            assert.equal(path[7], 'is-owned');
+            return { ok: true, json: async () => [2, 4].includes(id) };
+        }
+        return { ok: true, json: async () => ({
+            data: [3, 4].includes(id) && path[6] === '2142457718' ? [{ id: '2142457718' }] : []
+        }) };
+    });
+    const ranked = await command.prioritizeGamePlayers(result, '123456789');
+    assert.deepEqual(ranked.users.map(entry => entry.id), [4, 2, 3, 1, 5]);
+    assert.equal(ranked.itemCheckFailures, 0);
+    const description = command.buildDisplayNamePage(ranked, 0, 'session').embeds[0].toJSON().description;
+    assert.ok(description.indexOf('**Item Owners with Game History**') < description.indexOf('**Item Owners**'));
+    assert.ok(description.indexOf('**Item Owners**') < description.indexOf('**Top Results**'));
+    assert.ok(description.indexOf('**Top Results**') < description.indexOf('**Other Results**'));
+});
+
+test('private or malformed item checks remain unknown and show a warning', async t => {
+    t.mock.method(console, 'error', () => {});
+    t.mock.method(globalThis, 'fetch', async url => {
+        if (url.includes('/items/Asset/')) {
+            return url.includes('/users/1/')
+                ? { ok: false, status: 403 }
+                : { ok: true, json: async () => ({}) };
+        }
+        return { ok: true, json: async () => ({ data: [] }) };
+    });
+    const ranked = await command.prioritizeGamePlayers({ displayName: 'Target', users: [user(1), user(2)] }, '123');
+    assert.equal(ranked.itemCheckFailures, 2);
+    assert.deepEqual(ranked.users.map(entry => entry.ownsItem), [null, null]);
+    assert.match(command.buildDisplayNamePage(ranked, 0, 'session').embeds[0].toJSON().footer.text,
+        /2 item checks unavailable; ownership unknown/);
+});
+
+test('search rejects invalid item IDs before making requests', async t => {
+    t.mock.method(globalThis, 'fetch', async () => { throw new Error('unexpected fetch'); });
+    for (const item of ['0', '-1', '123abc', '1.2']) {
+        const request = interaction({ displayname: 'Target', item });
+        await displayNameCommand.executeInteraction({ interaction: request });
+        assert.match(request.replies[0].content, /valid positive Roblox asset ID/);
+        assert.equal(request.replies[0].flags, MessageFlags.Ephemeral);
+    }
+});
+
+test('/search passes the optional asset ID through to ownership checks and the results', async t => {
+    let assetChecks = 0;
+    t.mock.method(globalThis, 'fetch', async url => {
+        const parsed = new URL(url);
+        if (parsed.pathname === '/v1/users/search') {
+            return { ok: true, json: async () => ({ data: [user(1), user(2)], nextPageCursor: null }) };
+        }
+        if (parsed.pathname.includes('/items/Asset/123/is-owned')) {
+            assetChecks++;
+            return { ok: true, json: async () => parsed.pathname.includes('/users/2/') };
+        }
+        return { ok: true, json: async () => ({ data: [] }) };
+    });
+    const request = interaction({ displayname: 'Target', item: '123' });
+    await displayNameCommand.executeInteraction({ interaction: request });
+    assert.equal(request.replies[0].flags, MessageFlags.Ephemeral);
+    assert.match(request.replies[1].content, /item ownership/);
+    const embed = request.replies.at(-1).embeds[0].toJSON();
+    assert.equal(assetChecks, 2);
+    assert.match(embed.description, /\*\*Item Owners\*\*\n1\. \[user\\_2\]/);
+    assert.match(embed.footer.text, /Item 123/);
+});
+
+test('item rate limiting stops further requests and reports all unchecked ownership', async t => {
+    t.mock.method(console, 'error', () => {});
+    let itemCalls = 0;
+    t.mock.method(globalThis, 'fetch', async url => {
+        if (url.includes('/items/Asset/')) {
+            itemCalls++;
+            return { ok: false, status: 429 };
+        }
+        return { ok: true, json: async () => ({ data: [] }) };
+    });
+    const ranked = await command.prioritizeGamePlayers({
+        displayName: 'Target', users: Array.from({ length: 20 }, (_, i) => user(i + 1))
+    }, '123');
+    assert.ok(itemCalls <= 4);
+    assert.equal(ranked.itemCheckFailures, 20);
+    assert.ok(ranked.users.every(entry => entry.ownsItem === null));
+});
+
 test('badge rate limits stop further requests and show incomplete-ranking warning', async t => {
     let calls = 0;
     t.mock.method(console, 'error', () => {});
@@ -267,25 +359,25 @@ test('invalid inventory responses are flagged rather than classified as no game 
     assert.deepEqual(ranked.users[0].games, []);
 });
 
-test('Top Results spanning pages keep 25 users per page and all 100 unique entries', () => {
+test('Top Results spanning pages keep 15 users per page and all 150 unique entries', () => {
     const result = {
         displayName: 'Target', limited: true,
-        users: Array.from({ length: 100 }, (_, index) => ({
-            ...user(index + 1), games: index < 30 ? ['Timebomb Duels'] : []
+        users: Array.from({ length: 150 }, (_, index) => ({
+            ...user(index + 1), games: index < 20 ? ['Timebomb Duels'] : []
         }))
     };
     const lines = [];
-    for (let page = 0; page < 4; page++) {
+    for (let page = 0; page < 10; page++) {
         const embed = command.buildDisplayNamePage(result, page, 'session').embeds[0].toJSON();
         const entries = embed.description.split('\n').filter(line => /^\d+\./.test(line));
-        assert.equal(entries.length, 25);
+        assert.equal(entries.length, 15);
         lines.push(...entries);
         if (page === 1) {
             assert.match(embed.description, /Top Results/);
             assert.match(embed.description, /Other Results/);
         }
     }
-    assert.equal(new Set(lines).size, 100);
+    assert.equal(new Set(lines).size, 150);
 });
 
 test('Top Results show exact played-game labels while Other Results stay unlabeled', () => {
@@ -304,10 +396,10 @@ test('Top Results show exact played-game labels while Other Results stay unlabel
     assert.ok(description.endsWith(' - 4'));
 });
 
-test('long usernames with played labels preserve all 25 entries within Discord embed limits', () => {
+test('long usernames with played labels preserve all 15 entries within Discord embed limits', () => {
     const result = {
         displayName: 'Target',
-        users: Array.from({ length: 25 }, (_, index) => ({
+        users: Array.from({ length: 15 }, (_, index) => ({
             id: Number.MAX_SAFE_INTEGER - index, name: '_'.repeat(20), games: ['Custom Minigames']
         }))
     };
@@ -315,7 +407,7 @@ test('long usernames with played labels preserve all 25 entries within Discord e
     assert.ok(embed.description.length <= 4096);
     for (const field of embed.fields || []) assert.ok(field.value.length <= 1024);
     const text = [embed.description, ...(embed.fields || []).map(field => field.value)].join('\n');
-    assert.equal(text.split('\n').filter(line => /^\d+\./.test(line)).length, 25);
-    assert.equal((text.match(/Played Custom Minigames/g) || []).length, 25);
+    assert.equal(text.split('\n').filter(line => /^\d+\./.test(line)).length, 15);
+    assert.equal((text.match(/Played Custom Minigames/g) || []).length, 15);
     assert.ok(text.length + embed.title.length + embed.footer.text.length + 9 <= 6000);
 });

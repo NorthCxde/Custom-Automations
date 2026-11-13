@@ -66,7 +66,8 @@ const MODERATOR_WHITELIST = new Set([...HARD_CODED_ADMINS]);
 const TRUSTED_TRELLO_USER_IDS = new Set([...HARD_CODED_ADMINS]);
 const STATIC_HARD_CODED_ADMINS = [...HARD_CODED_ADMINS];
 const configuredGlobalSlashCommands = Array.isArray(config.globalSlashCommands)
-    ? config.globalSlashCommands.map(name => String(name || '').trim().toLowerCase()).filter(Boolean)
+    ? config.globalSlashCommands.map(name => String(name || '').trim().toLowerCase())
+        .map(name => name === 'displayname' ? 'search' : name).filter(Boolean)
     : [];
 const GLOBAL_SLASH_COMMAND_NAMES = new Set(configuredGlobalSlashCommands);
 
@@ -116,7 +117,7 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'summary'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind', 'pumpkinmask']);
-const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'displayname', 'recentbans', 'quota', 'register', 'viewinfractions']);
+const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'search', 'recentbans', 'quota', 'register', 'viewinfractions']);
 
 function trelloRequestJson(url) {
     return new Promise((resolve, reject) => {
@@ -3915,6 +3916,9 @@ client.getCommandAccessLevel = (commandName) => {
     if (!name) return 'moderator';
     if (client.commandAccessLevels.has(name)) {
         return client.commandAccessLevels.get(name);
+    }
+    if (name === 'search' && client.commandAccessLevels.has('displayname')) {
+        return client.commandAccessLevels.get('displayname');
     }
     return client.getDefaultCommandAccessLevel(name);
 };

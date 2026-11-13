@@ -15,6 +15,8 @@ const TRELLO_BOARD_ID = 'QpzzqyE8';
 const TRELLO_LIST_NAMES = ['Blacklist', 'TB Duels Blacklist'];
 const TIMEBOMB_BADGE_ID = '2142457718';
 const CUSTOM_MINIGAMES_BADGE_ID = '2124646244';
+const SEARCH_PAGE_SIZE = 15;
+const SEARCH_MAX_RESULTS = 150;
 
 async function fetchJson(url, options = {}) {
     const response = await fetch(url, options);
@@ -87,6 +89,16 @@ async function fetchBadgeOwnership(userId, badgeId, options = {}) {
     const result = await response.json();
     if (!Array.isArray(result.data)) throw new Error('Roblox returned invalid badge-ownership results');
     return result.data.some(item => String(item.id) === badgeId);
+}
+
+async function fetchAssetOwnership(userId, assetId, options = {}) {
+    const response = await fetch(`${ROBLOX_INVENTORY_API}/users/${userId}/items/Asset/${assetId}/is-owned`, options);
+    if (!response.ok) {
+        throw Object.assign(new Error(`Roblox item check failed with status ${response.status}`), { status: response.status });
+    }
+    const result = await response.json();
+    if (typeof result !== 'boolean') throw new Error('Roblox returned an invalid item-ownership result');
+    return result;
 }
 
 async function ownsBadge(userId, badgeId) {
@@ -278,10 +290,10 @@ async function searchDisplayName(input) {
             if (user.displayName.toLowerCase() !== displayName.toLowerCase() || seenIds.has(user.id)) continue;
             seenIds.add(user.id);
             users.push({ id: user.id, name: user.name });
-            if (users.length === 100) break;
+            if (users.length === SEARCH_MAX_RESULTS) break;
         }
         cursor = result.nextPageCursor;
-        if (users.length === 100) {
+        if (users.length === SEARCH_MAX_RESULTS) {
             limited = true;
             break;
         }
@@ -293,19 +305,16 @@ async function searchDisplayName(input) {
     return { displayName, users, limited };
 }
 
-async function prioritizeGamePlayers(result) {
+async function prioritizeGamePlayers(result, itemId = null) {
     const signal = AbortSignal.timeout(30000);
     const ranked = result.users.map(user => ({ ...user, games: [] }));
     let next = 0;
     let failures = 0;
+    let itemFailures = 0;
     let rateLimited = false;
     await Promise.all(Array.from({ length: Math.min(4, ranked.length) }, async () => {
         while (next < ranked.length) {
             const user = ranked[next++];
-            if (rateLimited || signal.aborted) {
-                failures++;
-                continue;
-            }
             let checkFailed = false;
             for (const [badgeId, game] of [
                 [TIMEBOMB_BADGE_ID, 'Timebomb Duels'], [CUSTOM_MINIGAMES_BADGE_ID, 'Custom Minigames']
@@ -325,22 +334,41 @@ async function prioritizeGamePlayers(result) {
                 }
             }
             if (checkFailed) failures++;
+            if (itemId) {
+                user.ownsItem = null;
+                if (!rateLimited && !signal.aborted) {
+                    try {
+                        user.ownsItem = await fetchAssetOwnership(user.id, itemId, { signal });
+                    } catch (error) {
+                        if (error.status === 429) rateLimited = true;
+                        console.error(`Failed to check asset ${itemId} for Roblox user ${user.id}:`, error.message);
+                    }
+                }
+                if (user.ownsItem === null) itemFailures++;
+            }
         }
     }));
+    const rank = user => itemId
+        ? (user.ownsItem === true ? (user.games.length ? 0 : 1) : (user.games.length ? 2 : 3))
+        : (user.games.length ? 0 : 1);
     return {
         ...result,
-        users: [...ranked.filter(user => user.games.length), ...ranked.filter(user => !user.games.length)],
-        badgeCheckFailures: failures
+        itemId,
+        users: ranked.sort((a, b) => rank(a) - rank(b)),
+        badgeCheckFailures: failures,
+        itemCheckFailures: itemFailures
     };
 }
 
 function buildDisplayNamePage(result, page, interactionId) {
-    const pageCount = Math.max(1, Math.ceil(result.users.length / 25));
-    const start = page * 25;
+    const pageCount = Math.max(1, Math.ceil(result.users.length / SEARCH_PAGE_SIZE));
+    const start = page * SEARCH_PAGE_SIZE;
     const lines = [];
     let section = null;
-    for (const [index, user] of result.users.slice(start, start + 25).entries()) {
-        const heading = user.games?.length ? 'Top Results' : 'Other Results';
+    for (const [index, user] of result.users.slice(start, start + SEARCH_PAGE_SIZE).entries()) {
+        const heading = result.itemId && user.ownsItem === true
+            ? (user.games?.length ? 'Item Owners with Game History' : 'Item Owners')
+            : (user.games?.length ? 'Top Results' : 'Other Results');
         if (heading !== section) {
             if (lines.length) lines.push('');
             lines.push(`**${heading}**`);
@@ -358,7 +386,7 @@ function buildDisplayNamePage(result, page, interactionId) {
         .setTitle(`Display Name: ${result.displayName}`)
         .setDescription(lines.length ? lines.join('\n') : 'No exact display-name matches were found in the searched results.')
         .setFooter({
-            text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}. Top results own a badge from a played game.${result.badgeCheckFailures ? ` ${result.badgeCheckFailures} badge checks unavailable; ranking incomplete.` : ''} Roblox search may omit accounts.`
+            text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}.${result.itemId ? ` Item ${result.itemId}.` : ''} Top results own a badge from a played game.${result.badgeCheckFailures ? ` ${result.badgeCheckFailures} badge checks unavailable; ranking incomplete.` : ''}${result.itemCheckFailures ? ` ${result.itemCheckFailures} item checks unavailable; ownership unknown.` : ''} Roblox search may omit accounts.`
         });
     if (overflow.length) embed.addFields({ name: 'Continued', value: overflow.join('\n') });
     const components = pageCount > 1 ? [new ActionRowBuilder().addComponents(
@@ -376,16 +404,17 @@ function buildDisplayNamePage(result, page, interactionId) {
     return { content: '', embeds: [embed], components };
 }
 
-async function showDisplayNameSearch(interaction, displayName) {
+async function showDisplayNameSearch(interaction, displayName, itemId = null) {
     let result;
     try {
         result = await searchDisplayName(displayName);
         if (result.users.length) {
             await interaction.editReply({
-                content: 'Checking game history... <a:Loading:1564411829290008737>',
+                content: itemId ? 'Checking game history and item ownership... <a:Loading:1564411829290008737>'
+                    : 'Checking game history... <a:Loading:1564411829290008737>',
                 embeds: [], components: []
             });
-            result = await prioritizeGamePlayers(result);
+            result = await prioritizeGamePlayers(result, itemId);
         }
     } catch (error) {
         console.error('Failed to search Roblox display names:', error);
@@ -397,7 +426,7 @@ async function showDisplayNameSearch(interaction, displayName) {
     }
     let page = 0;
     const message = await interaction.editReply(buildDisplayNamePage(result, page, interaction.id));
-    if (result.users.length <= 25) return;
+    if (result.users.length <= SEARCH_PAGE_SIZE) return;
     const backId = `info_display_back:${interaction.id}`;
     const nextId = `info_display_next:${interaction.id}`;
     const collector = message.createMessageComponentCollector({
@@ -405,7 +434,7 @@ async function showDisplayNameSearch(interaction, displayName) {
         time: 5 * 60 * 1000
     });
     collector.on('collect', async button => {
-        page = Math.max(0, Math.min(Math.ceil(result.users.length / 25) - 1,
+        page = Math.max(0, Math.min(Math.ceil(result.users.length / SEARCH_PAGE_SIZE) - 1,
             page + (button.customId === nextId ? 1 : -1)));
         try {
             await button.update(buildDisplayNamePage(result, page, interaction.id));
@@ -413,7 +442,7 @@ async function showDisplayNameSearch(interaction, displayName) {
             console.error('Failed to update Roblox display-name results:', error);
             collector.stop('error');
             try {
-                await interaction.followUp({ content: 'Could not change search pages. Run /displayname again.', flags: MessageFlags.Ephemeral });
+                await interaction.followUp({ content: 'Could not change search pages. Run /search again.', flags: MessageFlags.Ephemeral });
             } catch (replyError) {
                 console.error('Failed to send display-name pagination error:', replyError);
             }
