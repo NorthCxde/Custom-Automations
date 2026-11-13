@@ -26,11 +26,12 @@ function interaction(customId, modal = false) {
 test('menu preserves two red two-week options and adds a green 1 Week option', () => {
     const buttons = buildBlacklistMenu('531359446').toJSON().components;
     assert.deepEqual(buttons.map(button => [button.label, button.style]), [
-        ['Blacklist', ButtonStyle.Danger], ['TB Duels Blacklist', ButtonStyle.Danger],
+        ['Custom Minigames', ButtonStyle.Danger], ['Timebomb Duels', ButtonStyle.Danger],
         ['1 Week', ButtonStyle.Success]
     ]);
-    for (const button of buttons.slice(0, 2)) {
+    for (const [index, button] of buttons.slice(0, 2).entries()) {
         const request = getBlacklistRequest(interaction(button.custom_id));
+        assert.equal(request.listName, ['Blacklist', 'TB Duels Blacklist'][index]);
         assert.equal(request.days, 14);
         assert.equal(request.comment, null);
     }
@@ -46,13 +47,13 @@ test('1 Week opens required paragraph modal before offering both lists and retai
     assert.equal(input.required, true);
     assert.equal(input.max_length, 4000);
 
-    for (const listName of ['Blacklist', 'TB Duels Blacklist']) {
+    for (const [listName, label] of [['Blacklist', 'Custom Minigames'], ['TB Duels Blacklist', 'Timebomb Duels']]) {
         const submit = interaction(start.modal.custom_id, true);
         assert.equal(await handleWeekInteraction(client, submit), true);
         assert.equal(submit.response.ephemeral, true);
         const buttons = submit.response.components[0].toJSON().components;
-        assert.deepEqual(buttons.map(button => button.label), ['Blacklist', 'TB Duels Blacklist']);
-        const button = buttons.find(button => button.label === listName);
+        assert.deepEqual(buttons.map(button => button.label), ['Custom Minigames', 'Timebomb Duels']);
+        const button = buttons.find(button => button.label === label);
         assert.ok(button.custom_id.length <= 100);
         const selection = interaction(button.custom_id);
         assert.deepEqual(getBlacklistRequest(selection), {
