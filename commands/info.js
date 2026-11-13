@@ -7,8 +7,10 @@ const {
     MessageFlags,
     escapeMarkdown
 } = require('discord.js');
+const { randomUUID } = require('node:crypto');
 
 const ROBLOX_USERS_API = 'https://users.roblox.com/v1';
+const ROBLOX_PEOPLE_SEARCH_API = 'https://apis.roblox.com/search-api/omni-search';
 const ROBLOX_THUMBNAILS_API = 'https://thumbnails.roblox.com/v1';
 const ROBLOX_INVENTORY_API = 'https://inventory.roblox.com/v1';
 const TRELLO_BOARD_ID = 'QpzzqyE8';
@@ -266,23 +268,33 @@ function buildInfoComponents(userId, { alreadyBanned = false } = {}) {
     return [new ActionRowBuilder().addComponents(buttons)];
 }
 
-async function searchDisplayName(input) {
-    const displayName = input.trim();
+async function searchDisplayNameSource(displayName, signal, peopleSearch) {
     const users = [];
     const seenIds = new Set();
     const seenCursors = new Set();
-    const signal = AbortSignal.timeout(30000);
+    const sessionId = peopleSearch ? randomUUID() : null;
     let cursor = null;
     let limited = false;
     for (let page = 0; page < 10; page++) {
-        const params = new URLSearchParams({ keyword: displayName, limit: '100' });
-        if (cursor) params.set('cursor', cursor);
-        const result = await fetchJson(`${ROBLOX_USERS_API}/users/search?${params}`, { signal });
-        if (!Array.isArray(result.data) ||
-            (result.nextPageCursor != null && typeof result.nextPageCursor !== 'string')) {
+        const params = peopleSearch
+            ? new URLSearchParams({ verticalType: 'user', searchQuery: displayName, globalSessionId: sessionId, sessionId })
+            : new URLSearchParams({ keyword: displayName, limit: '100' });
+        if (cursor) params.set(peopleSearch ? 'pageToken' : 'cursor', cursor);
+        const url = peopleSearch ? ROBLOX_PEOPLE_SEARCH_API : `${ROBLOX_USERS_API}/users/search`;
+        const result = await fetchJson(`${url}?${params}`, { signal });
+        const nextCursor = peopleSearch ? result.nextPageToken : result.nextPageCursor;
+        if ((nextCursor != null && typeof nextCursor !== 'string') ||
+            (peopleSearch
+                ? !Array.isArray(result.searchResults) || result.searchResults.some(group => !Array.isArray(group.contents))
+                : !Array.isArray(result.data))) {
             throw new Error('Roblox returned invalid user-search results');
         }
-        for (const user of result.data) {
+        const entries = peopleSearch
+            ? result.searchResults.flatMap(group => group.contents.map(entry => ({
+                id: entry.contentId, name: entry.username, displayName: entry.displayName
+            })))
+            : result.data;
+        for (const user of entries) {
             if (!Number.isSafeInteger(user.id) || user.id <= 0 ||
                 typeof user.name !== 'string' || typeof user.displayName !== 'string') {
                 throw new Error('Roblox returned an invalid user-search entry');
@@ -292,7 +304,7 @@ async function searchDisplayName(input) {
             users.push({ id: user.id, name: user.name });
             if (users.length === SEARCH_MAX_RESULTS) break;
         }
-        cursor = result.nextPageCursor;
+        cursor = nextCursor;
         if (users.length === SEARCH_MAX_RESULTS) {
             limited = true;
             break;
@@ -302,7 +314,41 @@ async function searchDisplayName(input) {
         seenCursors.add(cursor);
         if (page === 9) limited = true;
     }
-    return { displayName, users, limited };
+    return { users, limited };
+}
+
+async function searchDisplayName(input) {
+    const displayName = input.trim();
+    const signal = AbortSignal.timeout(30000);
+    const primary = await searchDisplayNameSource(displayName, signal, false);
+    let people = { users: [], limited: false };
+    let peopleSearchUnavailable = false;
+    const peopleSearchSkipped = displayName.length < 3;
+    if (!peopleSearchSkipped) {
+        try {
+            people = await searchDisplayNameSource(displayName, signal, true);
+        } catch (error) {
+            peopleSearchUnavailable = true;
+            console.error('Failed to search Roblox people results:', error);
+        }
+    }
+
+    const users = [];
+    const seenIds = new Set();
+    for (let i = 0; i < Math.max(primary.users.length, people.users.length); i++) {
+        for (const user of [primary.users[i], people.users[i]]) {
+            if (!user || seenIds.has(user.id)) continue;
+            seenIds.add(user.id);
+            users.push(user);
+        }
+    }
+    return {
+        displayName,
+        users: users.slice(0, SEARCH_MAX_RESULTS),
+        limited: primary.limited || people.limited || users.length > SEARCH_MAX_RESULTS,
+        peopleSearchUnavailable,
+        peopleSearchSkipped
+    };
 }
 
 async function prioritizeGamePlayers(result, itemId = null) {
@@ -386,7 +432,7 @@ function buildDisplayNamePage(result, page, interactionId) {
         .setTitle(`Display Name: ${result.displayName}`)
         .setDescription(lines.length ? lines.join('\n') : 'No exact display-name matches were found in the searched results.')
         .setFooter({
-            text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}.${result.itemId ? ` Item ${result.itemId}.` : ''} Top results own a badge from a played game.${result.badgeCheckFailures ? ` ${result.badgeCheckFailures} badge checks unavailable; ranking incomplete.` : ''}${result.itemCheckFailures ? ` ${result.itemCheckFailures} item checks unavailable; ownership unknown.` : ''} Roblox search may omit accounts.`
+            text: `Page ${page + 1}/${pageCount} | ${result.users.length} exact matches${result.limited ? ' | Search limit reached' : ''}.${result.itemId ? ` Item ${result.itemId}.` : ''} Top results own a badge from a played game.${result.badgeCheckFailures ? ` ${result.badgeCheckFailures} badge checks unavailable; ranking incomplete.` : ''}${result.itemCheckFailures ? ` ${result.itemCheckFailures} item checks unavailable; ownership unknown.` : ''}${result.peopleSearchUnavailable ? ' People search unavailable; results incomplete.' : ''}${result.peopleSearchSkipped ? ' People search requires at least 3 characters.' : ''} Roblox search may omit accounts.`
         });
     if (overflow.length) embed.addFields({ name: 'Continued', value: overflow.join('\n') });
     const components = pageCount > 1 ? [new ActionRowBuilder().addComponents(

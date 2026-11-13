@@ -15,6 +15,9 @@ function mockSearch(t, handler) {
             return { ok: true, json: async () => ({ data: [] }) };
         }
         assert.ok(options.signal instanceof AbortSignal);
+        if (new URL(url).pathname === '/search-api/omni-search') {
+            return { ok: true, json: async () => ({ searchResults: [], nextPageToken: '' }) };
+        }
         assert.equal(new URL(url).pathname, '/v1/users/search');
         assert.equal(new URL(url).searchParams.get('limit'), '100');
         return { ok: true, json: async () => handler(new URL(url).searchParams) };
@@ -34,9 +37,91 @@ test('search filters exact case-insensitive display names, deduplicates and foll
         return { data: [user(1), user(4, 'TARGET')], nextPageCursor: null };
     });
     assert.deepEqual(await command.searchDisplayName(' Target '), {
-        displayName: 'Target', users: [{ id: 1, name: 'user_1' }, { id: 4, name: 'user_4' }], limited: false
+        displayName: 'Target', users: [{ id: 1, name: 'user_1' }, { id: 4, name: 'user_4' }],
+        limited: false, peopleSearchUnavailable: false, peopleSearchSkipped: false
     });
     assert.equal(calls, 2);
+});
+
+test('people search adds exact matches with unrelated usernames and deduplicates across sources', async t => {
+    let peopleCalls = 0;
+    let sessionId;
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        assert.ok(options.signal instanceof AbortSignal);
+        const parsed = new URL(url);
+        if (parsed.pathname === '/v1/users/search') {
+            return { ok: true, json: async () => ({ data: [user(1, 'Yang')], nextPageCursor: null }) };
+        }
+        assert.equal(parsed.pathname, '/search-api/omni-search');
+        assert.equal(parsed.searchParams.get('verticalType'), 'user');
+        assert.equal(parsed.searchParams.get('searchQuery'), 'Yang');
+        sessionId = sessionId || parsed.searchParams.get('sessionId');
+        assert.equal(parsed.searchParams.get('sessionId'), sessionId);
+        assert.equal(parsed.searchParams.get('globalSessionId'), sessionId);
+        peopleCalls++;
+        if (peopleCalls === 1) {
+            assert.equal(parsed.searchParams.get('pageToken'), null);
+            return { ok: true, json: async () => ({
+                searchResults: [{ contents: [
+                    { contentId: 1, username: 'user_1', displayName: 'Yang' },
+                    { contentId: 531359446, username: 'NorthCxde', displayName: 'YANG' },
+                    { contentId: 3, username: 'other', displayName: 'Yang2' }
+                ] }], nextPageToken: 'next+&='
+            }) };
+        }
+        assert.equal(parsed.searchParams.get('pageToken'), 'next+&=');
+        return { ok: true, json: async () => ({
+            searchResults: [{ contents: [{ contentId: 4, username: 'different', displayName: 'yang' }] }],
+            nextPageToken: ''
+        }) };
+    });
+    const result = await command.searchDisplayName('Yang');
+    assert.deepEqual(result.users, [
+        { id: 1, name: 'user_1' }, { id: 531359446, name: 'NorthCxde' }, { id: 4, name: 'different' }
+    ]);
+    assert.equal(result.peopleSearchUnavailable, false);
+    assert.equal(peopleCalls, 2);
+});
+
+test('combined search reserves space for both sources within the 150-result limit', async t => {
+    t.mock.method(globalThis, 'fetch', async url => {
+        const parsed = new URL(url);
+        if (parsed.pathname === '/v1/users/search') {
+            return { ok: true, json: async () => ({
+                data: Array.from({ length: 150 }, (_, i) => user(i + 1)), nextPageCursor: null
+            }) };
+        }
+        return { ok: true, json: async () => ({
+            searchResults: [{ contents: Array.from({ length: 150 }, (_, i) => ({
+                contentId: i + 1001, username: `other_${i}`, displayName: 'Target'
+            })) }], nextPageToken: ''
+        }) };
+    });
+    const result = await command.searchDisplayName('Target');
+    assert.equal(result.users.length, 150);
+    assert.equal(result.users.filter(entry => entry.id > 1000).length, 75);
+    assert.equal(result.limited, true);
+});
+
+test('people-search failures are visible and short display names skip that search', async t => {
+    t.mock.method(console, 'error', () => {});
+    let peopleCalls = 0;
+    t.mock.method(globalThis, 'fetch', async url => {
+        if (new URL(url).pathname === '/v1/users/search') {
+            return { ok: true, json: async () => ({ data: [], nextPageCursor: null }) };
+        }
+        peopleCalls++;
+        return { ok: false, status: 429 };
+    });
+    const failed = await command.searchDisplayName('Target');
+    assert.equal(failed.peopleSearchUnavailable, true);
+    assert.match(command.buildDisplayNamePage(failed, 0, 'session').embeds[0].toJSON().footer.text,
+        /People search unavailable; results incomplete/);
+    const short = await command.searchDisplayName('ab');
+    assert.equal(peopleCalls, 1);
+    assert.equal(short.peopleSearchSkipped, true);
+    assert.match(command.buildDisplayNamePage(short, 0, 'session').embeds[0].toJSON().footer.text,
+        /People search requires at least 3 characters/);
 });
 
 test('search caps results at 150 and bounds sparse-match searches to 10 requests', async t => {
@@ -276,16 +361,25 @@ test('search rejects invalid item IDs before making requests', async t => {
     }
 });
 
-test('/search passes the optional asset ID through to ownership checks and the results', async t => {
+test('/search ranks an item and badge owner found only by people search first', async t => {
     let assetChecks = 0;
     t.mock.method(globalThis, 'fetch', async url => {
         const parsed = new URL(url);
         if (parsed.pathname === '/v1/users/search') {
             return { ok: true, json: async () => ({ data: [user(1), user(2)], nextPageCursor: null }) };
         }
+        if (parsed.pathname === '/search-api/omni-search') {
+            return { ok: true, json: async () => ({
+                searchResults: [{ contents: [{ contentId: 3, username: 'different', displayName: 'Target' }] }],
+                nextPageToken: ''
+            }) };
+        }
         if (parsed.pathname.includes('/items/Asset/123/is-owned')) {
             assetChecks++;
-            return { ok: true, json: async () => parsed.pathname.includes('/users/2/') };
+            return { ok: true, json: async () => /\/users\/[23]\//.test(parsed.pathname) };
+        }
+        if (parsed.pathname.includes('/users/3/items/Badge/2142457718')) {
+            return { ok: true, json: async () => ({ data: [{ id: '2142457718' }] }) };
         }
         return { ok: true, json: async () => ({ data: [] }) };
     });
@@ -294,8 +388,9 @@ test('/search passes the optional asset ID through to ownership checks and the r
     assert.equal(request.replies[0].flags, MessageFlags.Ephemeral);
     assert.match(request.replies[1].content, /item ownership/);
     const embed = request.replies.at(-1).embeds[0].toJSON();
-    assert.equal(assetChecks, 2);
-    assert.match(embed.description, /\*\*Item Owners\*\*\n1\. \[user\\_2\]/);
+    assert.equal(assetChecks, 3);
+    assert.match(embed.description, /\*\*Item Owners with Game History\*\*\n1\. \[different\]/);
+    assert.match(embed.description, /\*\*Item Owners\*\*\n2\. \[user\\_2\]/);
     assert.match(embed.footer.text, /Item 123/);
 });
 
