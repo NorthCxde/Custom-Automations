@@ -134,7 +134,14 @@ function getModeratorBanCounts(client, guildId, logs, date = new Date(), exclude
     return { counts, totalBans };
 }
 
-async function buildStatsEmbed(client, guild, logs) {
+function getAdditionalBansNeeded(userBans, totalBans) {
+    const share = totalBans > 0 ? (userBans / totalBans) * 100 : 0;
+    return share >= QUOTA_PERCENT
+        ? 0
+        : Math.max(1, Math.ceil((QUOTA_PERCENT * totalBans - 100 * userBans) / (100 - QUOTA_PERCENT)));
+}
+
+async function buildStatsEmbed(client, guild, logs, necessities = false) {
     const now = new Date();
     const { year, month } = getMonthRange(now);
     const { counts, totalBans } = getModeratorBanCounts(client, guild.id, logs, now);
@@ -151,7 +158,8 @@ async function buildStatsEmbed(client, guild, logs) {
         ? rows.map(row => {
             const percentage = totalBans ? (row.count / totalBans) * 100 : 0;
             const indicator = percentage < LOW_QUOTA_PERCENT ? '❌' : percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
-            return `${indicator} <@${row.moderatorId}> — ${row.count} bans (${percentage.toFixed(1)}%)`;
+            const needed = necessities ? getAdditionalBansNeeded(row.count, totalBans) : 0;
+            return `${indicator} <@${row.moderatorId}> — ${row.count} bans (${percentage.toFixed(1)}%)${needed ? ` - Needs ${needed}` : ''}`;
         })
         : ['No bans recorded this month.'];
 
@@ -166,7 +174,11 @@ module.exports = {
     description: 'Show current-month moderator quota standings.',
     data: new SlashCommandBuilder()
         .setName('stats')
-        .setDescription('Show current-month moderator quota standings.'),
+        .setDescription('Show current-month moderator quota standings.')
+        .addBooleanOption(option => option
+            .setName('necessities')
+            .setDescription('Show additional bans needed to reach quota')
+            .setRequired(false)),
     async execute({ client, message }) {
         if (!message.guild) return null;
         const embed = await buildStatsEmbed(client, message.guild, client.getModLogs(message.guild.id));
@@ -176,13 +188,15 @@ module.exports = {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command must be used in a server channel.', flags: MessageFlags.Ephemeral });
         }
-        const embed = await buildStatsEmbed(client, interaction.guild, client.getModLogs(interaction.guild.id));
+        const embed = await buildStatsEmbed(client, interaction.guild, client.getModLogs(interaction.guild.id),
+            interaction.options.getBoolean('necessities') === true);
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
     isBanEntry,
     getCurrentMonthBans,
     getMonthRange,
     getModeratorBanCounts,
+    getAdditionalBansNeeded,
     buildStatsEmbed,
     QUOTA_PERCENT,
     LOW_QUOTA_PERCENT

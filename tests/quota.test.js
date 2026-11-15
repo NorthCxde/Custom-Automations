@@ -89,3 +89,44 @@ test('stats and summary use red below 3%, warning from 3% and green at 6%', asyn
         assert.ok(traineeSummary.fields[0].value.includes(`<@${moderatorId}> ${expected}`));
     }
 });
+
+test('stats necessities is opt-in and uses the same additional-ban calculation as quota', async () => {
+    const client = fixture({ [moderatorId]: 5, [otherId]: 95, [traineeId]: 0 });
+    const guild = { id: guildId, members: { fetch: async () => null } };
+    const overrides = [...client.statsOverrides.get(guildId).values()][0];
+    const before = [...overrides.entries()];
+    const option = stats.data.toJSON().options.find(entry => entry.name === 'necessities');
+    assert.equal(option.required, false);
+
+    for (const [value, enabled] of [[null, false], [false, false], [true, true]]) {
+        let response;
+        await stats.executeInteraction({
+            client,
+            interaction: {
+                guild,
+                options: { getBoolean: name => { assert.equal(name, 'necessities'); return value; } },
+                reply: async payload => { response = payload; }
+            }
+        });
+        const description = response.embeds[0].toJSON().description;
+        const line = description.split('\n').find(entry => entry.includes(`<@${moderatorId}>`));
+        const aboveLine = description.split('\n').find(entry => entry.includes(`<@${otherId}>`));
+        const zeroLine = description.split('\n').find(entry => entry.includes(`<@${traineeId}>`));
+        assert.equal(line.includes(' - Needs 2'), enabled);
+        assert.equal(zeroLine.includes(' - Needs 7'), enabled);
+        assert.doesNotMatch(aboveLine, /Needs/);
+    }
+    assert.match(await quotaDescription(client), /need 2 more ban/);
+    assert.deepEqual([...overrides.entries()], before);
+    assert.deepEqual(client.logs, []);
+});
+
+test('stats necessities handles no bans and leaves the default display unchanged', async () => {
+    const client = fixture({ [moderatorId]: 0 });
+    const guild = { id: guildId, members: { fetch: async () => null } };
+    const defaultDescription = (await stats.buildStatsEmbed(client, guild, client.logs)).toJSON().description;
+    const enabledDescription = (await stats.buildStatsEmbed(client, guild, client.logs, true)).toJSON().description;
+    assert.doesNotMatch(defaultDescription, /Needs/);
+    assert.match(enabledDescription, /0 bans \(0\.0%\) - Needs 1/);
+    assert.match(await quotaDescription(client), /need 1 more ban/);
+});
