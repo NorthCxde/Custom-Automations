@@ -76,3 +76,16 @@ test('below six percent remains below quota in stats and summary', async () => {
         new RegExp(`<@${moderatorId}> ⚠️`));
     assert.match(await quotaDescription(client), /⚠️ Below quota \(5\.0%\)/);
 });
+
+test('stats and summary use red below 3%, warning from 3% and green at 6%', async () => {
+    const guild = { id: guildId, members: { fetch: async () => null } };
+    for (const [own, expected] of [[29, '❌'], [30, '⚠️'], [39, '⚠️'], [60, '✅']]) {
+        const client = fixture({ [moderatorId]: own, [otherId]: 1000 - own });
+        const statsEmbed = (await stats.buildStatsEmbed(client, guild, client.logs)).toJSON();
+        assert.ok(statsEmbed.description.includes(`${expected} <@${moderatorId}>`));
+        const summary = buildSummaryEmbed(client, guild).toJSON();
+        assert.ok(summary.description.includes(`<@${moderatorId}> ${expected}`));
+        const traineeSummary = buildSummaryEmbed(client, guild, false, [moderatorId]).toJSON();
+        assert.ok(traineeSummary.fields[0].value.includes(`<@${moderatorId}> ${expected}`));
+    }
+});

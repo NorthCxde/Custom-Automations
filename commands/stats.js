@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 
 const QUOTA_PERCENT = 6;
+const LOW_QUOTA_PERCENT = 3;
 const QUOTA_TIME_ZONE = 'America/New_York';
 
 function isBanEntry(entry) {
@@ -149,7 +150,7 @@ async function buildStatsEmbed(client, guild, logs) {
     const lines = rows.length
         ? rows.map(row => {
             const percentage = totalBans ? (row.count / totalBans) * 100 : 0;
-            const indicator = percentage < 4 ? '❌' : percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
+            const indicator = percentage < LOW_QUOTA_PERCENT ? '❌' : percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
             return `${indicator} <@${row.moderatorId}> — ${row.count} bans (${percentage.toFixed(1)}%)`;
         })
         : ['No bans recorded this month.'];
@@ -183,5 +184,6 @@ module.exports = {
     getMonthRange,
     getModeratorBanCounts,
     buildStatsEmbed,
-    QUOTA_PERCENT
+    QUOTA_PERCENT,
+    LOW_QUOTA_PERCENT
 };

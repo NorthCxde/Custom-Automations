@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const statsCommand = require('./stats');
 const { getDiscordModstatsCountsInRange } = require('./modstats');
 
-const { QUOTA_PERCENT } = statsCommand;
+const { QUOTA_PERCENT, LOW_QUOTA_PERCENT } = statsCommand;
 const MAX_ROWS = 25;
 const STATS_TIME_ZONE = 'America/New_York';
 const TRAINEE_ROLE_ID = '1217365422501003284';
@@ -96,7 +96,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
         : 'None';
     const lines = rows.length
         ? rows.map((row, index) => {
-            const indicator = row.percentage < 4 ? '❌' : row.percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
+            const indicator = row.percentage < LOW_QUOTA_PERCENT ? '❌' : row.percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
             const serverStats = includeServerStats
                 ? ` | **${row.mutes}** Mutes | **${row.discordBans}** Discord Bans`
                 : '';
@@ -126,7 +126,7 @@ function buildSummaryEmbed(client, guild, includeServerStats = false, traineeIds
             : new Map();
         const traineeLines = traineeRows.map((row, index) => {
             const percentage = allStats.totalBans ? (row.count / allStats.totalBans) * 100 : 0;
-            const indicator = percentage < 4 ? '❌' : percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
+            const indicator = percentage < LOW_QUOTA_PERCENT ? '❌' : percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
             const discordStats = traineeStats.get(row.moderatorId);
             const serverStats = includeServerStats
                 ? ` | **${discordStats?.mutes || 0}** Mutes | **${discordStats?.discordBans || 0}** Discord Bans`
