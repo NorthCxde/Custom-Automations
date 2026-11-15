@@ -159,7 +159,7 @@ async function buildStatsEmbed(client, guild, logs, necessities = false) {
             const percentage = totalBans ? (row.count / totalBans) * 100 : 0;
             const indicator = percentage < LOW_QUOTA_PERCENT ? '❌' : percentage >= QUOTA_PERCENT ? '✅' : '⚠️';
             const needed = necessities ? getAdditionalBansNeeded(row.count, totalBans) : 0;
-            return `${indicator} <@${row.moderatorId}> — ${row.count} bans (${percentage.toFixed(1)}%)${needed ? ` - Needs ${needed}` : ''}`;
+            return `${indicator} <@${row.moderatorId}> — ${row.count} bans (${percentage.toFixed(1)}%)${needed ? ` - **Needs ${needed}**` : ''}`;
         })
         : ['No bans recorded this month.'];
 

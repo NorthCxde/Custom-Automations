@@ -112,8 +112,8 @@ test('stats necessities is opt-in and uses the same additional-ban calculation a
         const line = description.split('\n').find(entry => entry.includes(`<@${moderatorId}>`));
         const aboveLine = description.split('\n').find(entry => entry.includes(`<@${otherId}>`));
         const zeroLine = description.split('\n').find(entry => entry.includes(`<@${traineeId}>`));
-        assert.equal(line.includes(' - Needs 2'), enabled);
-        assert.equal(zeroLine.includes(' - Needs 7'), enabled);
+        assert.equal(line.includes(' - **Needs 2**'), enabled);
+        assert.equal(zeroLine.includes(' - **Needs 7**'), enabled);
         assert.doesNotMatch(aboveLine, /Needs/);
     }
     assert.match(await quotaDescription(client), /need 2 more ban/);
@@ -127,6 +127,6 @@ test('stats necessities handles no bans and leaves the default display unchanged
     const defaultDescription = (await stats.buildStatsEmbed(client, guild, client.logs)).toJSON().description;
     const enabledDescription = (await stats.buildStatsEmbed(client, guild, client.logs, true)).toJSON().description;
     assert.doesNotMatch(defaultDescription, /Needs/);
-    assert.match(enabledDescription, /0 bans \(0\.0%\) - Needs 1/);
+    assert.match(enabledDescription, /0 bans \(0\.0%\) - \*\*Needs 1\*\*/);
     assert.match(await quotaDescription(client), /need 1 more ban/);
 });
