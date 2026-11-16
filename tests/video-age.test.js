@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { extractTikTokLinks, parseUploadTime, warnAboutOldTikToks } = require('../lib/tiktok-age');
+const { extractVideoLinks, parseUploadTime, parseYouTubeUploadTime, warnAboutOldVideos } = require('../lib/video-age');
 
 const DAY = 24 * 60 * 60 * 1000;
 const uploadedAt = 1700000000000;
@@ -31,7 +31,7 @@ test('only real TikTok hosts are accepted, including short links and questionnai
     msg.content = `${link} ${link} https://tiktok.com.evil.example/video/1 https://example.com/tiktok
         https://www.tiktok.com@127.0.0.1/video/1 https://vm.tiktok.com/short/`;
     msg.embeds = [{ fields: [{ value: 'Evidence: https://vt.tiktok.com/short/' }] }];
-    assert.deepEqual(extractTikTokLinks(msg), [link, 'https://vm.tiktok.com/short/', 'https://vt.tiktok.com/short/']);
+    assert.deepEqual(extractVideoLinks(msg), [link, 'https://vm.tiktok.com/short/', 'https://vt.tiktok.com/short/']);
 });
 
 test('parses upload metadata for the matching video only, including legacy metadata', () => {
@@ -49,7 +49,7 @@ test('reacts only when upload age is strictly greater than five days at message 
     t.mock.method(globalThis, 'fetch', async () => pageResponse());
     for (const [age, expected] of [[5 * DAY - 1, []], [5 * DAY, []], [5 * DAY + 1, ['⚠️']], [-DAY, []]]) {
         const msg = message(age);
-        await warnAboutOldTikToks(msg, 'bot');
+        await warnAboutOldVideos(msg, 'bot');
         assert.deepEqual(msg.reactions, expected);
     }
 });
@@ -64,7 +64,7 @@ test('ignores parent-channel messages, other threads, DMs and the bot itself', a
     ]) {
         const msg = message();
         change(msg);
-        await warnAboutOldTikToks(msg, 'bot');
+        await warnAboutOldVideos(msg, 'bot');
         assert.deepEqual(msg.reactions, []);
     }
 });
@@ -81,7 +81,7 @@ test('resolves shortened links and keeps redirects limited to TikTok HTTPS hosts
     });
     const msg = message();
     msg.content = 'https://vm.tiktok.com/short/';
-    await warnAboutOldTikToks(msg, 'bot');
+    await warnAboutOldVideos(msg, 'bot');
     assert.equal(calls.length, 2);
     assert.deepEqual(msg.reactions, ['⚠️']);
 
@@ -93,7 +93,7 @@ test('resolves shortened links and keeps redirects limited to TikTok HTTPS hosts
             return new Response(null, { status: 302, headers: { location: destination } });
         });
         const blocked = message();
-        await warnAboutOldTikToks(blocked, 'bot');
+        await warnAboutOldVideos(blocked, 'bot');
         assert.equal(count, 1);
         assert.deepEqual(blocked.reactions, []);
     }
@@ -109,7 +109,7 @@ test('unavailable dates are logged without warnings and another old link can sti
     ]) {
         t.mock.method(globalThis, 'fetch', async () => response());
         const msg = message();
-        await warnAboutOldTikToks(msg, 'bot');
+        await warnAboutOldVideos(msg, 'bot');
         assert.deepEqual(msg.reactions, []);
     }
     assert.equal(errors.length, 3);
@@ -118,6 +118,87 @@ test('unavailable dates are logged without warnings and another old link can sti
         ? new Response(null, { status: 404 }) : pageResponse());
     const msg = message();
     msg.content = `https://www.tiktok.com/@example/video/456 ${link}`;
-    await warnAboutOldTikToks(msg, 'bot');
+    await warnAboutOldVideos(msg, 'bot');
     assert.deepEqual(msg.reactions, ['⚠️']);
+});
+
+const youtubeId = 'jNQXAC9IVRw';
+const youtubeLink = `https://www.youtube.com/watch?v=${youtubeId}`;
+
+function youtubeHtml(timestamp = new Date(uploadedAt).toISOString()) {
+    return `<meta itemprop="uploadDate" content="${timestamp}">`;
+}
+
+test('YouTube watch, short, Shorts, live and embed variants normalize to one video', () => {
+    const msg = message();
+    for (const url of [
+        `https://youtube.com/watch?v=${youtubeId}&list=playlist&t=3`,
+        `http://www.youtube.com/watch?feature=shared&v=${youtubeId}`,
+        `https://m.youtube.com/watch?v=${youtubeId}`,
+        `https://music.youtube.com/watch?v=${youtubeId}`,
+        `https://youtu.be/${youtubeId}?si=tracking`,
+        `https://www.youtu.be/${youtubeId}`,
+        `https://www.youtube.com/shorts/${youtubeId}?feature=share`,
+        `https://www.youtube.com/live/${youtubeId}`,
+        `https://www.youtube.com/embed/${youtubeId}`,
+        `https://www.youtube-nocookie.com/embed/${youtubeId}`,
+        `https://youtube.com/v/${youtubeId}`,
+        `https://youtube.com/e/${youtubeId}`
+    ]) {
+        msg.content = `${url} ${youtubeLink}`;
+        assert.deepEqual(extractVideoLinks(msg), [youtubeLink], url);
+    }
+    msg.content = `https://youtube.com.evil.example/watch?v=${youtubeId}
+        https://www.youtube.com@127.0.0.1/watch?v=${youtubeId}
+        https://www.youtube.com/playlist?list=123 https://www.youtube.com/@channel
+        https://youtube.com/watch?v=invalid https://youtu.be/${youtubeId}/extra`;
+    assert.deepEqual(extractVideoLinks(msg), []);
+});
+
+test('YouTube upload timestamps respect offsets and reject missing or date-only metadata', () => {
+    assert.equal(parseYouTubeUploadTime(youtubeHtml()), uploadedAt);
+    assert.equal(parseYouTubeUploadTime('<meta content="2023-11-14T17:13:20-05:00" itemprop="datePublished">'), uploadedAt);
+    for (const body of [youtubeHtml('2023-11-14'), youtubeHtml('invalid'), '<html>Sign in</html>']) {
+        assert.throws(() => parseYouTubeUploadTime(body), /valid upload timestamp/);
+    }
+});
+
+test('YouTube warns strictly after five days, checks canonical links, and deduplicates reactions', async t => {
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+        calls++;
+        assert.equal(url, youtubeLink);
+        assert.equal(options.redirect, 'manual');
+        return pageResponse(youtubeHtml());
+    });
+    for (const [age, expected] of [[5 * DAY, []], [5 * DAY + 1, ['⚠️']], [-DAY, []]]) {
+        const msg = message(age);
+        msg.content = `https://youtu.be/${youtubeId} ${youtubeLink}`;
+        await warnAboutOldVideos(msg, 'bot');
+        assert.deepEqual(msg.reactions, expected);
+    }
+    assert.equal(calls, 3);
+});
+
+test('mixed-platform messages still warn when one source is blocked; YouTube redirects cannot leave its hosts', async t => {
+    const errors = [];
+    t.mock.method(console, 'error', (...args) => errors.push(args));
+    t.mock.method(globalThis, 'fetch', async url => url === link
+        ? new Response(null, { status: 403 }) : pageResponse(youtubeHtml()));
+    const msg = message();
+    msg.content = `${link} ${youtubeLink}`;
+    await warnAboutOldVideos(msg, 'bot');
+    assert.deepEqual(msg.reactions, ['⚠️']);
+    assert.equal(errors.length, 1);
+
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async () => {
+        calls++;
+        return new Response(null, { status: 302, headers: { location: 'https://example.com/' } });
+    });
+    const redirected = message();
+    redirected.content = youtubeLink;
+    await warnAboutOldVideos(redirected, 'bot');
+    assert.equal(calls, 1);
+    assert.deepEqual(redirected.reactions, []);
 });
