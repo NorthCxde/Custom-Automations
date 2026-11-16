@@ -155,11 +155,53 @@ test('YouTube watch, short, Shorts, live and embed variants normalize to one vid
     assert.deepEqual(extractVideoLinks(msg), []);
 });
 
-test('YouTube upload timestamps respect offsets and reject missing or date-only metadata', () => {
+test('YouTube upload timestamps respect offsets and reject missing metadata', () => {
     assert.equal(parseYouTubeUploadTime(youtubeHtml()), uploadedAt);
     assert.equal(parseYouTubeUploadTime('<meta content="2023-11-14T17:13:20-05:00" itemprop="datePublished">'), uploadedAt);
-    for (const body of [youtubeHtml('2023-11-14'), youtubeHtml('invalid'), '<html>Sign in</html>']) {
+    for (const body of [youtubeHtml('invalid'), '<html>Sign in</html>']) {
         assert.throws(() => parseYouTubeUploadTime(body), /valid upload timestamp/);
+    }
+});
+
+function youtubeDateOnlyHtml(date = 'Mar 4, 2024') {
+    return `<script>var ytInitialPlayerResponse = {"playabilityStatus":{"status":"LOGIN_REQUIRED",
+        "reason":"Sign in to confirm you are not a bot"}};
+        var ytInitialData = ${JSON.stringify({
+            videoDescriptionHeaderRenderer: {
+                channel: { simpleText: 'New Rockstars' },
+                publishDate: { simpleText: date }
+            }
+        })};</script>`;
+}
+
+test('YouTube uses the displayed publication date when the VPS response omits exact timestamps', () => {
+    const latest = Date.parse('2024-03-05T12:00:00Z');
+    assert.equal(parseYouTubeUploadTime(youtubeDateOnlyHtml()), latest);
+    assert.equal(parseYouTubeUploadTime(youtubeHtml('2024-03-04')), latest);
+    assert.equal(parseYouTubeUploadTime(youtubeDateOnlyHtml('March 4, 2024')), latest);
+    assert.equal(parseYouTubeUploadTime(youtubeHtml() + youtubeDateOnlyHtml()), uploadedAt);
+    for (const date of ['Mar 40, 2024', 'Feb 30, 2024', 'Yesterday', 'Mar 4', 'invalid']) {
+        assert.throws(() => parseYouTubeUploadTime(youtubeDateOnlyHtml(date)), /valid upload timestamp/);
+    }
+    assert.throws(() => parseYouTubeUploadTime(youtubeHtml('2024-02-30')), /valid upload timestamp/);
+    assert.throws(() => parseYouTubeUploadTime('{"comment":{"publishDate":{"simpleText":"Mar 4, 2024"}}}'),
+        /valid upload timestamp/);
+});
+
+test('the reported two-year-old video warns with date-only metadata, but ambiguous ages wait', async t => {
+    t.mock.method(globalThis, 'fetch', async () => pageResponse(youtubeDateOnlyHtml()));
+    const latest = Date.parse('2024-03-05T12:00:00Z');
+    for (const [sentAt, expected] of [
+        [Date.parse('2026-11-16T23:32:00Z'), ['⚠️']],
+        [Date.parse('2024-03-09T12:00:00Z'), []],
+        [latest + 5 * DAY, []],
+        [latest + 5 * DAY + 1, ['⚠️']]
+    ]) {
+        const msg = message();
+        msg.content = 'https://www.youtube.com/watch?v=uj8IV5kii48';
+        msg.createdTimestamp = sentAt;
+        await warnAboutOldVideos(msg, 'bot');
+        assert.deepEqual(msg.reactions, expected);
     }
 });
 
