@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-    extractVideoLinks, parseUploadTime, parseYouTubeUploadTime, parseMedalUploadTime, warnAboutOldVideos
+    extractVideoLinks, parseUploadTime, parseYouTubeUploadTime, parseMedalUploadTime,
+    parseStreamableUploadTime, warnAboutOldVideos
 } = require('../lib/video-age');
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -309,6 +310,77 @@ test('Medal failures and redirects off-platform do not generate age warnings', a
         t.mock.method(globalThis, 'fetch', async () => ++calls === 1 ? response() : pageResponse(medalHtml()));
         const msg = message();
         msg.content = medalLink;
+        await warnAboutOldVideos(msg, 'bot');
+        assert.deepEqual(msg.reactions, []);
+    }
+    assert.equal(errors.length, 4);
+});
+
+const streamableLink = 'https://streamable.com/ohjj74';
+
+function streamableHtml(uploadDate = new Date(uploadedAt).toISOString(), id = 'ohjj74') {
+    return `<link rel="canonical" href="https://streamable.com/${id}">
+        <script type="application/ld+json" data-testid="structured-metadata">${JSON.stringify({
+            '@context': 'https://schema.org', '@type': 'VideoObject', uploadDate
+        })}</script>`;
+}
+
+test('Streamable standard and embed links normalize and reject lookalike or credential-bearing hosts', () => {
+    const msg = message();
+    msg.content = `${streamableLink}?src=player https://www.streamable.com/ohjj74
+        https://streamable.com/e/ohjj74?autoplay=1 ${streamableLink}#comments`;
+    assert.deepEqual(extractVideoLinks(msg), [streamableLink]);
+    msg.content = `https://streamable.com.evil.example/ohjj74
+        https://streamable.com@127.0.0.1/ohjj74 https://example.com/streamable/ohjj74`;
+    assert.deepEqual(extractVideoLinks(msg), []);
+});
+
+test('Streamable reads the upload timestamp only for the requested canonical video', () => {
+    assert.equal(parseStreamableUploadTime(streamableHtml(), 'ohjj74'), uploadedAt);
+    for (const body of [
+        streamableHtml('invalid'), streamableHtml('2023-11-14'),
+        streamableHtml(undefined, 'other'), '<html>Video unavailable</html>',
+        streamableHtml().replace('rel="canonical"', 'rel="other"'),
+        streamableHtml().replace('"VideoObject"', '"Person"')
+    ]) {
+        assert.throws(() => parseStreamableUploadTime(body, 'ohjj74'), /Streamable did not/);
+    }
+});
+
+test('Streamable uses the strict five-day threshold and honors report-thread scope', async t => {
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async url => {
+        calls++;
+        assert.equal(url, streamableLink);
+        return pageResponse(streamableHtml());
+    });
+    for (const [age, expected] of [[DAY, []], [5 * DAY, []], [5 * DAY + 1, ['⚠️']]]) {
+        const msg = message(age);
+        msg.content = 'https://streamable.com/e/ohjj74?autoplay=1';
+        await warnAboutOldVideos(msg, 'bot');
+        assert.deepEqual(msg.reactions, expected);
+    }
+    const outside = message();
+    outside.content = streamableLink;
+    outside.channel.parentId = 'other';
+    await warnAboutOldVideos(outside, 'bot');
+    assert.equal(calls, 3);
+    assert.deepEqual(outside.reactions, []);
+});
+
+test('Streamable inaccessible videos and unsafe redirects are logged without reacting', async t => {
+    const errors = [];
+    t.mock.method(console, 'error', (...args) => errors.push(args));
+    for (const response of [
+        () => new Response(null, { status: 404 }),
+        () => pageResponse('<html>Private</html>'),
+        () => new Response(null, { status: 302, headers: { location: 'https://127.0.0.1/' } }),
+        () => new Response(null, { status: 302, headers: { location: 'https://streamable.com/other' } })
+    ]) {
+        let calls = 0;
+        t.mock.method(globalThis, 'fetch', async () => ++calls === 1 ? response() : pageResponse(streamableHtml()));
+        const msg = message();
+        msg.content = streamableLink;
         await warnAboutOldVideos(msg, 'bot');
         assert.deepEqual(msg.reactions, []);
     }
