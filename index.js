@@ -34,6 +34,7 @@ const fs = require("fs");
 const path = require("path");
 const { GameStatistics } = require('./lib/game-statistics');
 const duplicateReport = require('./lib/duplicate-report');
+const { warnAboutOldTikToks } = require('./lib/tiktok-age');
 const { GAMES: ROBLOX_GAMES, fetchGameData: fetchRobloxGameData } = require('./lib/roblox-game');
 const https = require("https");
 const { DEFAULT_INFRACTION_RULES, sanitizeInfractionRules, cloneInfractionRules, cloneInfractionRule, parseDurationMs } = require('./infractions');
@@ -5530,6 +5531,14 @@ client.on('threadCreate', async (thread) => {
     if (thread?.parentId === APPEALS_PARENT_CHANNEL_ID) {
         await thread.join().catch(() => null);
         client.scheduleAppealsThreadScan(thread);
+    }
+});
+
+client.on('messageCreate', async (message) => {
+    try {
+        await warnAboutOldTikToks(message, client.user?.id);
+    } catch (error) {
+        console.error(`Failed to process TikTok age warning for message ${message.id}:`, error);
     }
 });
 

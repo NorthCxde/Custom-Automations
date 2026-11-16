@@ -46,6 +46,8 @@ Run the focused tests with `node --test tests/game-statistics.test.js`.
 
 ## Roblox blacklists
 
+New messages in threads under exploiter report channel `964450684613328916` receive a warning reaction (⚠️) if any linked TikTok video was uploaded more than five days before the message was sent (strictly over 120 hours). Standard and shortened TikTok links in message text and embed descriptions/fields are checked. This does not apply in the parent channel, other channels or appeals, and does not backfill old messages. The bot reads TikTok upload metadata, follows only approved TikTok HTTPS redirects, and needs permission to add reactions. Private/deleted videos, blocked requests or unavailable dates are logged without guessing or reacting. No videos are downloaded. Run `node --test tests/tiktok-age.test.js` for focused tests.
+
 Moderator quota is **6%** of monthly Roblox blacklist bans. `/stats`, `/quota`, and `/summary` use the same threshold; changing the threshold does not reset ban logs or saved overrides. In `/stats` and `/summary`, ❌ indicates below 3%, ⚠️ indicates 3% to below 6%, and ✅ indicates at least 6%. `/quota` calculates additional bans needed accounting for their effect on the total.
 
 Use `/stats necessities:True` to show `-` **Needs N** beside moderators below quota. The calculation accounts for those additional bans increasing the total; omit the option or set it to `False` to keep the usual display. This does not change saved stats.
