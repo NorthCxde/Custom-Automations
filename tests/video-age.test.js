@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { extractVideoLinks, parseUploadTime, parseYouTubeUploadTime, warnAboutOldVideos } = require('../lib/video-age');
+const {
+    extractVideoLinks, parseUploadTime, parseYouTubeUploadTime, parseMedalUploadTime, warnAboutOldVideos
+} = require('../lib/video-age');
 
 const DAY = 24 * 60 * 60 * 1000;
 const uploadedAt = 1700000000000;
@@ -243,4 +245,72 @@ test('mixed-platform messages still warn when one source is blocked; YouTube red
     await warnAboutOldVideos(redirected, 'bot');
     assert.equal(calls, 1);
     assert.deepEqual(redirected.reactions, []);
+});
+
+const medalId = 'nWfFBZtblXQEpiudr';
+const medalLink = `https://medal.tv/games/roblox/clips/${medalId}`;
+
+function medalHtml(uploadDate = new Date(uploadedAt).toISOString(), id = medalId) {
+    return `<script type="application/ld+json">${JSON.stringify({
+        '@context': 'https://schema.org/', '@type': 'VideoObject',
+        '@id': `https://medal.tv/games/roblox/clips/${id}`,
+        uploadDate, datePublished: '2020-01-01T00:00:00Z'
+    })}</script>`;
+}
+
+test('Medal clip URLs support tracking parameters, www and short clip paths without accepting lookalike hosts', () => {
+    const msg = message();
+    msg.content = `${medalLink}?invite=example ${medalLink}#comments
+        https://www.medal.tv/games/roblox/clips/${medalId}?invite=other`;
+    assert.deepEqual(extractVideoLinks(msg), [medalLink]);
+    for (const path of [`/clips/${medalId}`, `/clip/${medalId}`, `/games/roblox/clip/${medalId}`]) {
+        msg.content = `https://medal.tv${path}`;
+        assert.deepEqual(extractVideoLinks(msg), [`https://medal.tv${path}`]);
+    }
+    msg.content = `https://medal.tv.evil.example/games/roblox/clips/${medalId}
+        https://medal.tv@127.0.0.1/clips/${medalId} https://medal.tv/u/profile`;
+    assert.deepEqual(extractVideoLinks(msg), []);
+});
+
+test('Medal reads the matching clip upload date rather than publication or unrelated dates', () => {
+    assert.equal(parseMedalUploadTime(medalHtml(), medalId), uploadedAt);
+    for (const body of [
+        medalHtml('invalid'), medalHtml('2023-11-14'),
+        medalHtml(undefined, 'otherClip'), '<html>Unavailable</html>',
+        '<script type="application/ld+json">{"@type":"Person","createdAt":1700000000000}</script>'
+    ]) {
+        assert.throws(() => parseMedalUploadTime(body, medalId), /valid upload timestamp/);
+    }
+});
+
+test('Medal uses the same strict five-day threshold in report threads', async t => {
+    t.mock.method(globalThis, 'fetch', async url => {
+        assert.equal(url, medalLink);
+        return pageResponse(medalHtml());
+    });
+    for (const [age, expected] of [[DAY, []], [5 * DAY, []], [5 * DAY + 1, ['⚠️']]]) {
+        const msg = message(age);
+        msg.content = `${medalLink}?invite=example`;
+        await warnAboutOldVideos(msg, 'bot');
+        assert.deepEqual(msg.reactions, expected);
+    }
+});
+
+test('Medal failures and redirects off-platform do not generate age warnings', async t => {
+    const errors = [];
+    t.mock.method(console, 'error', (...args) => errors.push(args));
+    for (const response of [
+        () => new Response(null, { status: 404 }),
+        () => pageResponse('<html>Private clip</html>'),
+        () => new Response(null, { status: 302, headers: { location: 'https://example.com/' } }),
+        () => new Response(null, { status: 302, headers: { location: `${medalLink}other` } })
+    ]) {
+        let calls = 0;
+        t.mock.method(globalThis, 'fetch', async () => ++calls === 1 ? response() : pageResponse(medalHtml()));
+        const msg = message();
+        msg.content = medalLink;
+        await warnAboutOldVideos(msg, 'bot');
+        assert.deepEqual(msg.reactions, []);
+    }
+    assert.equal(errors.length, 4);
 });
