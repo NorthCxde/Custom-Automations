@@ -46,7 +46,7 @@ Run the focused tests with `node --test tests/game-statistics.test.js`.
 
 ## Roblox blacklists
 
-Evidence retries stop at the first successful download. Direct TikTok links ignore tracking parameters when deduplicating message text and embeds. Reposts also guard against repeated processing of the same message/link, both during a download and after a successful attachment reply. The last 10,000 successful message/link pairs are remembered in memory, not across bot restarts; separate messages can still save the same video.
+Evidence retries stop at the first successful download. Direct TikTok links ignore tracking parameters when deduplicating message text and embeds within a request. Completed fetches are not tracked: running fetch again for the same message or link downloads and posts a fresh copy. Only an active download is temporarily guarded against overlapping requests.
 
 Both fetch commands show `Fetching...` with the same animated Loading emoji as `?gif`, then replace that message with the saved video or final status. The loading message stays in place during download retries.
 

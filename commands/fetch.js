@@ -59,9 +59,6 @@ module.exports = {
                 guild: message.guild,
                 reply: payload => progress.edit(payload)
             }, link);
-            if (result === 'already_saved') {
-                await progress.edit({ content: `This clip has already been saved for that message: <${link}>` });
-            }
             if (result === 'in_progress') {
                 await progress.edit({ content: 'This clip is already being fetched for that message.' });
             }
@@ -85,8 +82,8 @@ module.exports = {
             guild: interaction.guild,
             reply: payload => interaction.editReply(payload)
         }, links[0]);
-        if (result === 'already_saved' || result === 'in_progress') {
-            await interaction.editReply({ content: 'This fetch request has already been processed or is in progress.' });
+        if (result === 'in_progress') {
+            await interaction.editReply({ content: 'This fetch request is already in progress.' });
         }
     }
 };

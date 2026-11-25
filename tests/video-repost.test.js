@@ -75,19 +75,19 @@ test('evidence becomes an MP4 reply with source attribution and temporary files 
     await assert.rejects(fs.stat(path.dirname(msg.outputPath)), { code: 'ENOENT' });
 });
 
-test('repeated processing of the same video in one message does not download or reply twice', async t => {
+test('overlapping fetches are guarded but a completed fetch can be repeated for a fresh copy', async t => {
     fakeDownload(t);
     const msg = message();
     const first = repostVideo(msg, link);
     assert.equal(await repostVideo(msg, link), 'in_progress');
     await first;
-    assert.equal(await repostVideo(msg, link), 'already_saved');
-    assert.equal(msg.replies.length, 1);
-    assert.equal(childProcess.spawn.mock.callCount(), 1);
+    assert.equal(await repostVideo(msg, link), 'saved');
+    assert.equal(msg.replies.length, 2);
+    assert.equal(childProcess.spawn.mock.callCount(), 2);
     const differentMessage = message();
     await repostVideo(differentMessage, link);
     assert.equal(differentMessage.replies.length, 1);
-    assert.equal(childProcess.spawn.mock.callCount(), 2);
+    assert.equal(childProcess.spawn.mock.callCount(), 3);
 });
 
 test('TikTok text and embed links with different tracking parameters identify one clip', () => {
@@ -237,7 +237,7 @@ test('?fetch requires a reply and does not accept a link in the command instead'
     assert.match(msg.replies[0].content, /Reply to the message/);
 });
 
-test('?fetch saves the referenced clip once and replies to its source rather than the command', async t => {
+test('?fetch replies to its source and downloads a fresh copy when run again', async t => {
     fakeDownload(t);
     const source = message();
     source.embeds = [{ url: `${link}?tracking=1` }];
@@ -252,8 +252,9 @@ test('?fetch saves the referenced clip once and replies to its source rather tha
     assert.deepEqual(msg.replies, []);
     await command.execute({ client: fetchClient(), message: msg });
     assert.equal(source.replies.length, 2);
-    assert.match(source.replies[1].content, /already been saved/);
-    assert.equal(childProcess.spawn.mock.callCount(), 1);
+    assert.match(source.replies[1].content, /Saved video\./);
+    assert.equal(source.updates.length, 4);
+    assert.equal(childProcess.spawn.mock.callCount(), 2);
 });
 
 test('both fetch forms download without consulting upload dates, including old source messages', async t => {
