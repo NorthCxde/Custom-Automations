@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { extractVideoLinks, REPORT_CHANNEL_ID } = require('../lib/video-age');
 const { repostVideo } = require('../lib/video-repost');
+const FETCHING = 'Fetching... <a:Loading:1564411829290008737>';
 
 function validationError(client, guild, member, userId, channel) {
     if (!guild) return 'This command must be used in a server.';
@@ -52,13 +53,18 @@ module.exports = {
             return reply(message, 'The replied-to message has no supported TikTok, YouTube, Medal or Streamable video links.');
         }
         for (const link of links) {
+            const progress = await reply(source, FETCHING);
             const result = await repostVideo({
                 id: source.id,
                 guild: message.guild,
-                reply: payload => source.reply(payload)
+                reply: payload => progress.edit(payload)
             }, link);
-            if (result === 'already_saved') await reply(message, `This clip has already been saved for that message: <${link}>`);
-            if (result === 'in_progress') await reply(message, 'This clip is already being fetched for that message.');
+            if (result === 'already_saved') {
+                await progress.edit({ content: `This clip has already been saved for that message: <${link}>` });
+            }
+            if (result === 'in_progress') {
+                await progress.edit({ content: 'This clip is already being fetched for that message.' });
+            }
         }
     },
     async executeInteraction({ client, interaction }) {
@@ -73,6 +79,7 @@ module.exports = {
             });
         }
         await interaction.deferReply();
+        await interaction.editReply({ content: FETCHING, allowedMentions: { parse: [] } });
         const result = await repostVideo({
             id: interaction.id,
             guild: interaction.guild,

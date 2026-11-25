@@ -21,13 +21,24 @@ function message() {
         channelId: 'thread',
         author: { id: 'reporter' }, createdTimestamp: now, content: link,
         channel: { isThread: () => true, parentId: '964450684613328916' },
-        replies: [], reactions: [],
+        replies: [], reactions: [], updates: [],
         async reply(payload) {
-            if (payload.files) {
-                this.file = await fs.readFile(payload.files[0].attachment);
-                this.outputPath = payload.files[0].attachment;
-            }
+            const update = async value => {
+                if (value.files) {
+                    this.file = await fs.readFile(value.files[0].attachment);
+                    this.outputPath = value.files[0].attachment;
+                }
+                this.updates.push(value);
+            };
+            await update(payload);
+            const index = this.replies.length;
             this.replies.push(payload);
+            return {
+                edit: async value => {
+                    await update(value);
+                    this.replies[index] = value;
+                }
+            };
         },
         async react(emoji) { this.reactions.push(emoji); }
     };
@@ -202,15 +213,18 @@ function fetchMessage() {
 }
 
 function slashInteraction(msg, input = link) {
+    let response;
     return {
         id: msg.id, guild: msg.guild, member: msg.member, user: msg.author,
         channel: msg.channel, createdTimestamp: msg.createdTimestamp,
         options: { getString: () => input },
         reply: payload => msg.reply(payload),
         deferReply: async () => { msg.deferred = true; },
-        editReply: payload => {
+        editReply: async payload => {
             assert.equal(msg.deferred, true);
-            return msg.reply(payload);
+            if (!response) response = await msg.reply(payload);
+            else await response.edit(payload);
+            return response;
         }
     };
 }
@@ -233,10 +247,12 @@ test('?fetch saves the referenced clip once and replies to its source rather tha
     await command.execute({ client: fetchClient(), message: msg });
     assert.equal(source.replies.length, 1);
     assert.match(source.replies[0].content, /Saved video\./);
+    assert.equal(source.updates[0].content, 'Fetching... <a:Loading:1564411829290008737>');
+    assert.equal(source.updates.length, 2);
     assert.deepEqual(msg.replies, []);
     await command.execute({ client: fetchClient(), message: msg });
-    assert.equal(source.replies.length, 1);
-    assert.match(msg.replies[0].content, /already been saved/);
+    assert.equal(source.replies.length, 2);
+    assert.match(source.replies[1].content, /already been saved/);
     assert.equal(childProcess.spawn.mock.callCount(), 1);
 });
 
@@ -295,6 +311,53 @@ test('/fetch requires a supported link and defers before downloading a public at
     assert.equal(msg.deferred, true);
     assert.equal(msg.replies.length, 1);
     assert.ok(msg.file);
+    assert.equal(msg.updates[0].content, 'Fetching... <a:Loading:1564411829290008737>');
+    assert.match(msg.updates[1].content, /Saved video\./);
+});
+
+test('both fetch forms keep one loading message through retries and replace it on success or final failure', async t => {
+    t.mock.method(console, 'error', () => {});
+    for (const variant of ['prefix', 'slash']) {
+        for (const succeeds of [true, false]) {
+            const msg = fetchMessage();
+            const source = message();
+            msg.reference = { messageId: source.id };
+            msg.fetchReference = async () => source;
+            const output = variant === 'prefix' ? source : msg;
+            let attempts = 0;
+            t.mock.method(timers, 'setTimeout', async () => {
+                assert.equal(output.replies.length, 1);
+                assert.equal(output.replies[0].content, 'Fetching... <a:Loading:1564411829290008737>');
+            });
+            t.mock.method(childProcess, 'spawn', (_executable, args) => {
+                attempts++;
+                const child = new EventEmitter();
+                child.stderr = new EventEmitter();
+                child.kill = () => child.emit('close', 1);
+                setImmediate(async () => {
+                    try {
+                        if (succeeds && attempts === 3) {
+                            await fs.writeFile(args[args.indexOf('--output') + 1], Buffer.from('0000ftypisom'));
+                            child.emit('close', 0);
+                        } else {
+                            child.emit('close', 1);
+                        }
+                    } catch (error) {
+                        child.emit('error', error);
+                        child.emit('close', 1);
+                    }
+                });
+                return child;
+            });
+            if (variant === 'prefix') await command.execute({ client: fetchClient(), message: msg });
+            else await command.executeInteraction({ client: fetchClient(), interaction: slashInteraction(msg) });
+            assert.equal(attempts, 3);
+            assert.equal(output.replies.length, 1);
+            assert.equal(output.updates.length, 2);
+            assert.match(output.replies[0].content, succeeds ? /Saved video\./ : /Video was not saved/);
+            assert.equal(Boolean(output.file), succeeds);
+        }
+    }
 });
 
 test('?fetch reports an unreadable reference or a message without supported links', async t => {
