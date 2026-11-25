@@ -4,6 +4,7 @@ const { EventEmitter } = require('node:events');
 const childProcess = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const timers = require('node:timers/promises');
 const { repostRecentVideo } = require('../lib/video-repost');
 const { warnAboutOldVideos } = require('../lib/video-age');
 const command = require('../commands/repoststatus');
@@ -58,6 +59,71 @@ test('recent evidence becomes an MP4 reply with source attribution and temporary
     assert.equal(msg.replies[0].files[0].name, 'evidence.mp4');
     assert.deepEqual(msg.replies[0].allowedMentions, { parse: [], repliedUser: false });
     await assert.rejects(fs.stat(path.dirname(msg.outputPath)), { code: 'ENOENT' });
+});
+
+for (const succeedsOn of [2, 3, null]) {
+    test(`download retries ${succeedsOn ? `succeed on attempt ${succeedsOn}` : 'report failure only after three attempts'}`, async t => {
+        t.mock.method(console, 'error', () => {});
+        const msg = message();
+        const directories = [];
+        let attempts = 0;
+        let pauses = 0;
+        t.mock.method(timers, 'setTimeout', async delay => {
+            pauses++;
+            assert.equal(delay, 2000);
+            assert.deepEqual(msg.replies, []);
+            await assert.rejects(fs.stat(directories.at(-1)), { code: 'ENOENT' });
+        });
+        t.mock.method(childProcess, 'spawn', (_executable, args) => {
+            attempts++;
+            assert.deepEqual(msg.replies, []);
+            const succeeds = attempts === succeedsOn;
+            const output = args[args.indexOf('--output') + 1];
+            directories.push(path.dirname(output));
+            const child = new EventEmitter();
+            child.stderr = new EventEmitter();
+            child.kill = () => child.emit('close', 1);
+            setImmediate(async () => {
+                try {
+                    await fs.writeFile(succeeds ? output : `${output}.part`, Buffer.from('0000ftypisom'));
+                    if (!succeeds) child.stderr.emit('data', 'Unexpected response from webpage request');
+                    child.emit('close', succeeds ? 0 : 1);
+                } catch (error) {
+                    child.emit('error', error);
+                    child.emit('close', 1);
+                }
+            });
+            return child;
+        });
+        await repostRecentVideo(msg, link, now - DAY);
+        assert.equal(attempts, succeedsOn || 3);
+        assert.equal(pauses, attempts - 1);
+        assert.equal(msg.replies.length, 1);
+        assert.match(msg.replies[0].content, succeedsOn ? /Saved video evidence/ : /Video was not saved/);
+        assert.equal(Boolean(msg.file), Boolean(succeedsOn));
+        for (const directory of directories) {
+            await assert.rejects(fs.stat(directory), { code: 'ENOENT' });
+        }
+    });
+}
+
+test('disabling during the retry pause prevents further attempts and replies', async t => {
+    t.mock.method(console, 'error', () => {});
+    let enabled = true;
+    let attempts = 0;
+    t.mock.method(timers, 'setTimeout', async () => { enabled = false; });
+    t.mock.method(childProcess, 'spawn', () => {
+        attempts++;
+        const child = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => child.emit('close', 1);
+        setImmediate(() => child.emit('close', 1));
+        return child;
+    });
+    const msg = message();
+    await repostRecentVideo(msg, link, now - DAY, () => enabled);
+    assert.equal(attempts, 1);
+    assert.deepEqual(msg.replies, []);
 });
 
 test('old videos warn but do not repost, unknown dates do not repost, and disabled reposting does no work', async t => {
