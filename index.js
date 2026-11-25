@@ -35,6 +35,7 @@ const path = require("path");
 const { GameStatistics } = require('./lib/game-statistics');
 const duplicateReport = require('./lib/duplicate-report');
 const { warnAboutOldVideos } = require('./lib/video-age');
+const { repostRecentVideo } = require('./lib/video-repost');
 const { GAMES: ROBLOX_GAMES, fetchGameData: fetchRobloxGameData } = require('./lib/roblox-game');
 const https = require("https");
 const { DEFAULT_INFRACTION_RULES, sanitizeInfractionRules, cloneInfractionRules, cloneInfractionRule, parseDurationMs } = require('./infractions');
@@ -115,7 +116,8 @@ const ADMIN_ONLY_COMMAND_NAMES = new Set([
     'linkaccounts',
     'addinfraction',
     'removemod',
-    'summary'
+    'summary',
+    'repoststatus'
 ]);
 const DEFAULT_PUBLIC_COMMAND_NAMES = new Set(['profile', 'avatar', 'remind', 'pumpkinmask']);
 const MANUAL_MODERATOR_COMMAND_NAMES = new Set(['info', 'search', 'recentbans', 'quota', 'register', 'viewinfractions']);
@@ -291,6 +293,7 @@ const contentReactChannelFile = path.join(dataPath, "contentreactchannel.json");
 const fanartChannelFile = path.join(dataPath, "fanartchannel.json");
 const prefixStateFile = path.join(dataPath, "prefix-state.json");
 const ticketScanStateFile = path.join(dataPath, "ticket-scan-state.json");
+const videoRepostStateFile = path.join(dataPath, 'video-repost-state.json');
 const hideCommandStateFile = path.join(dataPath, "hidecommand-state.json");
 const autorespondersFile = path.join(dataPath, "autoresponders.json");
 const automodFile = path.join(dataPath, "automod.json");
@@ -923,6 +926,24 @@ client.saveTicketScanState = () => {
         enabled: Boolean(client.ticketScanEnabled),
         scannedThreadIds: [...client.ticketScanHandledThreads]
     }, null, 2), 'utf8');
+};
+
+client.loadVideoRepostState = () => {
+    client.videoRepostEnabled = false;
+    if (!fs.existsSync(videoRepostStateFile)) return;
+    try {
+        const state = JSON.parse(fs.readFileSync(videoRepostStateFile, 'utf8'));
+        if (typeof state.enabled !== 'boolean') throw new Error('Invalid video repost state');
+        client.videoRepostEnabled = state.enabled;
+    } catch (error) {
+        console.error('Failed to load video repost state; reposting is disabled:', error);
+    }
+};
+
+client.setVideoRepostEnabled = enabled => {
+    fs.mkdirSync(dataPath, { recursive: true });
+    fs.writeFileSync(videoRepostStateFile, JSON.stringify({ enabled }, null, 2), 'utf8');
+    client.videoRepostEnabled = enabled;
 };
 
 client.loadAppealsScanState = () => {
@@ -4526,6 +4547,7 @@ client.loadContentReactChannels();
 client.loadFanartChannels();
 client.loadPrefixCommandState();
 client.loadTicketScanState();
+client.loadVideoRepostState();
 client.loadAppealsScanState();
 client.loadLinkedAccounts();
 client.loadHideCommandState();
@@ -5536,7 +5558,9 @@ client.on('threadCreate', async (thread) => {
 
 client.on('messageCreate', async (message) => {
     try {
-        await warnAboutOldVideos(message, client.user?.id);
+        await warnAboutOldVideos(message, client.user?.id, client.videoRepostEnabled
+            ? (source, link, uploadedAt) => repostRecentVideo(source, link, uploadedAt, () => client.videoRepostEnabled)
+            : null);
     } catch (error) {
         console.error(`Failed to process video age warning for message ${message.id}:`, error);
     }
