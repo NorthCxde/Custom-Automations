@@ -1,9 +1,9 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
-const { extractVideoLinks, REPORT_CHANNEL_ID } = require('../lib/video-age');
+const { extractVideoLinks } = require('../lib/video-age');
 const { repostVideo } = require('../lib/video-repost');
 const FETCHING = 'Fetching... <a:Loading:1564411829290008737>';
 
-function validationError(client, guild, member, userId, channel) {
+function validationError(client, guild, member, userId) {
     if (!guild) return 'This command must be used in a server.';
     const allowedRoles = client.getAllowedRoleIds(guild.id);
     const hasRole = member?.roles?.cache
@@ -11,9 +11,6 @@ function validationError(client, guild, member, userId, channel) {
         : Array.isArray(member?.roles) && member.roles.some(id => allowedRoles?.has(id));
     if (!client.hardcodedAdmins.has(String(userId)) && !hasRole) {
         return 'Only members with roles allowed through /perms or bot admins can fetch evidence.';
-    }
-    if (!channel?.isThread?.() || channel.parentId !== REPORT_CHANNEL_ID) {
-        return 'Use this command inside an exploiter-report thread.';
     }
     return null;
 }
@@ -27,13 +24,13 @@ module.exports = {
     description: 'Save video evidence from a replied-to message.',
     data: new SlashCommandBuilder()
         .setName('fetch')
-        .setDescription('Download and save video evidence in this report thread.')
+        .setDescription('Download and save video evidence in this channel.')
         .addStringOption(option => option
             .setName('link')
             .setDescription('A TikTok, YouTube, Medal or Streamable video link')
             .setRequired(true)),
     async execute({ client, message }) {
-        const error = validationError(client, message.guild, message.member, message.author.id, message.channel);
+        const error = validationError(client, message.guild, message.member, message.author.id);
         if (error) return reply(message, error);
         if (!message.reference?.messageId) {
             return reply(message, 'Reply to the message containing the video link with ?fetch.');
@@ -46,7 +43,7 @@ module.exports = {
             return reply(message, 'Could not read the replied-to message. Check that it still exists and the bot can read its history.');
         }
         if (source.channelId !== message.channelId) {
-            return reply(message, 'Reply to a message in this report thread.');
+            return reply(message, 'Reply to a message in this channel.');
         }
         const links = extractVideoLinks(source);
         if (!links.length) {
@@ -65,7 +62,7 @@ module.exports = {
         }
     },
     async executeInteraction({ client, interaction }) {
-        const error = validationError(client, interaction.guild, interaction.member, interaction.user.id, interaction.channel);
+        const error = validationError(client, interaction.guild, interaction.member, interaction.user.id);
         if (error) return interaction.reply({ content: error, flags: MessageFlags.Ephemeral });
         const input = interaction.options.getString('link', true).trim();
         const links = extractVideoLinks({ content: input });

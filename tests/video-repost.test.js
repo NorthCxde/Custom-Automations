@@ -274,7 +274,7 @@ test('both fetch forms download without consulting upload dates, including old s
     assert.equal(childProcess.spawn.mock.callCount(), 2);
 });
 
-test('both fetch forms enforce selected /perms roles, allow bot admins and reject other channels', async t => {
+test('both fetch forms enforce selected /perms roles and allow bot admins', async t => {
     t.mock.method(globalThis, 'fetch', () => assert.fail('No metadata requests expected'));
     for (const variant of ['prefix', 'slash']) {
         for (const allowedRoles of [null, new Set(), new Set(['different-role'])]) {
@@ -289,14 +289,42 @@ test('both fetch forms enforce selected /perms roles, allow bot admins and rejec
         admin.channel.parentId = 'other-channel';
         const client = fetchClient(null);
         if (variant === 'prefix') await command.execute({ client, message: admin });
-        else await command.executeInteraction({ client, interaction: slashInteraction(admin) });
-        assert.match(admin.replies[0].content, /exploiter-report thread/);
-        const allowed = fetchMessage();
-        allowed.channel.isThread = () => false;
-        if (variant === 'prefix') await command.execute({ client: fetchClient(), message: allowed });
-        else await command.executeInteraction({ client: fetchClient(), interaction: slashInteraction(allowed) });
-        assert.match(allowed.replies[0].content, /exploiter-report thread/);
+        else await command.executeInteraction({ client, interaction: slashInteraction(admin, 'not a link') });
+        assert.match(admin.replies[0].content, variant === 'prefix' ? /Reply to the message/ : /Enter one supported/);
     }
+});
+
+test('both fetch commands save videos in ordinary channels and unrelated threads', async t => {
+    fakeDownload(t);
+    for (const isThread of [false, true]) {
+        const msg = fetchMessage();
+        msg.channel = { isThread: () => isThread, parentId: 'other-channel' };
+        const source = message();
+        msg.reference = { messageId: source.id };
+        msg.fetchReference = async () => source;
+        await command.execute({ client: fetchClient(), message: msg });
+        assert.ok(source.file);
+        assert.match(source.replies[0].content, /Saved video\./);
+
+        const slash = fetchMessage();
+        slash.channel = msg.channel;
+        await command.executeInteraction({ client: fetchClient(), interaction: slashInteraction(slash) });
+        assert.ok(slash.file);
+        assert.match(slash.replies[0].content, /Saved video\./);
+    }
+    assert.equal(childProcess.spawn.mock.callCount(), 4);
+});
+
+test('?fetch refuses a referenced message from a different channel', async t => {
+    t.mock.method(childProcess, 'spawn', () => assert.fail('No download expected'));
+    const msg = fetchMessage();
+    const source = message();
+    source.channelId = 'different-channel';
+    msg.reference = { messageId: source.id };
+    msg.fetchReference = async () => source;
+    await command.execute({ client: fetchClient(), message: msg });
+    assert.match(msg.replies[0].content, /same channel|this channel/);
+    assert.equal(source.replies.length, 0);
 });
 
 test('/fetch requires a supported link and defers before downloading a public attachment', async t => {
